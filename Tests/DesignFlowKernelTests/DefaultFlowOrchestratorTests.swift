@@ -339,3 +339,109 @@ private struct ThrowingStageExecutor: FlowStageExecutor {
 private enum StubStageError: Error {
     case executionFailed
 }
+
+// MARK: - Approval gate (P4)
+
+@Suite("Approval gate")
+struct ApprovalGateTests {
+    @Test func approvalAbsentBlocksTheRunUntilDecided() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "dfk-approval-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let request = FlowOperationRequest(
+            projectRoot: root,
+            runID: "run-approve",
+            intent: "Approval flow",
+            stages: [
+                FlowStageDefinition(stageID: "001-drc", displayName: "DRC", requiresApproval: true),
+                FlowStageDefinition(stageID: "002-ship", displayName: "Ship"),
+            ]
+        )
+        let executors: [any FlowStageExecutor] = [
+            StubStageExecutor(stageID: "001-drc", toolID: "drc-tool", status: .succeeded),
+            StubStageExecutor(stageID: "002-ship", toolID: "ship-tool", status: .succeeded),
+        ]
+
+        // 1. No decision recorded: the run blocks at the gate; the
+        //    second stage never runs.
+        let blocked = try await DefaultFlowOrchestrator().run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: executors
+        )
+        #expect(blocked.status == .blocked)
+        #expect(blocked.stages.count == 1)
+        #expect(blocked.stages[0].gates.contains {
+            $0.gateID == "approval" && $0.status == .incomplete
+        })
+
+        // 2. The cockpit records the decision; re-running the same runID
+        //    resumes past the gate.
+        try XcircuitePackageStore().writeApproval(
+            XcircuiteApprovalRecord(
+                runID: "run-approve",
+                stageID: "001-drc",
+                verdict: .approved,
+                reviewer: "reviewer-1",
+                note: "looks clean"
+            ),
+            inProjectAt: root
+        )
+        let resumed = try await DefaultFlowOrchestrator().run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: executors
+        )
+        #expect(resumed.status == .succeeded)
+        #expect(resumed.stages.count == 2)
+        #expect(resumed.stages[0].gates.contains {
+            $0.gateID == "approval" && $0.status == .passed
+        })
+    }
+
+    @Test func rejectionFailsTheStage() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "dfk-reject-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let request = FlowOperationRequest(
+            projectRoot: root,
+            runID: "run-reject",
+            intent: "Approval flow",
+            stages: [
+                FlowStageDefinition(stageID: "001-drc", displayName: "DRC", requiresApproval: true),
+            ]
+        )
+        try XcircuitePackageStore().createPackage(at: root)
+        _ = try XcircuitePackageStore().createRunDirectory(for: "run-reject", inProjectAt: root)
+        try XcircuitePackageStore().writeApproval(
+            XcircuiteApprovalRecord(
+                runID: "run-reject",
+                stageID: "001-drc",
+                verdict: .rejected,
+                reviewer: "reviewer-1",
+                note: "needs a wider rail"
+            ),
+            inProjectAt: root
+        )
+
+        let result = try await DefaultFlowOrchestrator().run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: [
+                StubStageExecutor(stageID: "001-drc", toolID: "drc-tool", status: .succeeded),
+            ]
+        )
+        #expect(result.status == .failed)
+        #expect(result.stages[0].gates.contains {
+            $0.gateID == "approval" && $0.status == .failed
+        })
+        #expect(result.stages[0].diagnostics.contains { $0.code == "STAGE_REJECTED" })
+    }
+}

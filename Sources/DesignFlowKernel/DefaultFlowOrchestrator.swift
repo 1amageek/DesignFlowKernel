@@ -94,7 +94,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 }
             }
 
-            let result: FlowStageResult
+            var result: FlowStageResult
             do {
                 result = try await executor.execute(stage: stage, context: context)
             } catch {
@@ -117,6 +117,9 @@ public struct DefaultFlowOrchestrator: Sendable {
                 )
                 try persistRunResult(runResult, projectRoot: request.projectRoot, runDirectory: runDirectory)
                 return runResult
+            }
+            if stage.requiresApproval {
+                result = try applyApprovalGate(to: result, request: request)
             }
             try persistStageResult(
                 result,
@@ -146,6 +149,67 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
         try persistRunResult(runResult, projectRoot: request.projectRoot, runDirectory: runDirectory)
         return runResult
+    }
+
+    /// Judges the stage's "approval" gate from the run ledger's
+    /// `approvals/{stageID}.json` record. The decision only matters on a
+    /// stage that otherwise succeeded: approved keeps it succeeded,
+    /// rejected fails it, and an absent record BLOCKS the run until the
+    /// review cockpit records one — re-running the same runID then
+    /// resumes past the gate.
+    private func applyApprovalGate(
+        to result: FlowStageResult,
+        request: FlowOperationRequest
+    ) throws -> FlowStageResult {
+        var updated = result
+        guard result.status == .succeeded else { return result }
+
+        let record = try packageStore.loadApproval(
+            runID: request.runID,
+            stageID: result.stageID,
+            inProjectAt: request.projectRoot
+        )
+        switch record?.verdict {
+        case .approved:
+            let diagnostic = FlowDiagnostic(
+                severity: .info,
+                code: "STAGE_APPROVED",
+                message: "Approved by \(record?.reviewer ?? "unknown")\(record.map { $0.note.isEmpty ? "" : ": \($0.note)" } ?? "")."
+            )
+            updated.gates.append(FlowGateResult(
+                gateID: "approval",
+                status: .passed,
+                diagnostics: [diagnostic]
+            ))
+            updated.diagnostics.append(diagnostic)
+        case .rejected:
+            let diagnostic = FlowDiagnostic(
+                severity: .error,
+                code: "STAGE_REJECTED",
+                message: "Rejected by \(record?.reviewer ?? "unknown")\(record.map { $0.note.isEmpty ? "" : ": \($0.note)" } ?? "")."
+            )
+            updated.gates.append(FlowGateResult(
+                gateID: "approval",
+                status: .failed,
+                diagnostics: [diagnostic]
+            ))
+            updated.diagnostics.append(diagnostic)
+            updated.status = .failed
+        case nil:
+            let diagnostic = FlowDiagnostic(
+                severity: .warning,
+                code: "APPROVAL_PENDING",
+                message: "Stage awaits human approval (approvals/\(result.stageID).json)."
+            )
+            updated.gates.append(FlowGateResult(
+                gateID: "approval",
+                status: .incomplete,
+                diagnostics: [diagnostic]
+            ))
+            updated.diagnostics.append(diagnostic)
+            updated.status = .blocked
+        }
+        return updated
     }
 
     private func validate(request: FlowOperationRequest) throws {
