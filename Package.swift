@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "DesignFlowKernel", targets: ["DesignFlowKernel"]),
+        .executable(name: "design-flow", targets: ["DesignFlowCLI"]),
     ],
     dependencies: [
         .package(path: "../XcircuitePackage"),
@@ -19,6 +20,20 @@ let package = Package(
                 .product(name: "ToolQualification", package: "ToolQualification"),
             ]
         ),
-        .testTarget(name: "DesignFlowKernelTests", dependencies: ["DesignFlowKernel"]),
+        .target(
+            name: "DesignFlowCLISupport",
+            dependencies: ["DesignFlowKernel"]
+        ),
+        .executableTarget(
+            name: "DesignFlowCLI",
+            dependencies: ["DesignFlowCLISupport"]
+        ),
+        .testTarget(
+            name: "DesignFlowKernelTests",
+            dependencies: [
+                "DesignFlowKernel",
+                "DesignFlowCLISupport",
+            ]
+        ),
     ]
 )

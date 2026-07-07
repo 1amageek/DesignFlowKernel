@@ -25,4 +25,17 @@ public struct FlowExecutionContext: Sendable {
         self.toolRegistry = toolRegistry
         self.healthResults = healthResults
     }
+
+    public func loadCancellationRequest() throws -> FlowRunCancellationRequest? {
+        try FlowRunProgressStore(packageStore: packageStore).loadCancellationRequest(
+            runID: runID,
+            projectRoot: projectRoot
+        )
+    }
+
+    public func checkCancellation() throws {
+        if let request = try loadCancellationRequest() {
+            throw FlowRunCancellationError.requested(request)
+        }
+    }
 }

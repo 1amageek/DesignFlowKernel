@@ -11,17 +11,20 @@ public struct FlowStageDefinition: Sendable, Hashable, Codable {
     /// blocks. Re-running the same runID after the cockpit records the
     /// decision resumes the flow.
     public var requiresApproval: Bool
+    public var retryPolicy: FlowStageRetryPolicy
 
     public init(
         stageID: String,
         displayName: String,
         requiredTool: ToolTrustRequirement? = nil,
-        requiresApproval: Bool = false
+        requiresApproval: Bool = false,
+        retryPolicy: FlowStageRetryPolicy = .disabled
     ) {
         self.stageID = stageID
         self.displayName = displayName
         self.requiredTool = requiredTool
         self.requiresApproval = requiresApproval
+        self.retryPolicy = retryPolicy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -29,6 +32,7 @@ public struct FlowStageDefinition: Sendable, Hashable, Codable {
         case displayName
         case requiredTool
         case requiresApproval
+        case retryPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -39,5 +43,9 @@ public struct FlowStageDefinition: Sendable, Hashable, Codable {
         // Definitions written before the approval gate existed decode
         // as not requiring one.
         requiresApproval = try container.decodeIfPresent(Bool.self, forKey: .requiresApproval) ?? false
+        retryPolicy = try container.decodeIfPresent(
+            FlowStageRetryPolicy.self,
+            forKey: .retryPolicy
+        ) ?? .disabled
     }
 }
