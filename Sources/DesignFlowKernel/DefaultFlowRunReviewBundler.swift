@@ -24,8 +24,34 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     public func makeReviewBundle(runID: String, projectRoot: URL) throws -> FlowRunReviewBundle {
         let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
         let summary = summarizer.summarize(ledger)
+        let agentLoopSnapshot = try loadOptionalRunJSON(
+            XcircuiteAgentLoopSnapshot.self,
+            runID: ledger.runID,
+            relativePath: "loop/snapshot.json",
+            projectRoot: projectRoot
+        )
+        let runGuardVerdict = try loadOptionalRunJSON(
+            XcircuiteRunGuardVerdict.self,
+            runID: ledger.runID,
+            relativePath: "loop/guard-verdict.json",
+            projectRoot: projectRoot
+        )
+        let crossArtifactEvaluation = try loadOptionalRunJSON(
+            XcircuiteCrossArtifactEvaluation.self,
+            runID: ledger.runID,
+            relativePath: "reports/cross-artifact-evaluation.json",
+            projectRoot: projectRoot
+        )
         let artifacts = try reviewArtifacts(from: ledger, projectRoot: projectRoot)
-        let items = reviewItems(from: ledger, summary: summary, artifacts: artifacts, projectRoot: projectRoot)
+        let items = reviewItems(
+            from: ledger,
+            summary: summary,
+            artifacts: artifacts,
+            projectRoot: projectRoot,
+            agentLoopSnapshot: agentLoopSnapshot,
+            runGuardVerdict: runGuardVerdict,
+            crossArtifactEvaluation: crossArtifactEvaluation
+        )
         let decisionActions = try reviewDecisionActions(from: ledger.actions)
         return FlowRunReviewBundle(
             runID: ledger.runID,
@@ -41,7 +67,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 reviewItems: items,
                 approvals: ledger.approvals,
                 decisionActions: decisionActions
-            )
+            ),
+            agentLoopSnapshot: agentLoopSnapshot,
+            runGuardVerdict: runGuardVerdict,
+            crossArtifactEvaluation: crossArtifactEvaluation
         )
     }
 
@@ -112,6 +141,30 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 )
             )
         }
+        appendOptionalRunArtifact(
+            role: "agent-loop-snapshot",
+            runID: ledger.runID,
+            relativePath: "loop/snapshot.json",
+            projectRoot: projectRoot,
+            recordedReferencesByPath: recordedReferencesByPath,
+            into: &artifacts
+        )
+        appendOptionalRunArtifact(
+            role: "run-guard-verdict",
+            runID: ledger.runID,
+            relativePath: "loop/guard-verdict.json",
+            projectRoot: projectRoot,
+            recordedReferencesByPath: recordedReferencesByPath,
+            into: &artifacts
+        )
+        appendOptionalRunArtifact(
+            role: "cross-artifact-evaluation",
+            runID: ledger.runID,
+            relativePath: "reports/cross-artifact-evaluation.json",
+            projectRoot: projectRoot,
+            recordedReferencesByPath: recordedReferencesByPath,
+            into: &artifacts
+        )
         for approval in ledger.approvals {
             artifacts.append(
                 runArtifact(
@@ -166,6 +219,15 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     private func reviewRole(for reference: XcircuiteFileReference) -> String {
         guard let artifactID = reference.artifactID else {
             return "stage-artifact"
+        }
+        if artifactID == "agent-loop-snapshot" {
+            return "agent-loop-snapshot"
+        }
+        if artifactID == "run-guard-verdict" {
+            return "run-guard-verdict"
+        }
+        if artifactID == "cross-artifact-evaluation" {
+            return "cross-artifact-evaluation"
         }
         if let role = retainedHistoryReviewRole(for: reference) {
             return role
@@ -332,6 +394,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         if searchable.contains("review") {
             return "review"
         }
+        if searchable.contains("agent-loop") || searchable.contains("run-guard") {
+            return "agent-loop"
+        }
+        if searchable.contains("cross-artifact-evaluation") {
+            return "evaluation"
+        }
         return "artifact"
     }
 
@@ -421,7 +489,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         from ledger: FlowRunLedger,
         summary: FlowRunLedgerSummary,
         artifacts: [FlowRunReviewArtifact],
-        projectRoot: URL
+        projectRoot: URL,
+        agentLoopSnapshot: XcircuiteAgentLoopSnapshot?,
+        runGuardVerdict: XcircuiteRunGuardVerdict?,
+        crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation?
     ) -> [FlowRunReviewItem] {
         var items: [FlowRunReviewItem] = []
         let artifactPathsByStage = Dictionary(grouping: artifacts.filter { $0.stageID != nil }) { $0.stageID ?? "" }
@@ -617,6 +688,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             from: artifacts,
             projectRoot: projectRoot
         ))
+        items.append(contentsOf: loopAndEvaluationReviewItems(
+            from: artifacts,
+            agentLoopSnapshot: agentLoopSnapshot,
+            runGuardVerdict: runGuardVerdict,
+            crossArtifactEvaluation: crossArtifactEvaluation
+        ))
 
         if items.isEmpty, summary.status == .succeeded {
             items.append(
@@ -676,6 +753,147 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             return "retained-workflow-report"
         }
         return nil
+    }
+
+    private func loopAndEvaluationReviewItems(
+        from artifacts: [FlowRunReviewArtifact],
+        agentLoopSnapshot: XcircuiteAgentLoopSnapshot?,
+        runGuardVerdict: XcircuiteRunGuardVerdict?,
+        crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation?
+    ) -> [FlowRunReviewItem] {
+        var items: [FlowRunReviewItem] = []
+        let loopArtifactPaths = artifacts
+            .filter { artifact in
+                artifact.role == "agent-loop-snapshot"
+                    || artifact.role == "run-guard-verdict"
+            }
+            .map(\.path)
+            .sorted()
+        let crossArtifactPaths = artifacts
+            .filter { $0.role == "cross-artifact-evaluation" }
+            .map(\.path)
+            .sorted()
+
+        if let runGuardVerdict {
+            let severity = severity(for: runGuardVerdict.status)
+            let status = reviewStatus(for: runGuardVerdict.status)
+            items.append(
+                FlowRunReviewItem(
+                    itemID: "review-run-guard",
+                    kind: .runGuard,
+                    status: status,
+                    severity: severity,
+                    title: "Review run guard verdict",
+                    reason: runGuardReason(runGuardVerdict),
+                    diagnosticCodes: runGuardVerdict.triggeredDetectors.flatMap(\.diagnosticCodes).sorted(),
+                    artifactPaths: loopArtifactPaths,
+                    nextActionID: runGuardVerdict.status == .continue ? nil : "review-run-guard"
+                )
+            )
+        } else if let agentLoopSnapshot {
+            let status = agentLoopSnapshot.resumeReadiness.status == .ready
+                ? FlowRunReviewItemStatus.informational
+                : .needsReview
+            let severity = agentLoopSnapshot.resumeReadiness.status == .blocked
+                ? FlowDiagnosticSeverity.error
+                : agentLoopSnapshot.resumeReadiness.status == .ready ? .info : .warning
+            items.append(
+                FlowRunReviewItem(
+                    itemID: "review-agent-loop-snapshot",
+                    kind: .runGuard,
+                    status: status,
+                    severity: severity,
+                    title: "Review loop snapshot",
+                    reason: agentLoopSnapshot.resumeReadiness.reasons.isEmpty
+                        ? "Loop snapshot is available for resume and evidence coverage review."
+                        : agentLoopSnapshot.resumeReadiness.reasons.joined(separator: " "),
+                    artifactPaths: loopArtifactPaths,
+                    nextActionID: status == .informational ? nil : "review-agent-loop-snapshot"
+                )
+            )
+        }
+
+        if let crossArtifactEvaluation {
+            let severity = severity(for: crossArtifactEvaluation.status)
+            let status = reviewStatus(for: crossArtifactEvaluation.status)
+            items.append(
+                FlowRunReviewItem(
+                    itemID: "review-cross-artifact-evaluation",
+                    kind: .crossArtifactEvaluation,
+                    status: status,
+                    severity: severity,
+                    title: "Review cross-artifact evaluation",
+                    reason: crossArtifactEvaluation.summary.isEmpty
+                        ? "Cross-artifact evaluation is available for review."
+                        : crossArtifactEvaluation.summary,
+                    diagnosticCodes: crossArtifactEvaluation.diagnostics.map(\.code).sorted(),
+                    artifactPaths: crossArtifactPaths,
+                    nextActionID: status == .informational ? nil : "review-cross-artifact-evaluation"
+                )
+            )
+        }
+
+        return items
+    }
+
+    private func runGuardReason(_ verdict: XcircuiteRunGuardVerdict) -> String {
+        if verdict.triggeredDetectors.isEmpty {
+            return "Run guard status is \(verdict.status.rawValue)."
+        }
+        let reasons = verdict.triggeredDetectors.map(\.reason)
+        return reasons.joined(separator: " ")
+    }
+
+    private func reviewStatus(
+        for status: XcircuiteRunGuardVerdict.Status
+    ) -> FlowRunReviewItemStatus {
+        switch status {
+        case .continue:
+            .informational
+        case .needsHumanReview:
+            .needsReview
+        case .blocked, .cancelled:
+            .needsRepair
+        }
+    }
+
+    private func severity(
+        for status: XcircuiteRunGuardVerdict.Status
+    ) -> FlowDiagnosticSeverity {
+        switch status {
+        case .continue:
+            .info
+        case .needsHumanReview:
+            .warning
+        case .blocked, .cancelled:
+            .error
+        }
+    }
+
+    private func reviewStatus(
+        for status: XcircuiteEvaluationStatus
+    ) -> FlowRunReviewItemStatus {
+        switch status {
+        case .accepted:
+            .informational
+        case .needsHumanReview, .inconclusive:
+            .needsReview
+        case .rejected, .blocked:
+            .needsRepair
+        }
+    }
+
+    private func severity(
+        for status: XcircuiteEvaluationStatus
+    ) -> FlowDiagnosticSeverity {
+        switch status {
+        case .accepted:
+            .info
+        case .needsHumanReview, .inconclusive:
+            .warning
+        case .rejected, .blocked:
+            .error
+        }
     }
 
     private func retainedHistoryReviewItems(
@@ -1043,6 +1261,56 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             return []
         }
         return [path]
+    }
+
+    private func appendOptionalRunArtifact(
+        role: String,
+        runID: String,
+        relativePath: String,
+        projectRoot: URL,
+        recordedReferencesByPath: [String: XcircuiteFileReference],
+        into artifacts: inout [FlowRunReviewArtifact]
+    ) {
+        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
+        let existsInLedger = recordedReferencesByPath[projectRelativePath] != nil
+        let existsOnDisk: Bool
+        do {
+            let url = try XcircuitePackage(projectRoot: projectRoot)
+                .url(forProjectRelativePath: projectRelativePath)
+            existsOnDisk = FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+        } catch {
+            existsOnDisk = false
+        }
+        guard existsInLedger || existsOnDisk else {
+            return
+        }
+        guard !artifacts.contains(where: { $0.path == projectRelativePath }) else {
+            return
+        }
+        artifacts.append(
+            runArtifact(
+                role: role,
+                runID: runID,
+                relativePath: relativePath,
+                projectRoot: projectRoot,
+                recordedReferencesByPath: recordedReferencesByPath
+            )
+        )
+    }
+
+    private func loadOptionalRunJSON<T: Decodable>(
+        _ type: T.Type,
+        runID: String,
+        relativePath: String,
+        projectRoot: URL
+    ) throws -> T? {
+        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
+        let url = try XcircuitePackage(projectRoot: projectRoot)
+            .url(forProjectRelativePath: projectRelativePath)
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+            return nil
+        }
+        return try XcircuitePackageStore().readJSON(type, from: url)
     }
 
     private func runArtifact(

@@ -155,6 +155,6 @@ public struct DesignFlowCLIExecutionResult: Sendable, Hashable {
 
 extension DesignFlowCLICommand {
     static var runUsageMessage: String {
-        "Usage: design-flow approve-gate ... | design-flow inspect-run ... | design-flow review-run ... | design-flow build-stage-artifact-ladder ... | design-flow progress-run ..."
+        "Usage: design-flow approve-gate ... | design-flow inspect-run ... | design-flow review-run ... | design-flow summarize-loop ... | design-flow evaluate-run-guard ... | design-flow compare-artifacts ... | design-flow progress-run ..."
     }
 }

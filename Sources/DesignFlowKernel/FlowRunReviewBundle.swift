@@ -43,6 +43,9 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
     public var approvals: [XcircuiteApprovalRecord]
     public var decisionActions: [XcircuiteRunReviewDecisionAction]?
     public var coverageRefs: [CoverageRef]?
+    public var agentLoopSnapshot: XcircuiteAgentLoopSnapshot?
+    public var runGuardVerdict: XcircuiteRunGuardVerdict?
+    public var crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation?
 
     public init(
         schemaVersion: Int = 1,
@@ -54,7 +57,10 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         artifacts: [FlowRunReviewArtifact] = [],
         approvals: [XcircuiteApprovalRecord] = [],
         decisionActions: [XcircuiteRunReviewDecisionAction]? = nil,
-        coverageRefs: [CoverageRef]? = nil
+        coverageRefs: [CoverageRef]? = nil,
+        agentLoopSnapshot: XcircuiteAgentLoopSnapshot? = nil,
+        runGuardVerdict: XcircuiteRunGuardVerdict? = nil,
+        crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.runID = runID
@@ -66,5 +72,8 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         self.approvals = approvals
         self.decisionActions = decisionActions
         self.coverageRefs = coverageRefs
+        self.agentLoopSnapshot = agentLoopSnapshot
+        self.runGuardVerdict = runGuardVerdict
+        self.crossArtifactEvaluation = crossArtifactEvaluation
     }
 }

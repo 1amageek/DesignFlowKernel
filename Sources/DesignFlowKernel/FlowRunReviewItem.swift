@@ -11,6 +11,8 @@ public enum FlowRunReviewItemKind: String, Sendable, Hashable, Codable {
     case artifactCoverage
     case planningCorrectness
     case retainedHistory
+    case runGuard
+    case crossArtifactEvaluation
     case cancellation
     case archiveOrContinue
 }

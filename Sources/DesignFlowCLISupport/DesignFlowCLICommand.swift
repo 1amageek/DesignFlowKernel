@@ -27,6 +27,12 @@ public enum DesignFlowCLICommand {
             return try reviewRun(arguments: Array(arguments.dropFirst()))
         case "build-stage-artifact-ladder":
             return try buildStageArtifactLadder(arguments: Array(arguments.dropFirst()))
+        case "summarize-loop":
+            return try summarizeLoop(arguments: Array(arguments.dropFirst()))
+        case "evaluate-run-guard":
+            return try evaluateRunGuard(arguments: Array(arguments.dropFirst()))
+        case "compare-artifacts":
+            return try compareArtifacts(arguments: Array(arguments.dropFirst()))
         case "progress-run":
             return try progressRunSnapshot(arguments: Array(arguments.dropFirst()))
         case "--help", "-h", "help":
@@ -69,6 +75,10 @@ public enum DesignFlowCLICommand {
             return decisionPacketValidationExitCode(output: output)
         case "build-release-envelope":
             return releaseEnvelopeExitCode(output: output)
+        case "evaluate-run-guard":
+            return runGuardExitCode(output: output)
+        case "compare-artifacts":
+            return crossArtifactEvaluationExitCode(output: output)
         default:
             return 0
         }
@@ -112,6 +122,42 @@ public enum DesignFlowCLICommand {
         case .passed:
             return 0
         case .needsReview, .blocked:
+            return 2
+        }
+    }
+
+    private static func runGuardExitCode(output: String) -> Int {
+        guard let data = output.data(using: .utf8) else {
+            return 1
+        }
+        let result: FlowRunGuardEvaluationResult
+        do {
+            result = try JSONDecoder().decode(FlowRunGuardEvaluationResult.self, from: data)
+        } catch {
+            return 1
+        }
+        switch result.verdict.status {
+        case .continue:
+            return 0
+        case .needsHumanReview, .blocked, .cancelled:
+            return 2
+        }
+    }
+
+    private static func crossArtifactEvaluationExitCode(output: String) -> Int {
+        guard let data = output.data(using: .utf8) else {
+            return 1
+        }
+        let result: FlowRunCrossArtifactEvaluationResult
+        do {
+            result = try JSONDecoder().decode(FlowRunCrossArtifactEvaluationResult.self, from: data)
+        } catch {
+            return 1
+        }
+        switch result.evaluation.status {
+        case .accepted:
+            return 0
+        case .rejected, .inconclusive, .needsHumanReview, .blocked:
             return 2
         }
     }
@@ -219,6 +265,51 @@ public enum DesignFlowCLICommand {
             projectRoot: projectRoot
         )
         return try encode(result, pretty: pretty)
+    }
+
+    private static func summarizeLoop(arguments: [String]) throws -> String {
+        let options = try parseLoopOptions(arguments: arguments)
+        if options.helpRequested {
+            return summarizeLoopHelpText
+        }
+        let profile = try loadAgentLoopProfile(from: options.profileURL)
+        let result = try DefaultFlowRunLoopSnapshotBuilder().summarizeLoop(
+            runID: options.runID,
+            projectRoot: options.projectRoot,
+            profile: profile,
+            persist: options.persist
+        )
+        return try encode(result, pretty: options.pretty)
+    }
+
+    private static func evaluateRunGuard(arguments: [String]) throws -> String {
+        let options = try parseLoopOptions(arguments: arguments)
+        if options.helpRequested {
+            return evaluateRunGuardHelpText
+        }
+        let profile = try loadAgentLoopProfile(from: options.profileURL)
+        let result = try DefaultFlowRunGuardEvaluator().evaluateRunGuard(
+            runID: options.runID,
+            projectRoot: options.projectRoot,
+            profile: profile,
+            persist: options.persist
+        )
+        return try encode(result, pretty: options.pretty)
+    }
+
+    private static func compareArtifacts(arguments: [String]) throws -> String {
+        let options = try parseCrossArtifactOptions(arguments: arguments)
+        if options.helpRequested {
+            return compareArtifactsHelpText
+        }
+        let profile = try loadEvaluationProfile(from: options.profileURL)
+        let result = try DefaultFlowRunCrossArtifactEvaluator().compareArtifacts(
+            runID: options.runID,
+            projectRoot: options.projectRoot,
+            profile: profile,
+            persist: options.persist
+        )
+        return try encode(result, pretty: options.pretty)
     }
 
     private static func buildDecisionPacket(arguments: [String]) throws -> String {
@@ -522,6 +613,163 @@ public enum DesignFlowCLICommand {
         return parsed
     }
 
+    private static func parseLoopOptions(arguments: [String]) throws -> LoopCommandOptions {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            return LoopCommandOptions(
+                projectRoot: URL(filePath: "/"),
+                runID: "help",
+                profileURL: nil,
+                persist: true,
+                pretty: false,
+                helpRequested: true
+            )
+        }
+
+        var parser = DesignFlowCLIArgumentParser(arguments: arguments)
+        var projectRoot: URL?
+        var runID: String?
+        var profileURL: URL?
+        var persist = true
+        var pretty = false
+
+        while let argument = parser.next() {
+            switch argument {
+            case "--project-root":
+                projectRoot = URL(filePath: try parser.requiredValue(after: argument))
+            case "--run-id":
+                runID = try parser.requiredValue(after: argument)
+            case "--profile":
+                profileURL = URL(filePath: try parser.requiredValue(after: argument))
+            case "--no-persist":
+                persist = false
+            case "--pretty":
+                pretty = true
+            default:
+                throw DesignFlowCLIError.unknownOption(argument)
+            }
+        }
+
+        guard let projectRoot else {
+            throw DesignFlowCLIError.missingOption("--project-root")
+        }
+        guard let runID else {
+            throw DesignFlowCLIError.missingOption("--run-id")
+        }
+
+        return LoopCommandOptions(
+            projectRoot: projectRoot,
+            runID: runID,
+            profileURL: profileURL,
+            persist: persist,
+            pretty: pretty
+        )
+    }
+
+    private static func parseCrossArtifactOptions(arguments: [String]) throws -> CrossArtifactCommandOptions {
+        if arguments.contains("--help") || arguments.contains("-h") {
+            return CrossArtifactCommandOptions(
+                projectRoot: URL(filePath: "/"),
+                runID: "help",
+                profileURL: nil,
+                persist: true,
+                pretty: false,
+                helpRequested: true
+            )
+        }
+
+        var parser = DesignFlowCLIArgumentParser(arguments: arguments)
+        var projectRoot: URL?
+        var runID: String?
+        var profileURL: URL?
+        var persist = true
+        var pretty = false
+
+        while let argument = parser.next() {
+            switch argument {
+            case "--project-root":
+                projectRoot = URL(filePath: try parser.requiredValue(after: argument))
+            case "--run-id":
+                runID = try parser.requiredValue(after: argument)
+            case "--profile":
+                profileURL = URL(filePath: try parser.requiredValue(after: argument))
+            case "--no-persist":
+                persist = false
+            case "--pretty":
+                pretty = true
+            default:
+                throw DesignFlowCLIError.unknownOption(argument)
+            }
+        }
+
+        guard let projectRoot else {
+            throw DesignFlowCLIError.missingOption("--project-root")
+        }
+        guard let runID else {
+            throw DesignFlowCLIError.missingOption("--run-id")
+        }
+
+        return CrossArtifactCommandOptions(
+            projectRoot: projectRoot,
+            runID: runID,
+            profileURL: profileURL,
+            persist: persist,
+            pretty: pretty
+        )
+    }
+
+    private static func loadAgentLoopProfile(from url: URL?) throws -> XcircuiteAgentLoopProfile {
+        guard let url else {
+            return .makeDefault()
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw DesignFlowCLIError.invalidValue(
+                option: "--profile",
+                value: url.path(percentEncoded: false),
+                expected: "readable XcircuiteAgentLoopProfile JSON"
+            )
+        }
+        let profile: XcircuiteAgentLoopProfile
+        do {
+            profile = try JSONDecoder().decode(XcircuiteAgentLoopProfile.self, from: data)
+        } catch {
+            throw DesignFlowCLIError.invalidValue(
+                option: "--profile",
+                value: url.path(percentEncoded: false),
+                expected: "valid XcircuiteAgentLoopProfile JSON"
+            )
+        }
+        try XcircuiteAgentLoopProfileValidator().validate(profile)
+        return profile
+    }
+
+    private static func loadEvaluationProfile(from url: URL?) throws -> XcircuiteEvaluationProfile? {
+        guard let url else {
+            return nil
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw DesignFlowCLIError.invalidValue(
+                option: "--profile",
+                value: url.path(percentEncoded: false),
+                expected: "readable XcircuiteEvaluationProfile JSON"
+            )
+        }
+        do {
+            return try JSONDecoder().decode(XcircuiteEvaluationProfile.self, from: data)
+        } catch {
+            throw DesignFlowCLIError.invalidValue(
+                option: "--profile",
+                value: url.path(percentEncoded: false),
+                expected: "valid XcircuiteEvaluationProfile JSON"
+            )
+        }
+    }
+
     private static func approveGate(arguments: [String]) throws -> String {
         var parser = DesignFlowCLIArgumentParser(arguments: arguments)
         var projectRoot: URL?
@@ -679,6 +927,9 @@ public enum DesignFlowCLICommand {
           design-flow inspect-run --project-root <path> --run-id <id> [--pretty]
           design-flow review-run --project-root <path> --run-id <id> [--pretty]
           design-flow build-stage-artifact-ladder --project-root <path> --run-id <id> [--pretty]
+          design-flow summarize-loop --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
+          design-flow evaluate-run-guard --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
+          design-flow compare-artifacts --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
           design-flow build-decision-packet --project-root <path> --run-id <id> [--pretty]
           design-flow validate-decision-packet --project-root <path> --run-id <id> [--pretty]
           design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --migration-report <path> [--pretty]
@@ -712,6 +963,33 @@ public enum DesignFlowCLICommand {
           design-flow build-stage-artifact-ladder --project-root <path> --run-id <id> [--pretty]
 
         Writes review/stage-artifact-ladder.json and emits a FlowRunStageArtifactLadderBuildResult JSON document.
+        """
+    }
+
+    public static var summarizeLoopHelpText: String {
+        """
+        Usage:
+          design-flow summarize-loop --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
+
+        Builds loop/iterations.jsonl and loop/snapshot.json from the run ledger, action log, approvals, and artifact envelopes. The loop order remains owned by the external Agent.
+        """
+    }
+
+    public static var evaluateRunGuardHelpText: String {
+        """
+        Usage:
+          design-flow evaluate-run-guard --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
+
+        Builds a loop snapshot, evaluates deterministic guard detectors, writes loop/guard-verdict.json, and emits a FlowRunGuardEvaluationResult JSON document.
+        """
+    }
+
+    public static var compareArtifactsHelpText: String {
+        """
+        Usage:
+          design-flow compare-artifacts --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
+
+        Builds reports/cross-artifact-evaluation.json from stage results, gates, design diff, artifact envelopes, and an optional XcircuiteEvaluationProfile. The external Agent owns the next edit decision.
         """
     }
 
@@ -785,4 +1063,22 @@ private struct ProgressRunOptions {
     var follow: Bool
     var waitForNewEvents: Bool
     var pretty: Bool
+}
+
+private struct LoopCommandOptions {
+    var projectRoot: URL
+    var runID: String
+    var profileURL: URL?
+    var persist: Bool
+    var pretty: Bool
+    var helpRequested: Bool = false
+}
+
+private struct CrossArtifactCommandOptions {
+    var projectRoot: URL
+    var runID: String
+    var profileURL: URL?
+    var persist: Bool
+    var pretty: Bool
+    var helpRequested: Bool = false
 }
