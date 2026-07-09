@@ -326,7 +326,6 @@ struct DefaultFlowOrchestratorTests {
             await sink.append(line)
         }
 
-        try await Task.sleep(nanoseconds: 50_000_000)
         let progressStore = FlowRunProgressStore()
         try progressStore.appendEvent(
             runID: "run-progress-follow",
@@ -378,7 +377,6 @@ struct DefaultFlowOrchestratorTests {
             await sink.append(line)
         }
 
-        try await Task.sleep(nanoseconds: 50_000_000)
         let script = StageResultScript(results: [
             FlowStageResult(
                 stageID: "001-drc",
