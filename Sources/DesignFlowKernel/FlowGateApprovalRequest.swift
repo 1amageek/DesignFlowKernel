@@ -49,10 +49,10 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
         stageID = try container.decode(String.self, forKey: .stageID)
         verdict = try container.decode(FlowGateApprovalVerdict.self, forKey: .verdict)
         reviewer = try container.decode(String.self, forKey: .reviewer)
-        reviewerKind = try container.decodeIfPresent(
+        reviewerKind = try container.decode(
             XcircuiteRunActionActor.Kind.self,
             forKey: .reviewerKind
-        ) ?? .human
+        )
         note = try container.decode(String.self, forKey: .note)
         decidedAt = try container.decode(Date.self, forKey: .decidedAt)
     }

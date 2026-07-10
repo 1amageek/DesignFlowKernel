@@ -429,7 +429,7 @@ public enum DesignFlowCLICommand {
         var projectRoot: URL?
         var runID: String?
         var signoffDashboardPath: URL?
-        var migrationReportPath: URL?
+        var contractReportPath: URL?
         var pretty = false
 
         while let argument = parser.next() {
@@ -440,8 +440,8 @@ public enum DesignFlowCLICommand {
                 runID = try parser.requiredValue(after: argument)
             case "--signoff-dashboard":
                 signoffDashboardPath = URL(filePath: try parser.requiredValue(after: argument))
-            case "--migration-report":
-                migrationReportPath = URL(filePath: try parser.requiredValue(after: argument))
+            case "--contract-report":
+                contractReportPath = URL(filePath: try parser.requiredValue(after: argument))
             case "--pretty":
                 pretty = true
             case "--help", "-h":
@@ -460,15 +460,15 @@ public enum DesignFlowCLICommand {
         guard let signoffDashboardPath else {
             throw DesignFlowCLIError.missingOption("--signoff-dashboard")
         }
-        guard let migrationReportPath else {
-            throw DesignFlowCLIError.missingOption("--migration-report")
+        guard let contractReportPath else {
+            throw DesignFlowCLIError.missingOption("--contract-report")
         }
 
         let result = try DefaultFlowRunReleaseEvidenceCollector().collectReleaseEvidence(
             runID: runID,
             projectRoot: projectRoot,
             signoffDashboardPath: signoffDashboardPath,
-            migrationReportPath: migrationReportPath
+            contractReportPath: contractReportPath
         )
         return try encode(result, pretty: pretty)
     }
@@ -932,7 +932,7 @@ public enum DesignFlowCLICommand {
           design-flow compare-artifacts --project-root <path> --run-id <id> [--profile <path>] [--no-persist] [--pretty]
           design-flow build-decision-packet --project-root <path> --run-id <id> [--pretty]
           design-flow validate-decision-packet --project-root <path> --run-id <id> [--pretty]
-          design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --migration-report <path> [--pretty]
+          design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --contract-report <path> [--pretty]
           design-flow build-release-envelope --project-root <path> --run-id <id> [--max-evidence-age-days <days>] [--pretty]
           design-flow progress-run --project-root <path> --run-id <id> [--since-sequence <n>] [--wait|--follow] [--timeout-milliseconds <n>] [--poll-interval-milliseconds <n>] [--pretty]
           design-flow --help
@@ -1023,9 +1023,9 @@ public enum DesignFlowCLICommand {
     public static var collectReleaseEvidenceHelpText: String {
         """
         Usage:
-          design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --migration-report <path> [--pretty]
+          design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --contract-report <path> [--pretty]
 
-        Writes qualification/corpus-history.json, qualification/performance-envelope.json, and qualification/migration-audit.json from retained qualification reports.
+        Writes qualification/corpus-history.json, qualification/performance-envelope.json, and qualification/contract-audit.json from retained qualification reports.
         """
     }
 

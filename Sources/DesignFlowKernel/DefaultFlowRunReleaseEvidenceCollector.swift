@@ -4,7 +4,7 @@ import XcircuitePackage
 public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceCollecting {
     public static let corpusHistoryArtifactID = "qualification-corpus-history"
     public static let performanceEnvelopeArtifactID = "qualification-performance-envelope"
-    public static let migrationAuditArtifactID = "qualification-migration-audit"
+    public static let contractAuditArtifactID = "qualification-contract-audit"
 
     private let packageStore: XcircuitePackageStore
     private let hasher: XcircuiteHasher
@@ -24,14 +24,14 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         runID: String,
         projectRoot: URL,
         signoffDashboardPath: URL,
-        migrationReportPath: URL
+        contractReportPath: URL
     ) throws -> FlowRunReleaseEvidenceCollectionResult {
         let dashboard = try loadJSONValue(from: signoffDashboardPath)
-        let migrationReport = try loadJSONValue(from: migrationReportPath)
+        let contractReport = try loadJSONValue(from: contractReportPath)
         try validateSignoffDashboard(dashboard)
-        try validateMigrationReport(migrationReport)
+        try validateContractReport(contractReport)
         let dashboardSHA256 = try hasher.sha256(fileAt: signoffDashboardPath)
-        let migrationSHA256 = try hasher.sha256(fileAt: migrationReportPath)
+        let contractSHA256 = try hasher.sha256(fileAt: contractReportPath)
         let collectedAt = timestamp(currentDate)
 
         let corpusHistory = makeCorpusHistory(
@@ -48,12 +48,12 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             sourceSHA256: dashboardSHA256,
             dashboard: dashboard
         )
-        let migrationAudit = makeMigrationAudit(
+        let contractAudit = try makeContractAudit(
             runID: runID,
             collectedAt: collectedAt,
-            sourcePath: migrationReportPath,
-            sourceSHA256: migrationSHA256,
-            report: migrationReport
+            sourcePath: contractReportPath,
+            sourceSHA256: contractSHA256,
+            report: contractReport
         )
 
         let artifacts = try persistArtifacts(
@@ -61,16 +61,16 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             projectRoot: projectRoot,
             corpusHistory: corpusHistory,
             performanceEnvelope: performanceEnvelope,
-            migrationAudit: migrationAudit
+            contractAudit: contractAudit
         )
         let diagnostics = corpusHistory.diagnostics
             + performanceEnvelope.diagnostics
-            + migrationAudit.diagnostics
+            + contractAudit.diagnostics
         return FlowRunReleaseEvidenceCollectionResult(
             runID: runID,
             corpusHistory: corpusHistory,
             performanceEnvelope: performanceEnvelope,
-            migrationAudit: migrationAudit,
+            contractAudit: contractAudit,
             artifacts: artifacts,
             diagnostics: diagnostics
         )
@@ -114,13 +114,13 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         _ = try requiredString(at: ["status"], in: retainedSuiteValue, source: source, prefix: "retainedSignoffSuite")
     }
 
-    private func validateMigrationReport(_ value: XcircuiteJSONValue) throws {
-        let source = "migration-report"
+    private func validateContractReport(_ value: XcircuiteJSONValue) throws {
+        let source = "contract-report"
         _ = try requiredObject(value, source: source, fieldPath: "$")
         try requireSchemaVersion(value, source: source)
         _ = try requiredString(at: ["status"], in: value, source: source)
-        _ = try requiredNumber(at: ["contractCount"], in: value, source: source)
-        _ = try requiredNumber(at: ["failedContractCount"], in: value, source: source)
+        _ = try requiredInteger(at: ["contractCount"], in: value, source: source)
+        _ = try requiredInteger(at: ["failedContractCount"], in: value, source: source)
         let contracts = try requiredArray(at: ["contracts"], in: value, source: source)
         for (index, item) in contracts.enumerated() {
             let contract = try requiredObject(
@@ -132,6 +132,10 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             _ = try requiredString(at: ["id"], in: contractValue, source: source, prefix: "contracts[\(index)]")
             _ = try requiredString(at: ["owner"], in: contractValue, source: source, prefix: "contracts[\(index)]")
             _ = try requiredString(at: ["status"], in: contractValue, source: source, prefix: "contracts[\(index)]")
+            _ = try requiredValue(at: ["expectedVersion"], in: contractValue, source: source, prefix: "contracts[\(index)]")
+            _ = try requiredValue(at: ["observedVersion"], in: contractValue, source: source, prefix: "contracts[\(index)]")
+            _ = try requiredInteger(at: ["requiredPathCount"], in: contractValue, source: source, prefix: "contracts[\(index)]")
+            _ = try requiredArray(at: ["failures"], in: contractValue, source: source, prefix: "contracts[\(index)]")
         }
     }
 
@@ -265,46 +269,49 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         )
     }
 
-    private func makeMigrationAudit(
+    private func makeContractAudit(
         runID: String,
         collectedAt: String,
         sourcePath: URL,
         sourceSHA256: String,
         report: XcircuiteJSONValue
-    ) -> FlowRunReleaseMigrationAudit {
-        let contracts = (arrayValue(value(at: ["contracts"], in: report)) ?? []).compactMap {
-            item -> FlowRunReleaseMigrationAudit.ContractSummary? in
-            guard let object = objectValue(item) else {
-                return nil
-            }
-            return FlowRunReleaseMigrationAudit.ContractSummary(
-                contractID: stringValue(object["id"]) ?? "",
-                owner: stringValue(object["owner"]) ?? "",
-                status: stringValue(object["status"]) ?? "unknown",
-                expectedVersion: object["expectedVersion"],
-                observedVersion: object["observedVersion"],
-                requiredPathCount: intValue(object["requiredPathCount"]) ?? 0,
-                failureCount: arrayValue(object["failures"])?.count ?? 0
-            )
+    ) throws -> FlowRunReleaseContractAudit {
+        let source = "contract-report"
+        let contractValues = try requiredArray(at: ["contracts"], in: report, source: source)
+        var contracts: [FlowRunReleaseContractAudit.ContractSummary] = []
+        for (index, item) in contractValues.enumerated() {
+            let prefix = "contracts[\(index)]"
+            let object = try requiredObject(item, source: source, fieldPath: prefix)
+            let contract = XcircuiteJSONValue.object(object)
+            contracts.append(FlowRunReleaseContractAudit.ContractSummary(
+                contractID: try requiredString(at: ["id"], in: contract, source: source, prefix: prefix),
+                owner: try requiredString(at: ["owner"], in: contract, source: source, prefix: prefix),
+                status: try requiredString(at: ["status"], in: contract, source: source, prefix: prefix),
+                expectedVersion: try requiredValue(at: ["expectedVersion"], in: contract, source: source, prefix: prefix),
+                observedVersion: try requiredValue(at: ["observedVersion"], in: contract, source: source, prefix: prefix),
+                requiredPathCount: try requiredInteger(at: ["requiredPathCount"], in: contract, source: source, prefix: prefix),
+                failureCount: try requiredArray(at: ["failures"], in: contract, source: source, prefix: prefix).count
+            ))
         }
         var diagnostics: [FlowDiagnostic] = []
-        if stringValue(value(at: ["status"], in: report)) != "passed" {
+        let status = try requiredString(at: ["status"], in: report, source: source)
+        if status != "passed" {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
-                    code: "release-migration-audit-not-passed",
+                    code: "release-contract-audit-not-passed",
                     message: "Versioned contract fixture report status is not passed."
                 )
             )
         }
-        return FlowRunReleaseMigrationAudit(
+        return FlowRunReleaseContractAudit(
             runID: runID,
             collectedAt: collectedAt,
             sourceReportPath: sourcePath.path(percentEncoded: false),
             sourceReportSHA256: sourceSHA256,
-            status: stringValue(value(at: ["status"], in: report)),
-            contractCount: intValue(value(at: ["contractCount"], in: report)) ?? contracts.count,
-            failedContractCount: intValue(value(at: ["failedContractCount"], in: report)) ?? 0,
+            status: status,
+            contractCount: try requiredInteger(at: ["contractCount"], in: report, source: source),
+            failedContractCount: try requiredInteger(at: ["failedContractCount"], in: report, source: source),
             contracts: contracts,
             diagnostics: diagnostics
         )
@@ -315,7 +322,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         projectRoot: URL,
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
-        migrationAudit: FlowRunReleaseMigrationAudit
+        contractAudit: FlowRunReleaseContractAudit
     ) throws -> [XcircuiteFileReference] {
         let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let qualificationDirectory = runDirectory.appending(path: "qualification")
@@ -324,7 +331,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         let artifactSpecs: [(path: String, artifactID: String, value: any Encodable)] = [
             ("qualification/corpus-history.json", Self.corpusHistoryArtifactID, corpusHistory),
             ("qualification/performance-envelope.json", Self.performanceEnvelopeArtifactID, performanceEnvelope),
-            ("qualification/migration-audit.json", Self.migrationAuditArtifactID, migrationAudit),
+            ("qualification/contract-audit.json", Self.contractAuditArtifactID, contractAudit),
         ]
         var references: [XcircuiteFileReference] = []
         for spec in artifactSpecs {
@@ -448,6 +455,24 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         return string
     }
 
+    private func requiredValue(
+        at path: [String],
+        in value: XcircuiteJSONValue?,
+        source: String,
+        prefix: String? = nil
+    ) throws -> XcircuiteJSONValue {
+        let fieldPath = joinedPath(path, prefix: prefix)
+        guard let result = self.value(at: path, in: value) else {
+            throw FlowRunReleaseEvidenceCollectionError.invalidSourceField(
+                source: source,
+                fieldPath: fieldPath,
+                expected: "JSON value",
+                actual: "missing"
+            )
+        }
+        return result
+    }
+
     private func requiredNumber(
         at path: [String],
         in value: XcircuiteJSONValue?,
@@ -464,6 +489,32 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             )
         }
         return number
+    }
+
+    private func requiredInteger(
+        at path: [String],
+        in value: XcircuiteJSONValue?,
+        source: String,
+        prefix: String? = nil
+    ) throws -> Int {
+        let fieldPath = joinedPath(path, prefix: prefix)
+        let number = try requiredNumber(
+            at: path,
+            in: value,
+            source: source,
+            prefix: prefix
+        )
+        guard number.rounded() == number,
+              number >= Double(Int.min),
+              number <= Double(Int.max) else {
+            throw FlowRunReleaseEvidenceCollectionError.invalidSourceField(
+                source: source,
+                fieldPath: fieldPath,
+                expected: "integer",
+                actual: String(number)
+            )
+        }
+        return Int(number)
     }
 
     private func requiredArray(

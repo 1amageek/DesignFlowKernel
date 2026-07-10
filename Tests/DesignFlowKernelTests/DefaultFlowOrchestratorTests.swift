@@ -42,6 +42,11 @@ struct DefaultFlowOrchestratorTests {
         )
         #expect(runManifest.runID == "run-1")
         #expect(runManifest.status == .succeeded)
+        #expect(runManifest.intent == "Run basic flow")
+        #expect(runManifest.actor.identifier == "design-flow-kernel")
+        #expect(runManifest.startedAt != nil)
+        #expect(runManifest.finishedAt != nil)
+        #expect(runManifest.revision >= 2)
 
         let toolchain = try readToolchainManifest(in: root, runID: "run-1")
         #expect(toolchain.runID == "run-1")

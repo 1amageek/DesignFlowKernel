@@ -743,18 +743,6 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
 
 private struct PlanVerificationSummaryDocument: Decodable {
     var correctnessGateResults: [PlanVerificationSummaryCorrectnessGate]
-
-    private enum CodingKeys: String, CodingKey {
-        case correctnessGateResults
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.correctnessGateResults = try container.decodeIfPresent(
-            [PlanVerificationSummaryCorrectnessGate].self,
-            forKey: .correctnessGateResults
-        ) ?? []
-    }
 }
 
 private struct PlanVerificationSummaryCorrectnessGate: Decodable {
@@ -764,25 +752,6 @@ private struct PlanVerificationSummaryCorrectnessGate: Decodable {
     var diagnostics: [PlanVerificationSummaryDiagnostic]
     var nextActions: [String]
 
-    private enum CodingKeys: String, CodingKey {
-        case gateID
-        case status
-        case summary
-        case diagnostics
-        case nextActions
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.gateID = try container.decode(String.self, forKey: .gateID)
-        self.status = try container.decode(String.self, forKey: .status)
-        self.summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? gateID
-        self.diagnostics = try container.decodeIfPresent(
-            [PlanVerificationSummaryDiagnostic].self,
-            forKey: .diagnostics
-        ) ?? []
-        self.nextActions = try container.decodeIfPresent([String].self, forKey: .nextActions) ?? []
-    }
 }
 
 private struct PlanVerificationSummaryDiagnostic: Decodable {

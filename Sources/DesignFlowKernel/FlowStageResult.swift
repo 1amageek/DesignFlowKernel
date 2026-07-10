@@ -25,22 +25,4 @@ public struct FlowStageResult: Sendable, Hashable, Codable {
         self.attempts = attempts
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case stageID
-        case status
-        case diagnostics
-        case gates
-        case artifacts
-        case attempts
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        stageID = try container.decode(String.self, forKey: .stageID)
-        status = try container.decode(FlowStageStatus.self, forKey: .status)
-        diagnostics = try container.decodeIfPresent([FlowDiagnostic].self, forKey: .diagnostics) ?? []
-        gates = try container.decodeIfPresent([FlowGateResult].self, forKey: .gates) ?? []
-        artifacts = try container.decodeIfPresent([XcircuiteFileReference].self, forKey: .artifacts) ?? []
-        attempts = try container.decodeIfPresent([FlowStageAttemptRecord].self, forKey: .attempts) ?? []
-    }
 }

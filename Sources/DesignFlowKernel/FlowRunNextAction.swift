@@ -27,30 +27,4 @@ public struct FlowRunNextAction: Sendable, Hashable, Codable {
         self.suggestedCommands = suggestedCommands
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case actionID
-        case kind
-        case stageID
-        case severity
-        case reason
-        case diagnosticCodes
-        case suggestedCommands
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.actionID = try container.decode(String.self, forKey: .actionID)
-        self.kind = try container.decode(String.self, forKey: .kind)
-        self.stageID = try container.decodeIfPresent(String.self, forKey: .stageID)
-        self.severity = try container.decode(FlowDiagnosticSeverity.self, forKey: .severity)
-        self.reason = try container.decode(String.self, forKey: .reason)
-        self.diagnosticCodes = try container.decodeIfPresent(
-            [String].self,
-            forKey: .diagnosticCodes
-        ) ?? []
-        self.suggestedCommands = try container.decodeIfPresent(
-            [FlowRunSuggestedCommand].self,
-            forKey: .suggestedCommands
-        ) ?? []
-    }
 }

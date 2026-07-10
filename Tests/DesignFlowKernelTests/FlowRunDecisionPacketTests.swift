@@ -272,14 +272,17 @@ extension FlowRunLedgerSummaryTests {
 	    )
 
 	    let store = XcircuitePackageStore()
-	    let manifestURL = root.appending(path: ".xcircuite/runs/run-1/manifest.json")
-	    var manifest = try store.readJSON(XcircuiteRunManifest.self, from: manifestURL)
+	    let manifest = try store.loadRunManifest(runID: "run-1", inProjectAt: root)
 	    let packetPath = ".xcircuite/runs/run-1/review/decision-packet.json"
-	    let packetIndex = try #require(manifest.artifacts.firstIndex {
+	    var mismatchedReference = try #require(manifest.artifacts.first {
 	        $0.path == packetPath
 	    })
-	    manifest.artifacts[packetIndex].artifactID = "wrong-decision-packet"
-	    try store.writeJSON(manifest, to: manifestURL, forProjectAt: root)
+	    mismatchedReference.artifactID = "wrong-decision-packet"
+	    _ = try store.upsertRunArtifacts(
+	        [mismatchedReference],
+	        runID: "run-1",
+	        inProjectAt: root
+	    )
 
 	    let validation = try DefaultFlowRunDecisionPacketValidator().validateDecisionPacket(
 	        runID: "run-1",

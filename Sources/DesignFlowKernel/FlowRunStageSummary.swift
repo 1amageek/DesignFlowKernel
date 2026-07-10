@@ -27,24 +27,4 @@ public struct FlowRunStageSummary: Sendable, Hashable, Codable {
         self.retryCount = retryCount
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case stageID
-        case status
-        case gates
-        case diagnosticCodes
-        case artifactCount
-        case attemptCount
-        case retryCount
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        stageID = try container.decode(String.self, forKey: .stageID)
-        status = try container.decode(FlowStageStatus.self, forKey: .status)
-        gates = try container.decodeIfPresent([FlowRunGateSummary].self, forKey: .gates) ?? []
-        diagnosticCodes = try container.decodeIfPresent([String].self, forKey: .diagnosticCodes) ?? []
-        artifactCount = try container.decodeIfPresent(Int.self, forKey: .artifactCount) ?? 0
-        attemptCount = try container.decodeIfPresent(Int.self, forKey: .attemptCount) ?? 0
-        retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
-    }
 }

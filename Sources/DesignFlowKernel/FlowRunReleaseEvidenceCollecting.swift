@@ -5,6 +5,6 @@ public protocol FlowRunReleaseEvidenceCollecting: Sendable {
         runID: String,
         projectRoot: URL,
         signoffDashboardPath: URL,
-        migrationReportPath: URL
+        contractReportPath: URL
     ) throws -> FlowRunReleaseEvidenceCollectionResult
 }

@@ -2,7 +2,9 @@ import Foundation
 import XcircuitePackage
 
 public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
-    public var schemaVersion: Int
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
     public var runDirectoryPath: String
@@ -19,7 +21,6 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
     public var suggestedCommandSelections: [XcircuiteSuggestedCommandSelection]
 
     public init(
-        schemaVersion: Int = 1,
         runID: String,
         status: FlowRunStatus,
         runDirectoryPath: String,
@@ -35,7 +36,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         nextActions: [FlowRunNextAction] = [],
         suggestedCommandSelections: [XcircuiteSuggestedCommandSelection] = []
     ) {
-        self.schemaVersion = schemaVersion
+        self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.status = status
         self.runDirectoryPath = runDirectoryPath
@@ -73,13 +74,20 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Expected flow run ledger summary schema version \(Self.currentSchemaVersion)."
+            )
+        }
         self.runID = try container.decode(String.self, forKey: .runID)
         self.status = try container.decode(FlowRunStatus.self, forKey: .status)
         self.runDirectoryPath = try container.decode(String.self, forKey: .runDirectoryPath)
-        self.stages = try container.decodeIfPresent(
+        self.stages = try container.decode(
             [FlowRunStageSummary].self,
             forKey: .stages
-        ) ?? []
+        )
         self.toolchain = try container.decodeIfPresent(
             FlowRunToolchainSummary.self,
             forKey: .toolchain
@@ -88,7 +96,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
             FlowRunDesignDiffSummary.self,
             forKey: .designDiff
         )
-        self.progressEventCount = try container.decodeIfPresent(Int.self, forKey: .progressEventCount) ?? 0
+        self.progressEventCount = try container.decode(Int.self, forKey: .progressEventCount)
         self.latestProgressEvent = try container.decodeIfPresent(
             FlowRunProgressEvent.self,
             forKey: .latestProgressEvent
@@ -97,19 +105,19 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
             FlowRunCancellationRequest.self,
             forKey: .cancellationRequest
         )
-        self.actionCount = try container.decodeIfPresent(Int.self, forKey: .actionCount) ?? 0
-        self.approvalCount = try container.decodeIfPresent(Int.self, forKey: .approvalCount) ?? 0
-        self.diagnostics = try container.decodeIfPresent(
+        self.actionCount = try container.decode(Int.self, forKey: .actionCount)
+        self.approvalCount = try container.decode(Int.self, forKey: .approvalCount)
+        self.diagnostics = try container.decode(
             [FlowDiagnostic].self,
             forKey: .diagnostics
-        ) ?? []
-        self.nextActions = try container.decodeIfPresent(
+        )
+        self.nextActions = try container.decode(
             [FlowRunNextAction].self,
             forKey: .nextActions
-        ) ?? []
-        self.suggestedCommandSelections = try container.decodeIfPresent(
+        )
+        self.suggestedCommandSelections = try container.decode(
             [XcircuiteSuggestedCommandSelection].self,
             forKey: .suggestedCommandSelections
-        ) ?? []
+        )
     }
 }

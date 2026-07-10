@@ -50,6 +50,14 @@ public struct DefaultFlowOrchestrator: Sendable {
             request: request,
             runDirectory: runDirectory
         )
+        _ = try packageStore.transitionRun(
+            runID: request.runID,
+            transition: XcircuiteRunTransition(
+                status: .running,
+                artifacts: [planReference]
+            ),
+            inProjectAt: request.projectRoot
+        )
         try progressStore.appendEvent(
             runID: request.runID,
             projectRoot: request.projectRoot,
@@ -1002,14 +1010,20 @@ public struct DefaultFlowOrchestrator: Sendable {
     }
 
     private func runDirectory(for request: FlowOperationRequest) throws -> URL {
+        let descriptor = XcircuiteRunDescriptor(
+            actor: request.actor,
+            intent: request.intent
+        )
         if request.allowExistingRunDirectory {
             return try packageStore.ensureRunDirectory(
                 for: request.runID,
+                descriptor: descriptor,
                 inProjectAt: request.projectRoot
             )
         }
         return try packageStore.createRunDirectory(
             for: request.runID,
+            descriptor: descriptor,
             inProjectAt: request.projectRoot
         )
     }
@@ -1277,25 +1291,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                 + progressArtifacts
                 + [toolchainReference]
         )
-        let runManifest = XcircuiteRunManifest(
+        _ = try packageStore.transitionRun(
             runID: result.runID,
-            status: xcircuiteStatus(result.status),
-            artifacts: artifacts
+            transition: XcircuiteRunTransition(
+                status: xcircuiteStatus(result.status),
+                artifacts: artifacts
+            ),
+            inProjectAt: projectRoot
         )
-        try packageStore.writeJSON(
-            runManifest,
-            to: runDirectory.appending(path: "manifest.json"),
-            forProjectAt: projectRoot
-        )
-        let runManifestReference = try packageStore.fileReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(result.runID)/manifest.json",
-            artifactID: "run-manifest",
-            kind: .other,
-            format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: result.runID
-        )
-        try packageStore.upsertFileReference(runManifestReference, forProjectAt: projectRoot)
     }
 
     private func persistRunPlan(
@@ -1342,7 +1345,10 @@ public struct DefaultFlowOrchestrator: Sendable {
         guard FileManager.default.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
             return []
         }
-        return try packageStore.readJSON(XcircuiteRunManifest.self, from: manifestURL).artifacts
+        return try packageStore.loadRunManifest(
+            runID: runID,
+            inProjectAt: projectRoot
+        ).artifacts
     }
 
     private func mergedArtifacts(_ artifacts: [XcircuiteFileReference]) -> [XcircuiteFileReference] {

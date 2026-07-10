@@ -161,13 +161,13 @@ public struct FlowRunReleasePerformanceEnvelope: Sendable, Hashable, Codable {
     }
 }
 
-public struct FlowRunReleaseMigrationAudit: Sendable, Hashable, Codable {
+public struct FlowRunReleaseContractAudit: Sendable, Hashable, Codable {
     public struct ContractSummary: Sendable, Hashable, Codable {
         public var contractID: String
         public var owner: String
         public var status: String
-        public var expectedVersion: XcircuiteJSONValue?
-        public var observedVersion: XcircuiteJSONValue?
+        public var expectedVersion: XcircuiteJSONValue
+        public var observedVersion: XcircuiteJSONValue
         public var requiredPathCount: Int
         public var failureCount: Int
 
@@ -175,8 +175,8 @@ public struct FlowRunReleaseMigrationAudit: Sendable, Hashable, Codable {
             contractID: String,
             owner: String,
             status: String,
-            expectedVersion: XcircuiteJSONValue?,
-            observedVersion: XcircuiteJSONValue?,
+            expectedVersion: XcircuiteJSONValue,
+            observedVersion: XcircuiteJSONValue,
             requiredPathCount: Int,
             failureCount: Int
         ) {
@@ -195,7 +195,7 @@ public struct FlowRunReleaseMigrationAudit: Sendable, Hashable, Codable {
     public var collectedAt: String
     public var sourceReportPath: String
     public var sourceReportSHA256: String
-    public var status: String?
+    public var status: String
     public var contractCount: Int
     public var failedContractCount: Int
     public var contracts: [ContractSummary]
@@ -207,7 +207,7 @@ public struct FlowRunReleaseMigrationAudit: Sendable, Hashable, Codable {
         collectedAt: String,
         sourceReportPath: String,
         sourceReportSHA256: String,
-        status: String?,
+        status: String,
         contractCount: Int,
         failedContractCount: Int,
         contracts: [ContractSummary],

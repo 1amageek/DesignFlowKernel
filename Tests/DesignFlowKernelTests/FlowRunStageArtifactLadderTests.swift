@@ -461,7 +461,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(drcStage.diagnosticCodes.contains("stage-artifact-ladder-duplicate-stage-result"))
 }
 
-@Test func stageArtifactLadderDecodesLegacyArtifactsWithSafeDefaults() throws {
+@Test func stageArtifactLadderRejectsIncompleteCurrentSchema() throws {
     let payload = Data(
         """
         {
@@ -508,32 +508,9 @@ extension FlowRunLedgerSummaryTests {
         """.utf8
     )
 
-    let ladder = try JSONDecoder().decode(FlowRunStageArtifactLadder.self, from: payload)
-
-    #expect(ladder.schemaVersion == 1)
-    #expect(ladder.readiness == .needsReview)
-    #expect(ladder.runDirectoryPath == ".xcircuite/runs/run-1")
-    #expect(ladder.runArtifacts.isEmpty)
-    #expect(ladder.runReviewItems.isEmpty)
-    #expect(ladder.nextActions.isEmpty)
-    #expect(ladder.replayCommands.isEmpty)
-    #expect(ladder.summary.stageCount == 1)
-    #expect(ladder.summary.retryArtifactCount == 0)
-    #expect(ladder.summary.domainCounts.isEmpty)
-    let stage = try #require(ladder.stages.first)
-    #expect(stage.index == 0)
-    #expect(stage.artifactCount == 1)
-    #expect(stage.attemptCount == 0)
-    #expect(stage.domains.isEmpty)
-    #expect(stage.reviewItems.isEmpty)
-    #expect(stage.nextActions.isEmpty)
-    #expect(stage.roleCoverage.first?.artifactPaths == [])
-    #expect(stage.roleCoverage.first?.verifiedCount == 0)
-    #expect(stage.retryRefs?.first?.diagnosticCodes == [])
-    let signoffCoverage = try #require(ladder.signoffManifestCoverage)
-    #expect(signoffCoverage.artifactPathsByRole.isEmpty)
-    #expect(signoffCoverage.unsignedArtifactPaths.isEmpty)
-    #expect(!signoffCoverage.allRequiredArtifactsHaveHashesAndByteCounts)
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowRunStageArtifactLadder.self, from: payload)
+    }
 }
 
 }

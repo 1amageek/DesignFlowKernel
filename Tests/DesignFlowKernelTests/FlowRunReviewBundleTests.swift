@@ -113,7 +113,7 @@ extension FlowRunLedgerSummaryTests {
     let problemPath = ".xcircuite/runs/run-1/planning/problem.json"
     let problemPayload = Data(#"{"schemaVersion":1,"problemID":"problem-1"}"#.utf8)
     let problemTranslationAuditPath = ".xcircuite/runs/run-1/planning/problem-translation-audit.json"
-    let problemTranslationAuditPayload = Data(#"{"schemaVersion":1,"status":"passed","problemID":"problem-1"}"#.utf8)
+    let problemTranslationAuditPayload = Data(#"{"schemaVersion":1,"status":"passed","problemID":"problem-1","blocking":false,"diagnostics":[],"nextActions":[]}"#.utf8)
     let candidatePlanPath = ".xcircuite/runs/run-1/planning/candidate-plan.json"
     let candidatePlanPayload = Data(#"{"schemaVersion":1,"planID":"plan-1"}"#.utf8)
     let symbolicPlannerTracePath = ".xcircuite/runs/run-1/planning/symbolic-planner-trace.json"
@@ -126,7 +126,7 @@ extension FlowRunLedgerSummaryTests {
     let selectionTracePayload = Data(#"{"schemaVersion":1,"selectedCandidateID":"candidate-1"}"#.utf8)
     let planVerificationPath = ".xcircuite/runs/run-1/planning/plan-verification.json"
     let planVerificationPayload = Data("""
-    {"schemaVersion":1,"planID":"plan-1","accepted":false,"correctnessGateResults":[{"gateID":"action-domain-binding","status":"passed","summary":"Candidate steps bind to declared action-domain operations."},{"gateID":"problem-translation-audit","status":"blocked","summary":"Planning problem translation audit must run before planner execution.","diagnostics":[{"code":"problem-translation-audit-required"}],"nextActions":["audit-problem-translation"]},{"gateID":"post-execution-signoff","status":"pending","summary":"Post-execution signoff gates still need to run.","diagnostics":[{"code":"post-execution-verification-required"}],"nextActions":["verify-candidate-plan:post-execution"]}]}
+    {"schemaVersion":1,"planID":"plan-1","accepted":false,"correctnessGateResults":[{"gateID":"action-domain-binding","status":"passed","summary":"Candidate steps bind to declared action-domain operations.","diagnostics":[],"nextActions":[]},{"gateID":"problem-translation-audit","status":"blocked","summary":"Planning problem translation audit must run before planner execution.","diagnostics":[{"code":"problem-translation-audit-required"}],"nextActions":["audit-problem-translation"]},{"gateID":"post-execution-signoff","status":"pending","summary":"Post-execution signoff gates still need to run.","diagnostics":[{"code":"post-execution-verification-required"}],"nextActions":["verify-candidate-plan:post-execution"]}]}
     """.utf8)
     let rejectedPlansPath = ".xcircuite/runs/run-1/planning/rejected-plans.jsonl"
     let rejectedPlansPayload = Data(#"{"schemaVersion":1,"rejectionID":"rejection-1","status":"rejected"}"#.utf8)

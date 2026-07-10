@@ -6,7 +6,7 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
     public var runID: String
     public var corpusHistory: FlowRunReleaseCorpusHistory
     public var performanceEnvelope: FlowRunReleasePerformanceEnvelope
-    public var migrationAudit: FlowRunReleaseMigrationAudit
+    public var contractAudit: FlowRunReleaseContractAudit
     public var artifacts: [XcircuiteFileReference]
     public var diagnostics: [FlowDiagnostic]
 
@@ -15,7 +15,7 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
         runID: String,
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
-        migrationAudit: FlowRunReleaseMigrationAudit,
+        contractAudit: FlowRunReleaseContractAudit,
         artifacts: [XcircuiteFileReference],
         diagnostics: [FlowDiagnostic] = []
     ) {
@@ -23,7 +23,7 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
         self.runID = runID
         self.corpusHistory = corpusHistory
         self.performanceEnvelope = performanceEnvelope
-        self.migrationAudit = migrationAudit
+        self.contractAudit = contractAudit
         self.artifacts = artifacts
         self.diagnostics = diagnostics
     }

@@ -41,10 +41,9 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     ) -> FlowRunDecisionPacketValidationResult {
         let manifest: XcircuiteRunManifest
         do {
-            let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
-            manifest = try packageStore.readJSON(
-                XcircuiteRunManifest.self,
-                from: runDirectory.appending(path: "manifest.json")
+            manifest = try packageStore.loadRunManifest(
+                runID: runID,
+                inProjectAt: projectRoot
             )
         } catch {
             return blockedResult(

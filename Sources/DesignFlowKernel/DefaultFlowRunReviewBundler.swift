@@ -1522,18 +1522,6 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
 private struct PlanVerificationReviewDocument: Decodable {
     var correctnessGateResults: [PlanVerificationCorrectnessGate]
-
-    private enum CodingKeys: String, CodingKey {
-        case correctnessGateResults
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.correctnessGateResults = try container.decodeIfPresent(
-            [PlanVerificationCorrectnessGate].self,
-            forKey: .correctnessGateResults
-        ) ?? []
-    }
 }
 
 private struct PlanVerificationCorrectnessGate: Decodable {
@@ -1543,25 +1531,6 @@ private struct PlanVerificationCorrectnessGate: Decodable {
     var diagnostics: [PlanVerificationCorrectnessDiagnostic]
     var nextActions: [String]
 
-    private enum CodingKeys: String, CodingKey {
-        case gateID
-        case status
-        case summary
-        case diagnostics
-        case nextActions
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.gateID = try container.decode(String.self, forKey: .gateID)
-        self.status = try container.decode(String.self, forKey: .status)
-        self.summary = try container.decodeIfPresent(String.self, forKey: .summary) ?? gateID
-        self.diagnostics = try container.decodeIfPresent(
-            [PlanVerificationCorrectnessDiagnostic].self,
-            forKey: .diagnostics
-        ) ?? []
-        self.nextActions = try container.decodeIfPresent([String].self, forKey: .nextActions) ?? []
-    }
 }
 
 private struct PlanVerificationCorrectnessDiagnostic: Decodable {

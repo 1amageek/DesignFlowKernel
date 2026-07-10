@@ -16,9 +16,9 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
     public func loadRunLedger(runID: String, projectRoot: URL) throws -> FlowRunLedger {
         let package = XcircuitePackage(projectRoot: projectRoot)
         let runDirectory = try package.runDirectoryURL(for: runID)
-        let runManifest = try packageStore.readJSON(
-            XcircuiteRunManifest.self,
-            from: runDirectory.appending(path: "manifest.json")
+        let runManifest = try packageStore.loadRunManifest(
+            runID: runID,
+            inProjectAt: projectRoot
         )
         let plan = try loadPlan(from: runDirectory)
         let stages = try loadStageResults(

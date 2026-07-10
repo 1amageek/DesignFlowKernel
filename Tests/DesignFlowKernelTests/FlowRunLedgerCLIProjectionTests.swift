@@ -114,7 +114,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     let planVerificationPath = ".xcircuite/runs/run-1/planning/plan-verification.json"
     let payload = Data("""
-    {"schemaVersion":1,"planID":"plan-1","accepted":false,"correctnessGateResults":[{"gateID":"problem-validation","status":"passed","summary":"Planning problem was validated."},{"gateID":"planner-replay","status":"blocked","summary":"Planner replay did not satisfy all goal atoms.","diagnostics":[{"code":"missing-goal-atoms"}],"nextActions":["repair-planning-problem-goals"]}]}
+    {"schemaVersion":1,"planID":"plan-1","accepted":false,"correctnessGateResults":[{"gateID":"problem-validation","status":"passed","summary":"Planning problem was validated.","diagnostics":[],"nextActions":[]},{"gateID":"planner-replay","status":"blocked","summary":"Planner replay did not satisfy all goal atoms.","diagnostics":[{"code":"missing-goal-atoms"}],"nextActions":["repair-planning-problem-goals"]}]}
     """.utf8)
 
     try await createBlockedApprovalRun(root: root, runID: "run-1")
@@ -215,30 +215,24 @@ extension FlowRunLedgerSummaryTests {
     ])
 }
 
-@Test func flowRunNextActionDecodesWithoutSuggestedCommandsForCompatibility() throws {
+@Test func flowRunNextActionRejectsMissingSuggestedCommands() throws {
     let payload = Data("""
-    {"actionID":"legacy-action","kind":"inspectFailure","severity":"warning","reason":"Legacy next action.","diagnosticCodes":["legacy-code"]}
+    {"actionID":"incomplete-action","kind":"inspectFailure","severity":"warning","reason":"Incomplete next action.","diagnosticCodes":["incomplete-code"]}
     """.utf8)
 
-    let action = try JSONDecoder().decode(FlowRunNextAction.self, from: payload)
-
-    #expect(action.actionID == "legacy-action")
-    #expect(action.kind == "inspectFailure")
-    #expect(action.severity == .warning)
-    #expect(action.diagnosticCodes == ["legacy-code"])
-    #expect(action.suggestedCommands.isEmpty)
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowRunNextAction.self, from: payload)
+    }
 }
 
-@Test func flowRunLedgerSummaryDecodesWithoutSuggestedCommandSelectionsForCompatibility() throws {
+@Test func flowRunLedgerSummaryRejectsIncompleteCurrentSchema() throws {
     let payload = Data("""
     {"schemaVersion":1,"runID":"run-1","status":"succeeded","runDirectoryPath":"/tmp/run-1","stages":[],"actionCount":0,"approvalCount":0,"diagnostics":[],"nextActions":[]}
     """.utf8)
 
-    let summary = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: payload)
-
-    #expect(summary.runID == "run-1")
-    #expect(summary.status == .succeeded)
-    #expect(summary.suggestedCommandSelections.isEmpty)
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: payload)
+    }
 }
 
 @Test func reviewRunCLICommandEmitsReviewBundleJSON() async throws {

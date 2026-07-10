@@ -62,10 +62,9 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         projectRoot: URL
     ) -> (manifest: XcircuiteRunManifest?, diagnostic: FlowDiagnostic?) {
         do {
-            let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
-            let manifest = try packageStore.readJSON(
-                XcircuiteRunManifest.self,
-                from: runDirectory.appending(path: "manifest.json")
+            let manifest = try packageStore.loadRunManifest(
+                runID: runID,
+                inProjectAt: projectRoot
             )
             return (manifest, nil)
         } catch {
@@ -116,13 +115,13 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             ),
             retainedArtifactRequirement(
-                requirementID: "migration-audit",
-                title: "Migration audit",
-                artifactID: "qualification-migration-audit",
-                relativePath: "qualification/migration-audit.json",
-                purpose: "Prove schema and artifact compatibility for release review and resume.",
-                missingDiagnosticCode: "release-envelope-migration-audit-missing",
-                ageDiagnosticPrefix: "release-envelope-migration-audit",
+                requirementID: "contract-audit",
+                title: "Contract audit",
+                artifactID: "qualification-contract-audit",
+                relativePath: "qualification/contract-audit.json",
+                purpose: "Prove current schema and artifact conformance for release review and resume.",
+                missingDiagnosticCode: "release-envelope-contract-audit-missing",
+                ageDiagnosticPrefix: "release-envelope-contract-audit",
                 runID: runID,
                 projectRoot: projectRoot,
                 manifest: manifest,
@@ -264,8 +263,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             corpusHistoryDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         case "qualification-performance-envelope":
             performanceEnvelopeDiagnosticCodes(reference: reference, projectRoot: projectRoot)
-        case "qualification-migration-audit":
-            migrationAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+        case "qualification-contract-audit":
+            contractAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         default:
             []
         }
@@ -468,85 +467,85 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         return codes.sorted()
     }
 
-    private func migrationAuditDiagnosticCodes(
+    private func contractAuditDiagnosticCodes(
         reference: XcircuiteFileReference,
         projectRoot: URL
     ) -> [String] {
         guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-migration-audit-path-invalid"]
+            return ["release-envelope-contract-audit-path-invalid"]
         }
         let artifactValue: XcircuiteJSONValue
         do {
             artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
-            return ["release-envelope-migration-audit-unreadable"]
+            return ["release-envelope-contract-audit-unreadable"]
         }
 
         var codes = Set<String>()
         if let status = stringValue(value(at: ["status"], in: artifactValue)) {
             if status != "passed" {
-                codes.insert("release-envelope-migration-audit-not-passed")
+                codes.insert("release-envelope-contract-audit-not-passed")
             }
         } else {
-            codes.insert("release-envelope-migration-audit-status-missing")
+            codes.insert("release-envelope-contract-audit-status-missing")
         }
 
         if let contractCount = integerValue(
             value(at: ["contractCount"], in: artifactValue),
-            missingCode: "release-envelope-migration-audit-contract-count-missing",
-            invalidCode: "release-envelope-migration-audit-contract-count-invalid",
+            missingCode: "release-envelope-contract-audit-contract-count-missing",
+            invalidCode: "release-envelope-contract-audit-contract-count-invalid",
             codes: &codes
         ) {
             if contractCount <= 0 {
-                codes.insert("release-envelope-migration-audit-contract-count-missing")
+                codes.insert("release-envelope-contract-audit-contract-count-missing")
             }
         }
 
         if let failedContractCount = integerValue(
             value(at: ["failedContractCount"], in: artifactValue),
-            missingCode: "release-envelope-migration-audit-failed-contract-count-missing",
-            invalidCode: "release-envelope-migration-audit-failed-contract-count-invalid",
+            missingCode: "release-envelope-contract-audit-failed-contract-count-missing",
+            invalidCode: "release-envelope-contract-audit-failed-contract-count-invalid",
             codes: &codes
         ) {
             if failedContractCount > 0 {
-                codes.insert("release-envelope-migration-audit-failed-contracts")
+                codes.insert("release-envelope-contract-audit-failed-contracts")
             }
         }
 
         if let diagnostics = arrayValue(value(at: ["diagnostics"], in: artifactValue)), !diagnostics.isEmpty {
-            codes.insert("release-envelope-migration-audit-diagnostics-present")
+            codes.insert("release-envelope-contract-audit-diagnostics-present")
         }
 
         guard let contracts = arrayValue(value(at: ["contracts"], in: artifactValue)), !contracts.isEmpty else {
-            codes.insert("release-envelope-migration-audit-contracts-missing")
+            codes.insert("release-envelope-contract-audit-contracts-missing")
             return codes.sorted()
         }
 
         for contractValue in contracts {
             guard case .object(let contract) = contractValue else {
-                codes.insert("release-envelope-migration-audit-contract-unreadable")
+                codes.insert("release-envelope-contract-audit-contract-unreadable")
                 continue
             }
             if let status = stringValue(contract["status"]), status != "passed" {
-                codes.insert("release-envelope-migration-audit-contract-failed")
+                codes.insert("release-envelope-contract-audit-contract-failed")
             }
             if let requiredPathCount = integerValue(
                 contract["requiredPathCount"],
-                missingCode: "release-envelope-migration-audit-contract-required-paths-missing",
-                invalidCode: "release-envelope-migration-audit-contract-required-path-count-invalid",
+                missingCode: "release-envelope-contract-audit-contract-required-paths-missing",
+                invalidCode: "release-envelope-contract-audit-contract-required-path-count-invalid",
                 codes: &codes
             ) {
                 if requiredPathCount <= 0 {
-                    codes.insert("release-envelope-migration-audit-contract-required-paths-missing")
+                    codes.insert("release-envelope-contract-audit-contract-required-paths-missing")
                 }
             }
             if let failureCount = integerValue(
                 contract["failureCount"],
-                missingCode: "release-envelope-migration-audit-contract-failure-count-missing",
-                invalidCode: "release-envelope-migration-audit-contract-failure-count-invalid",
+                missingCode: "release-envelope-contract-audit-contract-failure-count-missing",
+                invalidCode: "release-envelope-contract-audit-contract-failure-count-invalid",
                 codes: &codes
             ), failureCount > 0 {
-                codes.insert("release-envelope-migration-audit-contract-failures")
+                codes.insert("release-envelope-contract-audit-contract-failures")
             }
         }
         return codes.sorted()

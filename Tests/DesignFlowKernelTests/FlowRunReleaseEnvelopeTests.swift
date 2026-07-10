@@ -87,7 +87,7 @@ extension FlowRunLedgerSummaryTests {
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
     let corpusPath = ".xcircuite/runs/run-1/qualification/corpus-history.json"
     let performancePath = ".xcircuite/runs/run-1/qualification/performance-envelope.json"
-    let migrationPath = ".xcircuite/runs/run-1/qualification/migration-audit.json"
+    let contractPath = ".xcircuite/runs/run-1/qualification/contract-audit.json"
     let collectedAt = ISO8601DateFormatter().string(from: Date())
     try await createBlockedApprovalRun(
         root: root,
@@ -112,8 +112,8 @@ extension FlowRunLedgerSummaryTests {
                 format: .json
             ),
             XcircuiteFileReference(
-                artifactID: "qualification-migration-audit",
-                path: migrationPath,
+                artifactID: "qualification-contract-audit",
+                path: contractPath,
                 kind: .report,
                 format: .json
             ),
@@ -176,19 +176,19 @@ extension FlowRunLedgerSummaryTests {
               "diagnostics": []
             }
             """.utf8),
-            migrationPath: Data("""
+            contractPath: Data("""
             {
               "schemaVersion": 1,
               "runID": "run-1",
               "collectedAt": "\(collectedAt)",
-              "sourceReportPath": "migration-report.json",
+              "sourceReportPath": "contract-report.json",
               "sourceReportSHA256": "sha256",
               "status": "passed",
               "contractCount": 1,
               "failedContractCount": 0,
               "contracts": [
                 {
-                  "contractID": "xcircuite.run-manifest.v1",
+                  "contractID": "xcircuite.run-manifest.v2",
                   "owner": "XcircuitePackage",
                   "status": "passed",
                   "expectedVersion": 1,
@@ -232,7 +232,7 @@ extension FlowRunLedgerSummaryTests {
             && $0.artifactIntegrity.first?.status == .verified
     })
     #expect(result.envelope.requirements.contains {
-        $0.requirementID == "migration-audit"
+        $0.requirementID == "contract-audit"
             && $0.status == .passed
             && $0.artifactIntegrity.first?.status == .verified
     })
@@ -241,13 +241,13 @@ extension FlowRunLedgerSummaryTests {
     })
 }
 
-@Test func releaseEnvelopeBlocksFailedCorpusHistoryAndMigrationAuditContent() async throws {
-    let root = try makeTemporaryRoot("agent-release-corpus-migration-content-failed")
+@Test func releaseEnvelopeBlocksFailedCorpusHistoryAndContractAuditContent() async throws {
+    let root = try makeTemporaryRoot("agent-release-corpus-contract-content-failed")
     defer { removeTemporaryRoot(root) }
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
     let corpusPath = ".xcircuite/runs/run-1/qualification/corpus-history.json"
     let performancePath = ".xcircuite/runs/run-1/qualification/performance-envelope.json"
-    let migrationPath = ".xcircuite/runs/run-1/qualification/migration-audit.json"
+    let contractPath = ".xcircuite/runs/run-1/qualification/contract-audit.json"
     let collectedAt = ISO8601DateFormatter().string(from: Date())
     try await createBlockedApprovalRun(
         root: root,
@@ -272,8 +272,8 @@ extension FlowRunLedgerSummaryTests {
                 format: .json
             ),
             XcircuiteFileReference(
-                artifactID: "qualification-migration-audit",
-                path: migrationPath,
+                artifactID: "qualification-contract-audit",
+                path: contractPath,
                 kind: .report,
                 format: .json
             ),
@@ -342,19 +342,19 @@ extension FlowRunLedgerSummaryTests {
               "diagnostics": []
             }
             """.utf8),
-            migrationPath: Data("""
+            contractPath: Data("""
             {
               "schemaVersion": 1,
               "runID": "run-1",
               "collectedAt": "\(collectedAt)",
-              "sourceReportPath": "migration-report.json",
+              "sourceReportPath": "contract-report.json",
               "sourceReportSHA256": "sha256",
               "status": "failed",
               "contractCount": 1,
               "failedContractCount": 1,
               "contracts": [
                 {
-                  "contractID": "xcircuite.run-manifest.v1",
+                  "contractID": "xcircuite.run-manifest.v2",
                   "owner": "XcircuitePackage",
                   "status": "failed",
                   "expectedVersion": 1,
@@ -366,7 +366,7 @@ extension FlowRunLedgerSummaryTests {
               "diagnostics": [
                 {
                   "severity": "error",
-                  "code": "release-migration-audit-not-passed",
+                  "code": "release-contract-audit-not-passed",
                   "message": "Versioned contract fixture report status is not passed."
                 }
               ]
@@ -395,20 +395,20 @@ extension FlowRunLedgerSummaryTests {
     #expect(corpusRequirement.diagnosticCodes.contains("release-envelope-corpus-domain-unqualified"))
     #expect(corpusRequirement.diagnosticCodes.contains("release-envelope-corpus-domain-pass-rate-below-one"))
 
-    let migrationRequirement = try #require(envelope.requirements.first {
-        $0.requirementID == "migration-audit"
+    let contractRequirement = try #require(envelope.requirements.first {
+        $0.requirementID == "contract-audit"
     })
-    #expect(migrationRequirement.status == .blocked)
-    #expect(migrationRequirement.artifactIntegrity.first?.status == .verified)
-    #expect(migrationRequirement.diagnosticCodes.contains("release-envelope-migration-audit-not-passed"))
-    #expect(migrationRequirement.diagnosticCodes.contains("release-envelope-migration-audit-failed-contracts"))
-    #expect(migrationRequirement.diagnosticCodes.contains("release-envelope-migration-audit-contract-failed"))
-    #expect(migrationRequirement.diagnosticCodes.contains("release-envelope-migration-audit-contract-required-paths-missing"))
+    #expect(contractRequirement.status == .blocked)
+    #expect(contractRequirement.artifactIntegrity.first?.status == .verified)
+    #expect(contractRequirement.diagnosticCodes.contains("release-envelope-contract-audit-not-passed"))
+    #expect(contractRequirement.diagnosticCodes.contains("release-envelope-contract-audit-failed-contracts"))
+    #expect(contractRequirement.diagnosticCodes.contains("release-envelope-contract-audit-contract-failed"))
+    #expect(contractRequirement.diagnosticCodes.contains("release-envelope-contract-audit-contract-required-paths-missing"))
     #expect(envelope.diagnostics.contains {
         $0.code == "release-envelope-corpus-dashboard-not-passed"
     })
     #expect(envelope.diagnostics.contains {
-        $0.code == "release-envelope-migration-audit-not-passed"
+        $0.code == "release-envelope-contract-audit-not-passed"
     })
 }
 
@@ -430,7 +430,7 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
     )
     let dashboardURL = root.appending(path: "signoff-dashboard.json")
-    let migrationURL = root.appending(path: "migration-report.json")
+    let contractURL = root.appending(path: "contract-report.json")
     try Data("""
     {
       "schemaVersion": 1,
@@ -481,7 +481,7 @@ extension FlowRunLedgerSummaryTests {
       "failedContractCount": 0,
       "contracts": [
         {
-          "id": "xcircuite.run-manifest.v1",
+          "id": "xcircuite.run-manifest.v2",
           "owner": "XcircuitePackage",
           "status": "passed",
           "expectedVersion": 1,
@@ -491,7 +491,7 @@ extension FlowRunLedgerSummaryTests {
         }
       ]
     }
-    """.utf8).write(to: migrationURL, options: .atomic)
+    """.utf8).write(to: contractURL, options: .atomic)
 
     let json = try DesignFlowCLICommand.run(
         arguments: [
@@ -502,8 +502,8 @@ extension FlowRunLedgerSummaryTests {
             "run-1",
             "--signoff-dashboard",
             dashboardURL.path(percentEncoded: false),
-            "--migration-report",
-            migrationURL.path(percentEncoded: false),
+            "--contract-report",
+            contractURL.path(percentEncoded: false),
         ]
     )
     let data = try #require(json.data(using: .utf8))
@@ -511,11 +511,11 @@ extension FlowRunLedgerSummaryTests {
 
     #expect(result.artifacts.map(\.artifactID).contains("qualification-corpus-history"))
     #expect(result.artifacts.map(\.artifactID).contains("qualification-performance-envelope"))
-    #expect(result.artifacts.map(\.artifactID).contains("qualification-migration-audit"))
+    #expect(result.artifacts.map(\.artifactID).contains("qualification-contract-audit"))
     #expect(!result.corpusHistory.collectedAt.isEmpty)
     #expect(result.corpusHistory.previousEntryCount == 2)
     #expect(result.performanceEnvelope.domains.first?.durationRegressionRatio == 1.2)
-    #expect(result.migrationAudit.failedContractCount == 0)
+    #expect(result.contractAudit.failedContractCount == 0)
 
     _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
         runID: "run-1",
@@ -533,7 +533,7 @@ extension FlowRunLedgerSummaryTests {
         $0.requirementID == "performance-envelope" && $0.status == .passed
     })
     #expect(envelope.requirements.contains {
-        $0.requirementID == "migration-audit" && $0.status == .passed
+        $0.requirementID == "contract-audit" && $0.status == .passed
     })
     #expect(!envelope.diagnostics.contains {
         $0.code == "release-envelope-corpus-history-missing"
@@ -558,7 +558,7 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
     )
     let dashboardURL = root.appending(path: "signoff-dashboard.json")
-    let migrationURL = root.appending(path: "migration-report.json")
+    let contractURL = root.appending(path: "contract-report.json")
     try Data("""
     {
       "schemaVersion": 1,
@@ -577,18 +577,25 @@ extension FlowRunLedgerSummaryTests {
     try Data("""
     {
       "schemaVersion": 1,
+      "status": "passed",
       "contractCount": 1,
       "failedContractCount": 0,
-      "contracts": []
+      "contracts": [
+        {
+          "id": "xcircuite.run-manifest.v2",
+          "owner": "XcircuitePackage",
+          "status": "passed"
+        }
+      ]
     }
-    """.utf8).write(to: migrationURL, options: .atomic)
+    """.utf8).write(to: contractURL, options: .atomic)
 
     #expect(throws: FlowRunReleaseEvidenceCollectionError.self) {
         _ = try DefaultFlowRunReleaseEvidenceCollector().collectReleaseEvidence(
             runID: "run-1",
             projectRoot: root,
             signoffDashboardPath: dashboardURL,
-            migrationReportPath: migrationURL
+            contractReportPath: contractURL
         )
     }
 }
@@ -611,7 +618,7 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
     )
     let dashboardURL = root.appending(path: "signoff-dashboard.json")
-    let migrationURL = root.appending(path: "migration-report.json")
+    let contractURL = root.appending(path: "contract-report.json")
     try Data("""
     {
       "schemaVersion": 1,
@@ -668,13 +675,13 @@ extension FlowRunLedgerSummaryTests {
       "failedContractCount": 0,
       "contracts": []
     }
-    """.utf8).write(to: migrationURL, options: .atomic)
+    """.utf8).write(to: contractURL, options: .atomic)
 
     _ = try DefaultFlowRunReleaseEvidenceCollector().collectReleaseEvidence(
         runID: "run-1",
         projectRoot: root,
         signoffDashboardPath: dashboardURL,
-        migrationReportPath: migrationURL
+        contractReportPath: contractURL
     )
     _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
         runID: "run-1",
@@ -718,7 +725,7 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
     )
     let dashboardURL = root.appending(path: "signoff-dashboard.json")
-    let migrationURL = root.appending(path: "migration-report.json")
+    let contractURL = root.appending(path: "contract-report.json")
     try Data("""
     {
       "schemaVersion": 1,
@@ -742,14 +749,14 @@ extension FlowRunLedgerSummaryTests {
       "failedContractCount": 0,
       "contracts": []
     }
-    """.utf8).write(to: migrationURL, options: .atomic)
+    """.utf8).write(to: contractURL, options: .atomic)
 
     let oldDate = Date(timeIntervalSince1970: 0)
     _ = try DefaultFlowRunReleaseEvidenceCollector(currentDate: oldDate).collectReleaseEvidence(
         runID: "run-1",
         projectRoot: root,
         signoffDashboardPath: dashboardURL,
-        migrationReportPath: migrationURL
+        contractReportPath: contractURL
     )
     _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
         runID: "run-1",
@@ -923,7 +930,7 @@ extension FlowRunLedgerSummaryTests {
 	    let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
 	    let corpusPath = ".xcircuite/runs/run-1/qualification/corpus-history.json"
 	    let performancePath = ".xcircuite/runs/run-1/qualification/performance-envelope.json"
-	    let migrationPath = ".xcircuite/runs/run-1/qualification/migration-audit.json"
+	    let contractPath = ".xcircuite/runs/run-1/qualification/contract-audit.json"
 	    let collectedAt = ISO8601DateFormatter().string(from: Date())
 	    try await createBlockedApprovalRun(
 	        root: root,
@@ -948,8 +955,8 @@ extension FlowRunLedgerSummaryTests {
 	                format: .json
 	            ),
 	            XcircuiteFileReference(
-	                artifactID: "qualification-migration-audit",
-	                path: migrationPath,
+	                artifactID: "qualification-contract-audit",
+	                path: contractPath,
 	                kind: .report,
 	                format: .json
 	            ),
@@ -1002,7 +1009,7 @@ extension FlowRunLedgerSummaryTests {
 	              "diagnostics": []
 	            }
 	            """.utf8),
-	            migrationPath: Data("""
+	            contractPath: Data("""
 	            {
 	              "schemaVersion": 1,
 	              "runID": "run-1",
@@ -1012,7 +1019,7 @@ extension FlowRunLedgerSummaryTests {
 	              "failedContractCount": 0.5,
 	              "contracts": [
 	                {
-	                  "contractID": "xcircuite.run-manifest.v1",
+	                  "contractID": "xcircuite.run-manifest.v2",
 	                  "status": "passed",
 	                  "requiredPathCount": 9.5,
 	                  "failureCount": 0.5
@@ -1047,11 +1054,11 @@ extension FlowRunLedgerSummaryTests {
 	            && $0.diagnosticCodes.contains("release-envelope-performance-domain-failure-count-invalid")
 	    })
 	    #expect(envelope.requirements.contains {
-	        $0.requirementID == "migration-audit"
-	            && $0.diagnosticCodes.contains("release-envelope-migration-audit-contract-count-invalid")
-	            && $0.diagnosticCodes.contains("release-envelope-migration-audit-failed-contract-count-invalid")
-	            && $0.diagnosticCodes.contains("release-envelope-migration-audit-contract-required-path-count-invalid")
-	            && $0.diagnosticCodes.contains("release-envelope-migration-audit-contract-failure-count-invalid")
+	        $0.requirementID == "contract-audit"
+	            && $0.diagnosticCodes.contains("release-envelope-contract-audit-contract-count-invalid")
+	            && $0.diagnosticCodes.contains("release-envelope-contract-audit-failed-contract-count-invalid")
+	            && $0.diagnosticCodes.contains("release-envelope-contract-audit-contract-required-path-count-invalid")
+	            && $0.diagnosticCodes.contains("release-envelope-contract-audit-contract-failure-count-invalid")
 	    })
 	}
 

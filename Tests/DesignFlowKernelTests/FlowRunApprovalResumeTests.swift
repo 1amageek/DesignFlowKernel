@@ -567,16 +567,15 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-resume-cancelled")
     defer { removeTemporaryRoot(root) }
 
-    // Build a real blocked run, then flip the persisted manifest status
-    // to cancelled: cancellation is an explicit human stop and must stay
-    // final even though the ledger is otherwise resumable.
+    // Cancellation is an explicit human stop and must stay final even
+    // though a blocked run would otherwise be resumable.
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     let store = XcircuitePackageStore()
-    let manifestURL = root.appending(path: ".xcircuite/runs/run-1/manifest.json")
-    var manifest = try store.readJSON(XcircuiteRunManifest.self, from: manifestURL)
-    manifest.status = .cancelled
-    let data = try JSONEncoder().encode(manifest)
-    try data.write(to: manifestURL, options: .atomic)
+    _ = try store.transitionRun(
+        runID: "run-1",
+        transition: XcircuiteRunTransition(status: .cancelled),
+        inProjectAt: root
+    )
 
     await #expect(throws: FlowRunResumeError.self) {
         try await DefaultFlowRunResumer().resumeRun(

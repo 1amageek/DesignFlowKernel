@@ -2,6 +2,8 @@ import Foundation
 import XcircuitePackage
 
 public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
+    public static let currentSchemaVersion = 1
+
     public enum Readiness: String, Sendable, Hashable, Codable {
         case ready
         case needsReview
@@ -50,45 +52,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             self.statusRefCount = statusRefCount
         }
 
-        private enum CodingKeys: String, CodingKey {
-            case stageCount
-            case runArtifactCount
-            case stageArtifactCount
-            case retryArtifactCount
-            case reviewItemCount
-            case unresolvedReviewItemCount
-            case invalidArtifactCount
-            case artifactCoverageIssueCount
-            case domainCounts
-            case stageCategoryCounts
-            case handoffRefCount
-            case statusRefCount
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            stageCount = try container.decodeIfPresent(Int.self, forKey: .stageCount) ?? 0
-            runArtifactCount = try container.decodeIfPresent(Int.self, forKey: .runArtifactCount) ?? 0
-            stageArtifactCount = try container.decodeIfPresent(Int.self, forKey: .stageArtifactCount) ?? 0
-            retryArtifactCount = try container.decodeIfPresent(Int.self, forKey: .retryArtifactCount) ?? 0
-            reviewItemCount = try container.decodeIfPresent(Int.self, forKey: .reviewItemCount) ?? 0
-            unresolvedReviewItemCount = try container.decodeIfPresent(
-                Int.self,
-                forKey: .unresolvedReviewItemCount
-            ) ?? 0
-            invalidArtifactCount = try container.decodeIfPresent(Int.self, forKey: .invalidArtifactCount) ?? 0
-            artifactCoverageIssueCount = try container.decodeIfPresent(
-                Int.self,
-                forKey: .artifactCoverageIssueCount
-            ) ?? 0
-            domainCounts = try container.decodeIfPresent([String: Int].self, forKey: .domainCounts) ?? [:]
-            stageCategoryCounts = try container.decodeIfPresent(
-                [String: Int].self,
-                forKey: .stageCategoryCounts
-            )
-            handoffRefCount = try container.decodeIfPresent(Int.self, forKey: .handoffRefCount)
-            statusRefCount = try container.decodeIfPresent(Int.self, forKey: .statusRefCount)
-        }
     }
 
     public struct Artifact: Sendable, Hashable, Codable {
@@ -192,24 +155,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             self.diagnosticCodes = diagnosticCodes
         }
 
-        private enum CodingKeys: String, CodingKey {
-            case stageID
-            case attemptIndex
-            case status
-            case shouldRetry
-            case reason
-            case diagnosticCodes
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            stageID = try container.decode(String.self, forKey: .stageID)
-            attemptIndex = try container.decode(Int.self, forKey: .attemptIndex)
-            status = try container.decode(FlowStageStatus.self, forKey: .status)
-            shouldRetry = try container.decode(Bool.self, forKey: .shouldRetry)
-            reason = try container.decode(FlowStageRetryDecisionReason.self, forKey: .reason)
-            diagnosticCodes = try container.decodeIfPresent([String].self, forKey: .diagnosticCodes) ?? []
-        }
     }
 
     public struct RoleCoverage: Sendable, Hashable, Codable {
@@ -233,22 +178,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             self.artifactPaths = artifactPaths
         }
 
-        private enum CodingKeys: String, CodingKey {
-            case role
-            case artifactCount
-            case verifiedCount
-            case issueCount
-            case artifactPaths
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            role = try container.decode(String.self, forKey: .role)
-            artifactCount = try container.decodeIfPresent(Int.self, forKey: .artifactCount) ?? 0
-            verifiedCount = try container.decodeIfPresent(Int.self, forKey: .verifiedCount) ?? 0
-            issueCount = try container.decodeIfPresent(Int.self, forKey: .issueCount) ?? 0
-            artifactPaths = try container.decodeIfPresent([String].self, forKey: .artifactPaths) ?? []
-        }
     }
 
     public struct SignoffManifestCoverage: Sendable, Hashable, Codable {
@@ -275,30 +204,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             self.allRequiredArtifactsHaveHashesAndByteCounts = allRequiredArtifactsHaveHashesAndByteCounts
         }
 
-        private enum CodingKeys: String, CodingKey {
-            case requiredRoles
-            case satisfiedRoles
-            case missingRoles
-            case artifactPathsByRole
-            case unsignedArtifactPaths
-            case allRequiredArtifactsHaveHashesAndByteCounts
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            requiredRoles = try container.decodeIfPresent([String].self, forKey: .requiredRoles) ?? []
-            satisfiedRoles = try container.decodeIfPresent([String].self, forKey: .satisfiedRoles) ?? []
-            missingRoles = try container.decodeIfPresent([String].self, forKey: .missingRoles) ?? []
-            artifactPathsByRole = try container.decodeIfPresent(
-                [String: [String]].self,
-                forKey: .artifactPathsByRole
-            ) ?? [:]
-            unsignedArtifactPaths = try container.decodeIfPresent([String].self, forKey: .unsignedArtifactPaths) ?? []
-            allRequiredArtifactsHaveHashesAndByteCounts = try container.decodeIfPresent(
-                Bool.self,
-                forKey: .allRequiredArtifactsHaveHashesAndByteCounts
-            ) ?? false
-        }
     }
 
     public struct Stage: Sendable, Hashable, Codable {
@@ -361,51 +266,9 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             self.nextActions = nextActions
         }
 
-        private enum CodingKeys: String, CodingKey {
-            case index
-            case stageID
-            case status
-            case gates
-            case diagnosticCodes
-            case artifactCount
-            case attemptCount
-            case retryCount
-            case category
-            case statusRef
-            case domains
-            case roleCoverage
-            case artifacts
-            case handoffRefs
-            case retryRefs
-            case attempts
-            case reviewItems
-            case nextActions
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            index = try container.decodeIfPresent(Int.self, forKey: .index) ?? 0
-            stageID = try container.decode(String.self, forKey: .stageID)
-            status = try container.decode(FlowStageStatus.self, forKey: .status)
-            gates = try container.decodeIfPresent([FlowRunGateSummary].self, forKey: .gates) ?? []
-            diagnosticCodes = try container.decodeIfPresent([String].self, forKey: .diagnosticCodes) ?? []
-            artifacts = try container.decodeIfPresent([Artifact].self, forKey: .artifacts) ?? []
-            attempts = try container.decodeIfPresent([FlowStageAttemptRecord].self, forKey: .attempts) ?? []
-            roleCoverage = try container.decodeIfPresent([RoleCoverage].self, forKey: .roleCoverage) ?? []
-            artifactCount = try container.decodeIfPresent(Int.self, forKey: .artifactCount) ?? artifacts.count
-            attemptCount = try container.decodeIfPresent(Int.self, forKey: .attemptCount) ?? attempts.count
-            retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
-            category = try container.decodeIfPresent(String.self, forKey: .category)
-            statusRef = try container.decodeIfPresent(String.self, forKey: .statusRef)
-            domains = try container.decodeIfPresent([String].self, forKey: .domains) ?? []
-            handoffRefs = try container.decodeIfPresent([HandoffRef].self, forKey: .handoffRefs)
-            retryRefs = try container.decodeIfPresent([RetryRef].self, forKey: .retryRefs)
-            reviewItems = try container.decodeIfPresent([FlowRunReviewItem].self, forKey: .reviewItems) ?? []
-            nextActions = try container.decodeIfPresent([FlowRunNextAction].self, forKey: .nextActions) ?? []
-        }
     }
 
-    public var schemaVersion: Int
+    public let schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
     public var readiness: Readiness
@@ -419,7 +282,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
     public var signoffManifestCoverage: SignoffManifestCoverage?
 
     public init(
-        schemaVersion: Int = 1,
         runID: String,
         status: FlowRunStatus,
         readiness: Readiness,
@@ -432,7 +294,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         replayCommands: [FlowRunSuggestedCommand] = [],
         signoffManifestCoverage: SignoffManifestCoverage? = nil
     ) {
-        self.schemaVersion = schemaVersion
+        self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.status = status
         self.readiness = readiness
@@ -463,20 +325,24 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Expected stage artifact ladder schema version \(Self.currentSchemaVersion)."
+            )
+        }
         runID = try container.decode(String.self, forKey: .runID)
         status = try container.decode(FlowRunStatus.self, forKey: .status)
-        readiness = try container.decodeIfPresent(Readiness.self, forKey: .readiness) ?? .needsReview
-        runDirectoryPath = try container.decodeIfPresent(
-            String.self,
-            forKey: .runDirectoryPath
-        ) ?? "\(XcircuitePackage.directoryName)/runs/\(runID)"
+        readiness = try container.decode(Readiness.self, forKey: .readiness)
+        runDirectoryPath = try container.decode(String.self, forKey: .runDirectoryPath)
         summary = try container.decode(Summary.self, forKey: .summary)
-        runArtifacts = try container.decodeIfPresent([Artifact].self, forKey: .runArtifacts) ?? []
-        stages = try container.decodeIfPresent([Stage].self, forKey: .stages) ?? []
-        runReviewItems = try container.decodeIfPresent([FlowRunReviewItem].self, forKey: .runReviewItems) ?? []
-        nextActions = try container.decodeIfPresent([FlowRunNextAction].self, forKey: .nextActions) ?? []
-        replayCommands = try container.decodeIfPresent([FlowRunSuggestedCommand].self, forKey: .replayCommands) ?? []
+        runArtifacts = try container.decode([Artifact].self, forKey: .runArtifacts)
+        stages = try container.decode([Stage].self, forKey: .stages)
+        runReviewItems = try container.decode([FlowRunReviewItem].self, forKey: .runReviewItems)
+        nextActions = try container.decode([FlowRunNextAction].self, forKey: .nextActions)
+        replayCommands = try container.decode([FlowRunSuggestedCommand].self, forKey: .replayCommands)
         signoffManifestCoverage = try container.decodeIfPresent(
             SignoffManifestCoverage.self,
             forKey: .signoffManifestCoverage
