@@ -127,12 +127,33 @@ public struct DefaultFlowOrchestrator: Sendable {
                 return result
             }
 
+            if request.allowExistingRunDirectory,
+               !stage.requiresApproval,
+               let persisted = try reusableStageResult(
+                   for: stage,
+                   runDirectory: runDirectory
+               ) {
+                stageResults.append(persisted)
+                try progressStore.appendEvent(
+                    runID: request.runID,
+                    projectRoot: request.projectRoot,
+                    kind: progressKind(for: persisted.status),
+                    stageID: stage.stageID,
+                    stageStatus: persisted.status,
+                    runStatus: aggregateStatus(stageResults),
+                    message: "Stage \(stage.stageID) reused its persisted successful result during resume."
+                )
+                continue
+            }
+
             if stage.requiresApproval {
                 switch try persistedApprovalResolution(
                     for: stage,
                     request: request,
                     runDirectory: runDirectory,
-                    planReference: planReference
+                    planReference: planReference,
+                    executor: executorsByStageID[stage.stageID],
+                    context: context
                 ) {
                 case .none:
                     break
@@ -685,7 +706,9 @@ public struct DefaultFlowOrchestrator: Sendable {
         for stage: FlowStageDefinition,
         request: FlowOperationRequest,
         runDirectory: URL,
-        planReference: XcircuiteFileReference
+        planReference: XcircuiteFileReference,
+        executor: (any FlowStageExecutor)?,
+        context: FlowExecutionContext
     ) throws -> PersistedApprovalResolution {
         guard let record = try packageStore.loadApproval(
             runID: request.runID,
@@ -699,6 +722,33 @@ public struct DefaultFlowOrchestrator: Sendable {
         case .rejected:
             return .rejected(rejectedStageResult(stageID: stage.stageID, record: record))
         case .approved:
+            let resultURL = runDirectory
+                .appending(path: "stages")
+                .appending(path: stage.stageID)
+                .appending(path: "result.json")
+            let reviewedResult = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
+            if isApprovalApplied(to: reviewedResult) {
+                let approvalInputURL = approvalInputURL(
+                    stageID: stage.stageID,
+                    runDirectory: runDirectory
+                )
+                guard FileManager.default.fileExists(atPath: approvalInputURL.path(percentEncoded: false)) else {
+                    let diagnostic = FlowDiagnostic(
+                        severity: .error,
+                        code: "APPROVAL_REVIEW_INPUT_MISSING",
+                        message: "Approved stage \(stage.stageID) is missing the immutable reviewed result required for resume."
+                    )
+                    return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
+                }
+                if let diagnostic = approvalBindingDiagnostic(
+                    record: record,
+                    planReference: planReference,
+                    resultURL: approvalInputURL
+                ) {
+                    return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
+                }
+                return .approved(reviewedResult)
+            }
             if let diagnostic = approvalBindingDiagnostic(
                 record: record,
                 planReference: planReference,
@@ -706,11 +756,6 @@ public struct DefaultFlowOrchestrator: Sendable {
             ) {
                 return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
             }
-            let resultURL = runDirectory
-                .appending(path: "stages")
-                .appending(path: stage.stageID)
-                .appending(path: "result.json")
-            let reviewedResult = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
             guard reviewedResult.stageID == stage.stageID else {
                 let diagnostic = FlowDiagnostic(
                     severity: .error,
@@ -719,6 +764,58 @@ public struct DefaultFlowOrchestrator: Sendable {
                 )
                 return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
             }
+            if let validator = executor as? any FlowStageApprovalValidating {
+                do {
+                    let diagnostics = try validator.validateApproval(
+                        record,
+                        reviewedResult: reviewedResult,
+                        context: context
+                    )
+                    if !diagnostics.isEmpty {
+                        return .blocked(
+                            approvalValidationBlockedStageResult(
+                                stageID: stage.stageID,
+                                diagnostics: diagnostics
+                            )
+                        )
+                    }
+                } catch {
+                    let diagnostic = FlowDiagnostic(
+                        severity: .error,
+                        code: "APPROVAL_DOMAIN_VALIDATION_ERROR",
+                        message: "Approval domain validation failed: \(error.localizedDescription). Re-approval is required."
+                    )
+                    return .blocked(
+                        approvalValidationBlockedStageResult(
+                            stageID: stage.stageID,
+                            diagnostics: [diagnostic]
+                        )
+                    )
+                }
+            }
+            let approvalInputURL = approvalInputURL(
+                stageID: stage.stageID,
+                runDirectory: runDirectory
+            )
+            try packageStore.writeJSON(
+                reviewedResult,
+                to: approvalInputURL,
+                forProjectAt: request.projectRoot
+            )
+            let relativeApprovalInputPath = "\(XcircuitePackage.directoryName)/runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
+            let approvalInputReference = try packageStore.fileReference(
+                forProjectRelativePath: relativeApprovalInputPath,
+                artifactID: "approval-review-\(stage.stageID.replacingOccurrences(of: ".", with: "-"))",
+                kind: .report,
+                format: .json,
+                inProjectAt: request.projectRoot,
+                producedByRunID: request.runID
+            )
+            try packageStore.upsertRunArtifact(
+                approvalInputReference,
+                runID: request.runID,
+                inProjectAt: request.projectRoot
+            )
             return .approved(approvedStageResult(from: reviewedResult, record: record))
         }
     }
@@ -727,6 +824,22 @@ public struct DefaultFlowOrchestrator: Sendable {
         record: XcircuiteApprovalRecord,
         planReference: XcircuiteFileReference,
         runDirectory: URL
+    ) -> FlowDiagnostic? {
+        let resultURL = runDirectory
+            .appending(path: "stages")
+            .appending(path: record.stageID)
+            .appending(path: "result.json")
+        return approvalBindingDiagnostic(
+            record: record,
+            planReference: planReference,
+            resultURL: resultURL
+        )
+    }
+
+    private func approvalBindingDiagnostic(
+        record: XcircuiteApprovalRecord,
+        planReference: XcircuiteFileReference,
+        resultURL: URL
     ) -> FlowDiagnostic? {
         guard let planSHA256 = record.planSHA256,
               let planByteCount = record.planByteCount,
@@ -747,10 +860,6 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
         }
 
-        let resultURL = runDirectory
-            .appending(path: "stages")
-            .appending(path: record.stageID)
-            .appending(path: "result.json")
         guard FileManager.default.fileExists(atPath: resultURL.path(percentEncoded: false)) else {
             return FlowDiagnostic(
                 severity: .error,
@@ -778,6 +887,23 @@ public struct DefaultFlowOrchestrator: Sendable {
                 message: "Approval for \(record.stageID) could not verify the reviewed stage result: \(error.localizedDescription)"
             )
         }
+    }
+
+    private func approvalInputURL(
+        stageID: String,
+        runDirectory: URL
+    ) -> URL {
+        runDirectory
+            .appending(path: "stages")
+            .appending(path: stageID)
+            .appending(path: "approval-input.json")
+    }
+
+    private func isApprovalApplied(to result: FlowStageResult) -> Bool {
+        result.status == .succeeded
+            && result.gates.contains {
+                $0.gateID == "approval" && $0.status == .passed
+            }
     }
 
     private func approvalBindingDiagnostic(
@@ -851,6 +977,24 @@ public struct DefaultFlowOrchestrator: Sendable {
                     gateID: "approval",
                     status: .incomplete,
                     diagnostics: [diagnostic]
+                ),
+            ]
+        )
+    }
+
+    private func approvalValidationBlockedStageResult(
+        stageID: String,
+        diagnostics: [FlowDiagnostic]
+    ) -> FlowStageResult {
+        FlowStageResult(
+            stageID: stageID,
+            status: .blocked,
+            diagnostics: diagnostics,
+            gates: [
+                FlowGateResult(
+                    gateID: "approval",
+                    status: .incomplete,
+                    diagnostics: diagnostics
                 ),
             ]
         )
@@ -1193,6 +1337,24 @@ public struct DefaultFlowOrchestrator: Sendable {
             to: stageDirectory.appending(path: "result.json"),
             forProjectAt: projectRoot
         )
+    }
+
+    private func reusableStageResult(
+        for stage: FlowStageDefinition,
+        runDirectory: URL
+    ) throws -> FlowStageResult? {
+        let resultURL = runDirectory
+            .appending(path: "stages")
+            .appending(path: stage.stageID)
+            .appending(path: "result.json")
+        guard FileManager.default.fileExists(atPath: resultURL.path(percentEncoded: false)) else {
+            return nil
+        }
+        let result = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
+        guard result.stageID == stage.stageID, result.status == .succeeded else {
+            return nil
+        }
+        return result
     }
 
     private func blockedStageResult(

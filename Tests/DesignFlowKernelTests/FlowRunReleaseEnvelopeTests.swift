@@ -84,14 +84,51 @@ extension FlowRunLedgerSummaryTests {
 @Test func buildReleaseEnvelopeCLIEmitsVerifiedReleaseEvidenceJSON() async throws {
     let root = try makeTemporaryRoot("agent-release-envelope-cli")
     defer { removeTemporaryRoot(root) }
-    let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
+    let summaryPath = ".xcircuite/runs/run-1/stages/release.qualification/raw/drc-summary.json"
     let corpusPath = ".xcircuite/runs/run-1/qualification/corpus-history.json"
     let performancePath = ".xcircuite/runs/run-1/qualification/performance-envelope.json"
     let contractPath = ".xcircuite/runs/run-1/qualification/contract-audit.json"
+    let releaseQualificationPath = ".xcircuite/runs/run-1/stages/release.qualification/raw/result.json"
+    let retentionIndexPath = ".xcircuite/runs/run-1/qualification/retention-index.json"
+    let dashboardSourcePath = "retention/dashboard.json"
+    let historySourcePath = "retention/history.jsonl"
     let collectedAt = ISO8601DateFormatter().string(from: Date())
+    try FileManager.default.createDirectory(at: root.appending(path: "retention"), withIntermediateDirectories: true)
+    try Data(#"{"runID":"run-1"}"#.utf8).write(
+        to: root.appending(path: dashboardSourcePath),
+        options: .atomic
+    )
+    var historyEntry = FlowRunReleaseHistoryEntry(
+        sequence: 1,
+        entryID: "entry-1",
+        runID: "run-1",
+        recordedAt: collectedAt,
+        qualificationDigest: String(repeating: "c", count: 64),
+        previousEntrySHA256: nil,
+        entrySHA256: String(repeating: "0", count: 64)
+    )
+    historyEntry.entrySHA256 = try historyEntry.computedSHA256()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    var historyData = try encoder.encode(historyEntry)
+    historyData.append(Data("\n".utf8))
+    try historyData.write(to: root.appending(path: historySourcePath), options: .atomic)
+    let retentionIndex = try DefaultFlowRunReleaseRetentionIndexBuilder().build(
+        runID: "run-1",
+        workflowRunID: "workflow-run-1",
+        projectRoot: root,
+        sourceDashboardPath: dashboardSourcePath,
+        historyPath: historySourcePath,
+        previousEntryCount: 0,
+        retentionDays: 30,
+        minimumRetentionDays: 30,
+        recordedAt: Date()
+    )
+    let retentionIndexData = try encoder.encode(retentionIndex)
     try await createBlockedApprovalRun(
         root: root,
         runID: "run-1",
+        stageID: "release.qualification",
         artifacts: [
             XcircuiteFileReference(
                 artifactID: "drc-summary",
@@ -114,6 +151,18 @@ extension FlowRunLedgerSummaryTests {
             XcircuiteFileReference(
                 artifactID: "qualification-contract-audit",
                 path: contractPath,
+                kind: .report,
+                format: .json
+            ),
+            XcircuiteFileReference(
+                artifactID: "release-qualification-result",
+                path: releaseQualificationPath,
+                kind: .report,
+                format: .json
+            ),
+            XcircuiteFileReference(
+                artifactID: "qualification-retention-index",
+                path: retentionIndexPath,
                 kind: .report,
                 format: .json
             ),
@@ -200,6 +249,52 @@ extension FlowRunLedgerSummaryTests {
               "diagnostics": []
             }
             """.utf8),
+            releaseQualificationPath: Data("""
+            {
+              "schemaVersion": 1,
+              "runID": "run-1",
+              "status": "completed",
+              "diagnostics": [],
+              "metadata": {
+                "completedAt": "\(collectedAt)"
+              },
+              "payload": {
+                "schemaVersion": 1,
+                "qualified": true,
+                "processProfileID": "sky130",
+                "qualificationLevel": "oracleChecked",
+                "qualificationScope": {
+                  "implementationID": "native-drc",
+                  "binaryDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "algorithmVersion": "native-drc-v1",
+                  "processProfileID": "sky130",
+                  "deckDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                },
+                "qualificationDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "promotionStatus": "oracleChecked",
+                "promotionFailureCodes": [],
+                "laneResults": [
+                  {
+                    "laneID": "drc:external-oracle",
+                    "domain": "drc",
+                    "kind": "externalOracle",
+                    "status": "passed",
+                    "qualified": true,
+                    "caseCount": 3,
+                    "coverageTagCount": 4,
+                    "coveredRequiredCoverageTagCount": 4,
+                    "passRate": 1.0,
+                    "oracleAgreementRate": 1.0,
+                    "durationBudgetPassRate": 1.0,
+                    "failureCodes": []
+                  }
+                ],
+                "blockedLanes": [],
+                "failedLanes": []
+              }
+            }
+            """.utf8),
+            retentionIndexPath: retentionIndexData,
         ]
     )
     _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
@@ -218,7 +313,6 @@ extension FlowRunLedgerSummaryTests {
     )
     let data = try #require(json.data(using: .utf8))
     let result = try JSONDecoder().decode(FlowRunReleaseEnvelopeBuildResult.self, from: data)
-
     #expect(result.envelope.runID == "run-1")
     #expect(result.envelope.status == .needsReview)
     #expect(result.envelope.requirements.contains {
@@ -233,6 +327,16 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(result.envelope.requirements.contains {
         $0.requirementID == "contract-audit"
+            && $0.status == .passed
+            && $0.artifactIntegrity.first?.status == .verified
+    })
+    #expect(result.envelope.requirements.contains {
+        $0.requirementID == "release-qualification"
+            && $0.status == .passed
+            && $0.artifactIntegrity.first?.status == .verified
+    })
+    #expect(result.envelope.requirements.contains {
+        $0.requirementID == "retention-index"
             && $0.status == .passed
             && $0.artifactIntegrity.first?.status == .verified
     })

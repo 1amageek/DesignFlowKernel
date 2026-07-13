@@ -17,6 +17,10 @@ public enum DesignFlowCLICommand {
             return try collectReleaseEvidence(arguments: Array(arguments.dropFirst()))
         case "build-release-envelope":
             return try buildReleaseEnvelope(arguments: Array(arguments.dropFirst()))
+        case "build-retention-index":
+            return try buildRetentionIndex(arguments: Array(arguments.dropFirst()))
+        case "validate-retention-index":
+            return try validateRetentionIndex(arguments: Array(arguments.dropFirst()))
         case "approve-gate":
             return try approveGate(arguments: Array(arguments.dropFirst()))
         case "request-cancel":
@@ -75,6 +79,10 @@ public enum DesignFlowCLICommand {
             return decisionPacketValidationExitCode(output: output)
         case "build-release-envelope":
             return releaseEnvelopeExitCode(output: output)
+        case "build-retention-index":
+            return retentionIndexBuildExitCode(output: output)
+        case "validate-retention-index":
+            return retentionIndexValidationExitCode(output: output)
         case "evaluate-run-guard":
             return runGuardExitCode(output: output)
         case "compare-artifacts":
@@ -124,6 +132,32 @@ public enum DesignFlowCLICommand {
         case .needsReview, .blocked:
             return 2
         }
+    }
+
+    private static func retentionIndexBuildExitCode(output: String) -> Int {
+        guard let data = output.data(using: .utf8) else {
+            return 1
+        }
+        let result: FlowRunReleaseRetentionIndexBuildResult
+        do {
+            result = try JSONDecoder().decode(FlowRunReleaseRetentionIndexBuildResult.self, from: data)
+        } catch {
+            return 1
+        }
+        return result.index.status == .passed ? 0 : 2
+    }
+
+    private static func retentionIndexValidationExitCode(output: String) -> Int {
+        guard let data = output.data(using: .utf8) else {
+            return 1
+        }
+        let result: FlowRunReleaseRetentionValidationResult
+        do {
+            result = try JSONDecoder().decode(FlowRunReleaseRetentionValidationResult.self, from: data)
+        } catch {
+            return 1
+        }
+        return result.status == .passed ? 0 : 2
     }
 
     private static func runGuardExitCode(output: String) -> Int {
@@ -473,6 +507,157 @@ public enum DesignFlowCLICommand {
         return try encode(result, pretty: pretty)
     }
 
+    private static func buildRetentionIndex(arguments: [String]) throws -> String {
+        var parser = DesignFlowCLIArgumentParser(arguments: arguments)
+        var projectRoot: URL?
+        var runID: String?
+        var workflowRunID: String?
+        var sourceDashboardPath: String?
+        var historyPath: String?
+        var previousEntryCount: Int?
+        var retentionDays: Int?
+        var minimumRetentionDays: Int?
+        var recordedAt: Date = Date()
+        var pretty = false
+
+        while let argument = parser.next() {
+            switch argument {
+            case "--project-root":
+                projectRoot = URL(filePath: try parser.requiredValue(after: argument))
+            case "--run-id":
+                runID = try parser.requiredValue(after: argument)
+            case "--workflow-run-id":
+                workflowRunID = try parser.requiredValue(after: argument)
+            case "--source-dashboard":
+                sourceDashboardPath = try parser.requiredValue(after: argument)
+            case "--history":
+                historyPath = try parser.requiredValue(after: argument)
+            case "--previous-entry-count":
+                previousEntryCount = try parseInt(try parser.requiredValue(after: argument), option: argument)
+            case "--retention-days":
+                retentionDays = try parseInt(try parser.requiredValue(after: argument), option: argument)
+            case "--minimum-retention-days":
+                minimumRetentionDays = try parseInt(try parser.requiredValue(after: argument), option: argument)
+            case "--recorded-at":
+                recordedAt = try parseISO8601Date(try parser.requiredValue(after: argument), option: argument)
+            case "--pretty":
+                pretty = true
+            case "--help", "-h":
+                return buildRetentionIndexHelpText
+            default:
+                throw DesignFlowCLIError.unknownOption(argument)
+            }
+        }
+
+        guard let projectRoot else {
+            throw DesignFlowCLIError.missingOption("--project-root")
+        }
+        guard let runID else {
+            throw DesignFlowCLIError.missingOption("--run-id")
+        }
+        guard let workflowRunID else {
+            throw DesignFlowCLIError.missingOption("--workflow-run-id")
+        }
+        guard let sourceDashboardPath else {
+            throw DesignFlowCLIError.missingOption("--source-dashboard")
+        }
+        guard let historyPath else {
+            throw DesignFlowCLIError.missingOption("--history")
+        }
+        guard let previousEntryCount else {
+            throw DesignFlowCLIError.missingOption("--previous-entry-count")
+        }
+        guard let retentionDays else {
+            throw DesignFlowCLIError.missingOption("--retention-days")
+        }
+        guard let minimumRetentionDays else {
+            throw DesignFlowCLIError.missingOption("--minimum-retention-days")
+        }
+
+        let packageStore = XcircuitePackageStore()
+        try packageStore.ensureRunDirectory(
+            for: runID,
+            inProjectAt: projectRoot
+        )
+        let index = try DefaultFlowRunReleaseRetentionIndexBuilder(packageStore: packageStore).build(
+            runID: runID,
+            workflowRunID: workflowRunID,
+            projectRoot: projectRoot,
+            sourceDashboardPath: sourceDashboardPath,
+            historyPath: historyPath,
+            previousEntryCount: previousEntryCount,
+            retentionDays: retentionDays,
+            minimumRetentionDays: minimumRetentionDays,
+            recordedAt: recordedAt
+        )
+        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let qualificationDirectory = runDirectory.appending(path: "qualification")
+        try packageStore.ensureDirectory(at: qualificationDirectory)
+        let indexURL = qualificationDirectory.appending(path: "retention-index.json")
+        try packageStore.writeJSON(index, to: indexURL, forProjectAt: projectRoot)
+        let relativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json"
+        let reference = try packageStore.fileReference(
+            forProjectRelativePath: relativePath,
+            artifactID: "qualification-retention-index",
+            kind: .release,
+            format: .json,
+            inProjectAt: projectRoot,
+            producedByRunID: runID
+        )
+        try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        return try encode(
+            FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: reference),
+            pretty: pretty
+        )
+    }
+
+    private static func validateRetentionIndex(arguments: [String]) throws -> String {
+        var parser = DesignFlowCLIArgumentParser(arguments: arguments)
+        var projectRoot: URL?
+        var runID: String?
+        var maxEvidenceAgeDays: Int?
+        var pretty = false
+
+        while let argument = parser.next() {
+            switch argument {
+            case "--project-root":
+                projectRoot = URL(filePath: try parser.requiredValue(after: argument))
+            case "--run-id":
+                runID = try parser.requiredValue(after: argument)
+            case "--max-evidence-age-days":
+                maxEvidenceAgeDays = try parseInt(try parser.requiredValue(after: argument), option: argument)
+            case "--pretty":
+                pretty = true
+            case "--help", "-h":
+                return validateRetentionIndexHelpText
+            default:
+                throw DesignFlowCLIError.unknownOption(argument)
+            }
+        }
+
+        guard let projectRoot else {
+            throw DesignFlowCLIError.missingOption("--project-root")
+        }
+        guard let runID else {
+            throw DesignFlowCLIError.missingOption("--run-id")
+        }
+
+        let packageStore = XcircuitePackageStore()
+        let indexURL = try packageStore.url(
+            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json",
+            inProjectAt: projectRoot
+        )
+        let index = try packageStore.readJSON(FlowRunReleaseRetentionIndex.self, from: indexURL)
+        let result = try DefaultFlowRunReleaseRetentionIndexValidator(packageStore: packageStore).validate(
+            index: index,
+            runID: runID,
+            projectRoot: projectRoot,
+            currentDate: Date(),
+            maximumAgeSeconds: maxEvidenceAgeDays.map { TimeInterval($0) * 86_400 }
+        )
+        return try encode(result, pretty: pretty)
+    }
+
     private static func progressRunSnapshot(arguments: [String]) throws -> String {
         if arguments.contains("--help") || arguments.contains("-h") {
             return progressRunHelpText
@@ -611,6 +796,23 @@ public enum DesignFlowCLICommand {
             )
         }
         return parsed
+    }
+
+    private static func parseISO8601Date(_ value: String, option: String) throws -> Date {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        throw DesignFlowCLIError.invalidValue(
+            option: option,
+            value: value,
+            expected: "ISO 8601 timestamp"
+        )
     }
 
     private static func parseLoopOptions(arguments: [String]) throws -> LoopCommandOptions {
@@ -934,6 +1136,8 @@ public enum DesignFlowCLICommand {
           design-flow validate-decision-packet --project-root <path> --run-id <id> [--pretty]
           design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --contract-report <path> [--pretty]
           design-flow build-release-envelope --project-root <path> --run-id <id> [--max-evidence-age-days <days>] [--pretty]
+          design-flow build-retention-index --project-root <path> --run-id <id> --workflow-run-id <id> --source-dashboard <path> --history <path> --previous-entry-count <n> --retention-days <n> --minimum-retention-days <n> [--recorded-at <iso8601>] [--pretty]
+          design-flow validate-retention-index --project-root <path> --run-id <id> [--max-evidence-age-days <days>] [--pretty]
           design-flow progress-run --project-root <path> --run-id <id> [--since-sequence <n>] [--wait|--follow] [--timeout-milliseconds <n>] [--poll-interval-milliseconds <n>] [--pretty]
           design-flow --help
         """
@@ -1026,6 +1230,24 @@ public enum DesignFlowCLICommand {
           design-flow collect-release-evidence --project-root <path> --run-id <id> --signoff-dashboard <path> --contract-report <path> [--pretty]
 
         Writes qualification/corpus-history.json, qualification/performance-envelope.json, and qualification/contract-audit.json from retained qualification reports.
+        """
+    }
+
+    public static var buildRetentionIndexHelpText: String {
+        """
+        Usage:
+          design-flow build-retention-index --project-root <path> --run-id <id> --workflow-run-id <id> --source-dashboard <path> --history <path> --previous-entry-count <n> --retention-days <n> --minimum-retention-days <n> [--recorded-at <iso8601>] [--pretty]
+
+        Validates the append-only qualification history, writes qualification/retention-index.json, registers the release artifact, and emits a FlowRunReleaseRetentionIndexBuildResult JSON document.
+        """
+    }
+
+    public static var validateRetentionIndexHelpText: String {
+        """
+        Usage:
+          design-flow validate-retention-index --project-root <path> --run-id <id> [--max-evidence-age-days <days>] [--pretty]
+
+        Validates the persisted qualification/retention-index.json and emits a FlowRunReleaseRetentionValidationResult JSON document.
         """
     }
 

@@ -127,6 +127,34 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             ),
+            retainedArtifactRequirement(
+                requirementID: "release-qualification",
+                title: "Release qualification result",
+                artifactID: "release-qualification-result",
+                relativePath: "stages/release.qualification/raw/result.json",
+                purpose: "Prove that retained corpus, oracle correlation, process scope, and promotion gates passed for this run.",
+                missingDiagnosticCode: "release-envelope-release-qualification-missing",
+                ageDiagnosticPrefix: "release-envelope-release-qualification",
+                timestampPath: ["metadata", "completedAt"],
+                runID: runID,
+                projectRoot: projectRoot,
+                manifest: manifest,
+                maxEvidenceAgeDays: maxEvidenceAgeDays
+            ),
+            retainedArtifactRequirement(
+                requirementID: "retention-index",
+                title: "Retention index",
+                artifactID: "qualification-retention-index",
+                relativePath: "qualification/retention-index.json",
+                purpose: "Prove immutable, append-only CI history and the minimum retention window.",
+                missingDiagnosticCode: "release-envelope-retention-index-missing",
+                ageDiagnosticPrefix: "release-envelope-retention-index",
+                timestampPath: ["recordedAt"],
+                runID: runID,
+                projectRoot: projectRoot,
+                manifest: manifest,
+                maxEvidenceAgeDays: maxEvidenceAgeDays
+            ),
         ]
     }
 
@@ -154,6 +182,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         purpose: String,
         missingDiagnosticCode: String,
         ageDiagnosticPrefix: String,
+        timestampPath: [String] = ["collectedAt"],
         runID: String,
         projectRoot: URL,
         manifest: XcircuiteRunManifest?,
@@ -209,7 +238,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             reference: reference,
             projectRoot: projectRoot,
             maxEvidenceAgeDays: maxEvidenceAgeDays,
-            diagnosticPrefix: ageDiagnosticPrefix
+            diagnosticPrefix: ageDiagnosticPrefix,
+            timestampPath: timestampPath
         ) {
             return FlowRunReleaseEnvelope.Requirement(
                 requirementID: requirementID,
@@ -226,7 +256,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         let contentDiagnosticCodes = releaseArtifactContentDiagnosticCodes(
             artifactID: artifactID,
             reference: reference,
-            projectRoot: projectRoot
+            projectRoot: projectRoot,
+            runID: runID
         )
         if !contentDiagnosticCodes.isEmpty {
             return FlowRunReleaseEnvelope.Requirement(
@@ -256,7 +287,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func releaseArtifactContentDiagnosticCodes(
         artifactID: String,
         reference: XcircuiteFileReference,
-        projectRoot: URL
+        projectRoot: URL,
+        runID: String
     ) -> [String] {
         switch artifactID {
         case "qualification-corpus-history":
@@ -265,6 +297,10 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             performanceEnvelopeDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         case "qualification-contract-audit":
             contractAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+        case "release-qualification-result":
+            releaseQualificationDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID)
+        case "qualification-retention-index":
+            retentionIndexDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID, maxEvidenceAgeDays: nil)
         default:
             []
         }
@@ -551,11 +587,135 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         return codes.sorted()
     }
 
+    private func releaseQualificationDiagnosticCodes(
+        reference: XcircuiteFileReference,
+        projectRoot: URL,
+        runID: String
+    ) -> [String] {
+        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
+            return ["release-envelope-release-qualification-path-invalid"]
+        }
+        let artifactValue: XcircuiteJSONValue
+        do {
+            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+        } catch {
+            return ["release-envelope-release-qualification-unreadable"]
+        }
+
+        var codes = Set<String>()
+        if let observedRunID = stringValue(value(at: ["runID"], in: artifactValue)), !runID.isEmpty,
+           observedRunID != runID {
+            codes.insert("release-envelope-release-qualification-run-id-mismatch")
+        } else if stringValue(value(at: ["runID"], in: artifactValue)) == nil {
+            codes.insert("release-envelope-release-qualification-run-id-missing")
+        }
+        if stringValue(value(at: ["status"], in: artifactValue)) != "completed" {
+            codes.insert("release-envelope-release-qualification-not-completed")
+        }
+
+        guard let payload = objectValue(value(at: ["payload"], in: artifactValue)) else {
+            codes.insert("release-envelope-release-qualification-payload-missing")
+            return codes.sorted()
+        }
+        if boolValue(payload["qualified"]) != true {
+            codes.insert("release-envelope-release-qualification-not-qualified")
+        }
+        if let promotionStatus = stringValue(payload["promotionStatus"]) {
+            if promotionStatus == "blocked" {
+                codes.insert("release-envelope-release-qualification-promotion-blocked")
+            }
+        } else {
+            codes.insert("release-envelope-release-qualification-promotion-status-missing")
+        }
+        if let digest = stringValue(payload["qualificationDigest"]), digest.isEmpty {
+            codes.insert("release-envelope-release-qualification-digest-missing")
+        } else if stringValue(payload["qualificationDigest"]) == nil {
+            codes.insert("release-envelope-release-qualification-digest-missing")
+        }
+        if let promotionFailures = arrayValue(payload["promotionFailureCodes"]), !promotionFailures.isEmpty {
+            codes.insert("release-envelope-release-qualification-promotion-failures")
+        }
+        if let blockedLanes = arrayValue(payload["blockedLanes"]), !blockedLanes.isEmpty {
+            codes.insert("release-envelope-release-qualification-blocked-lanes")
+        }
+        if let failedLanes = arrayValue(payload["failedLanes"]), !failedLanes.isEmpty {
+            codes.insert("release-envelope-release-qualification-failed-lanes")
+        }
+        if objectValue(payload["qualificationScope"]) == nil {
+            codes.insert("release-envelope-release-qualification-scope-missing")
+        } else if let scope = objectValue(payload["qualificationScope"]),
+                  ["implementationID", "binaryDigest", "algorithmVersion", "processProfileID", "deckDigest"].contains(where: {
+                      stringValue(scope[$0])?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+                  }) {
+            codes.insert("release-envelope-release-qualification-scope-incomplete")
+        }
+        guard let lanes = arrayValue(payload["laneResults"]), !lanes.isEmpty else {
+            codes.insert("release-envelope-release-qualification-lanes-missing")
+            return codes.sorted()
+        }
+        for laneValue in lanes {
+            guard let lane = objectValue(laneValue) else {
+                codes.insert("release-envelope-release-qualification-lane-unreadable")
+                continue
+            }
+            if stringValue(lane["status"]) != "passed" {
+                codes.insert("release-envelope-release-qualification-lane-failed")
+            }
+            if boolValue(lane["qualified"]) != true {
+                codes.insert("release-envelope-release-qualification-lane-unqualified")
+            }
+            if let failures = arrayValue(lane["failureCodes"]), !failures.isEmpty {
+                codes.insert("release-envelope-release-qualification-lane-failures")
+            }
+        }
+        if let diagnostics = arrayValue(value(at: ["diagnostics"], in: artifactValue)) {
+            for diagnosticValue in diagnostics {
+                guard let diagnostic = objectValue(diagnosticValue) else {
+                    codes.insert("release-envelope-release-qualification-diagnostic-unreadable")
+                    continue
+                }
+                if stringValue(diagnostic["severity"]) == "error" {
+                    codes.insert("release-envelope-release-qualification-diagnostics-present")
+                }
+            }
+        }
+        return codes.sorted()
+    }
+
+    private func retentionIndexDiagnosticCodes(
+        reference: XcircuiteFileReference,
+        projectRoot: URL,
+        runID: String,
+        maxEvidenceAgeDays: Int?
+    ) -> [String] {
+        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
+            return ["release-envelope-retention-index-path-invalid"]
+        }
+        do {
+            let index = try packageStore.readJSON(
+                FlowRunReleaseRetentionIndex.self,
+                from: artifactURL
+            )
+            let maximumAgeSeconds = maxEvidenceAgeDays.map { Double($0) * 24 * 60 * 60 }
+            let validation = try DefaultFlowRunReleaseRetentionIndexValidator().validate(
+                index: index,
+                runID: runID,
+                projectRoot: projectRoot,
+                currentDate: currentDate,
+                maximumAgeSeconds: maximumAgeSeconds
+            )
+            return validation.diagnostics.map(\.code).sorted()
+        } catch {
+            return ["release-envelope-retention-index-unreadable"]
+        }
+    }
+
     private func evidenceAgeDiagnosticCode(
         reference: XcircuiteFileReference,
         projectRoot: URL,
         maxEvidenceAgeDays: Int?,
-        diagnosticPrefix: String
+        diagnosticPrefix: String,
+        timestampPath: [String] = ["collectedAt"]
     ) -> String? {
         guard let maxEvidenceAgeDays else {
             return nil
@@ -572,10 +732,10 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         } catch {
             return "\(diagnosticPrefix)-collected-at-unreadable"
         }
-        guard let collectedAt = stringValue(value(at: ["collectedAt"], in: artifactValue)) else {
+        guard let collectedAt = stringValue(value(at: timestampPath, in: artifactValue)) else {
             return "\(diagnosticPrefix)-collected-at-missing"
         }
-        guard let collectedDate = ISO8601DateFormatter().date(from: collectedAt) else {
+        guard let collectedDate = parseISO8601Date(collectedAt) else {
             return "\(diagnosticPrefix)-collected-at-invalid"
         }
         let age = currentDate.timeIntervalSince(collectedDate)
@@ -587,6 +747,16 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             return "\(diagnosticPrefix)-stale"
         }
         return nil
+    }
+
+    private func parseISO8601Date(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: value) {
+            return date
+        }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private func releaseDiagnostics(
@@ -741,6 +911,13 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             return nil
         }
         return string
+    }
+
+    private func objectValue(_ value: XcircuiteJSONValue?) -> [String: XcircuiteJSONValue]? {
+        guard case .object(let object) = value else {
+            return nil
+        }
+        return object
     }
 
     private func numberValue(_ value: XcircuiteJSONValue?) -> Double? {

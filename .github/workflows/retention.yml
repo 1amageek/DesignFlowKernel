@@ -1,0 +1,81 @@
+name: DesignFlow retention CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retention-contract:
+    runs-on: macos-26
+    steps:
+      - name: Check out DesignFlowKernel
+        uses: actions/checkout@v4
+
+      - name: Check out package dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main https://github.com/1amageek/XcircuitePackage.git ../XcircuitePackage
+          git clone --depth 1 --branch main https://github.com/1amageek/ToolQualification.git ../ToolQualification
+
+      - name: Build the design-flow CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -e 'alarm shift; exec @ARGV' 240 swift build -c release --product design-flow
+
+      - name: Run retention regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -e 'alarm shift; exec @ARGV' 240 swift test --filter FlowRunReleaseRetentionIndexTests
+
+      - name: Build and validate a retained history through the CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_root="${RUNNER_TEMP}/design-flow-retention-${GITHUB_RUN_ID}"
+          run_id="retention-ci-${GITHUB_RUN_ID}"
+          mkdir -p "$project_root"
+          python3 Fixtures/Retention/generate-retention-fixture.py "$project_root" "$run_id"
+          bin_path="$(swift build -c release --product design-flow --show-bin-path)"
+          "$bin_path/design-flow" build-retention-index \
+            --project-root "$project_root" \
+            --run-id "$run_id" \
+            --workflow-run-id "$GITHUB_RUN_ID" \
+            --source-dashboard ".xcircuite/runs/${run_id}/retention/dashboard.json" \
+            --history ".xcircuite/runs/${run_id}/retention/history.jsonl" \
+            --previous-entry-count 0 \
+            --retention-days 90 \
+            --minimum-retention-days 30 \
+            --pretty > "$project_root/build-result.json"
+          "$bin_path/design-flow" validate-retention-index \
+            --project-root "$project_root" \
+            --run-id "$run_id" \
+            --max-evidence-age-days 1 \
+            --pretty > "$project_root/validation-result.json"
+          python3 - "$project_root" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          build = json.loads((root / "build-result.json").read_text())
+          validation = json.loads((root / "validation-result.json").read_text())
+          assert build["index"]["status"] == "passed"
+          assert validation["status"] == "passed"
+          assert (root / ".xcircuite" / "runs" / build["index"]["runID"] / "qualification" / "retention-index.json").exists()
+          PY
+
+      - name: Upload retention run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: design-flow-retention-${{ github.run_id }}
+          path: ${{ runner.temp }}/design-flow-retention-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 90

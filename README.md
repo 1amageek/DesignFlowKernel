@@ -76,6 +76,36 @@ Resume is re-running the same runID: `approvals/` survives run directory re-crea
 so recording a decision and re-running moves past the gate. The review cockpit and
 the agent both operate on this one ledger — block → decide → resume.
 
+## Release envelope and retention evidence
+
+Release readiness is fail-closed and requires both the raw ReleaseEngine qualification
+result and an append-only retention index. The qualification result must be completed,
+qualified, promoted beyond `blocked`, scope-complete, and free of blocked or failed
+lanes. The retention index binds a source dashboard and JSONL history by SHA-256,
+byte count, entry count, and head digest; every history entry is hash-chained and the
+index records the minimum retention window and append-only advancement.
+
+Developer and Agent callers can create and revalidate the same artifact contract:
+
+```bash
+design-flow build-retention-index --project-root <path> --run-id <id> --workflow-run-id <id> --source-dashboard <path> --history <path> --previous-entry-count <n> --retention-days <n> --minimum-retention-days <n>
+design-flow validate-retention-index --project-root <path> --run-id <id>
+design-flow build-release-envelope --project-root <path> --run-id <id>
+```
+
+`build-retention-index` writes
+`.xcircuite/runs/<run-id>/qualification/retention-index.json`, registers
+`qualification-retention-index` in the run manifest, and returns a structured
+non-zero result when the evidence is blocked. `build-release-envelope` then
+content-validates the qualification result and retention index instead of relying
+
+The repository-owned `.github/workflows/retention.yml` builds the CLI, runs the
+retention regression suite, generates a hash-chained retained history through
+`Fixtures/Retention/generate-retention-fixture.py`, executes both retention CLI
+commands, and uploads the run artifacts with a 90-day retention setting.
+`build-retention-index` initializes a missing run directory so the same contract
+is directly reproducible from a clean CI workspace.
+
 ## Review contract
 
 `DefaultFlowRunReviewBundler` loads the same `.xcircuite/runs/<run-id>/` ledger as

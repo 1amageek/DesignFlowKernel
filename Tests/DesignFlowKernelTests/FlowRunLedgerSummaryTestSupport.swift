@@ -117,6 +117,7 @@ func removeTemporaryRoot(_ root: URL) {
 func createBlockedApprovalRun(
     root: URL,
     runID: String,
+    stageID: String = "001-drc",
     artifacts: [XcircuiteFileReference] = [],
     artifactPayloads: [String: Data] = [:]
 ) async throws {
@@ -128,7 +129,7 @@ func createBlockedApprovalRun(
             intent: "Run DRC with human review",
             stages: [
                 FlowStageDefinition(
-                    stageID: "001-drc",
+                    stageID: stageID,
                     displayName: "DRC",
                     requiredTool: drcRequirement(requiredEvidenceKinds: [.corpus]),
                     requiresApproval: true
@@ -145,7 +146,7 @@ func createBlockedApprovalRun(
         ],
         executors: [
             SummaryStageExecutor(
-                stageID: "001-drc",
+                stageID: stageID,
                 toolID: "native-drc",
                 status: .succeeded,
                 artifacts: artifacts,

@@ -418,6 +418,8 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             .rejected
         case .incomplete:
             .needsHumanReview
+        case .blocked:
+            .blocked
         }
     }
 

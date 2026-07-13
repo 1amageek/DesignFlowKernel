@@ -5,4 +5,5 @@ public enum FlowGateStatus: String, Sendable, Hashable, Codable {
     case failed
     case waived
     case incomplete
+    case blocked
 }

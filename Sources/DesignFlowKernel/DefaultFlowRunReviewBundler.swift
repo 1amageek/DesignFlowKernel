@@ -1472,7 +1472,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     private func isArtifactCoverageGate(_ gate: FlowGateResult) -> Bool {
-        guard gate.status == .failed || gate.status == .incomplete else {
+        guard gate.status == .failed || gate.status == .incomplete || gate.status == .blocked else {
             return false
         }
         return gate.gateID.hasSuffix("-artifacts")

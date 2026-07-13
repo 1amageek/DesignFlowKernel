@@ -258,14 +258,14 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
     }
 
     private func isArtifactCoverageGate(_ gate: FlowGateResult) -> Bool {
-        guard gate.status == .failed || gate.status == .incomplete else {
+        guard gate.status == .failed || gate.status == .incomplete || gate.status == .blocked else {
             return false
         }
         return gate.gateID.hasSuffix("-artifacts")
     }
 
     private func severity(for gate: FlowGateResult) -> FlowDiagnosticSeverity {
-        gate.status == .failed ? .error : .warning
+        gate.status == .failed || gate.status == .blocked ? .error : .warning
     }
 
     private func diagnosticCodes(from stage: FlowStageResult) -> [String] {
