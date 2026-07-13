@@ -21,6 +21,26 @@ public protocol FlowExecutionStorage: Sendable {
         inProjectAt projectRoot: URL
     ) throws -> URL
 
+    func loadRunManifest(
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws -> XcircuiteRunManifest
+
+    func loadRunActions(
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws -> [XcircuiteRunActionRecord]
+
+    func loadSuggestedCommandSelections(
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws -> [XcircuiteSuggestedCommandSelection]
+
+    func loadApprovals(
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws -> [XcircuiteApprovalRecord]
+
     func ensureDirectory(at url: URL) throws
 
     func url(
@@ -65,11 +85,6 @@ public protocol FlowExecutionStorage: Sendable {
         stageID: String,
         inProjectAt projectRoot: URL
     ) throws -> XcircuiteApprovalRecord?
-
-    func loadApprovals(
-        runID: String,
-        inProjectAt projectRoot: URL
-    ) throws -> [XcircuiteApprovalRecord]
 
     func loadCancellationRequest(
         runID: String,

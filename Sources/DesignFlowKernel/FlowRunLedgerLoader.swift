@@ -1,21 +1,31 @@
 import Foundation
 
 public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
-    private let packageStore: XcircuitePackageStore
+    private let storage: any FlowExecutionStorage
     private let progressStore: FlowRunProgressStore
 
+    public init(
+        storage: any FlowExecutionStorage,
+        progressStore: FlowRunProgressStore? = nil
+    ) {
+        self.storage = storage
+        self.progressStore = progressStore ?? FlowRunProgressStore(packageStore: storage)
+    }
+
+    @available(*, deprecated, message: "Inject a FlowExecutionStorage implementation.")
     public init(
         packageStore: XcircuitePackageStore = XcircuitePackageStore(),
         progressStore: FlowRunProgressStore = FlowRunProgressStore()
     ) {
-        self.packageStore = packageStore
-        self.progressStore = progressStore
+        self.init(storage: packageStore, progressStore: progressStore)
     }
 
     public func loadRunLedger(runID: String, projectRoot: URL) throws -> FlowRunLedger {
-        let package = XcircuitePackage(projectRoot: projectRoot)
-        let runDirectory = try package.runDirectoryURL(for: runID)
-        let runManifest = try packageStore.loadRunManifest(
+        let runDirectory = try storage.runDirectory(
+            for: runID,
+            inProjectAt: projectRoot
+        )
+        let runManifest = try storage.loadRunManifest(
             runID: runID,
             inProjectAt: projectRoot
         )
@@ -35,15 +45,15 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
             runID: runID,
             projectRoot: projectRoot
         )
-        let actions = try packageStore.loadRunActions(
+        let actions = try storage.loadRunActions(
             runID: runID,
             inProjectAt: projectRoot
         )
-        let suggestedCommandSelections = try packageStore.loadSuggestedCommandSelections(
+        let suggestedCommandSelections = try storage.loadSuggestedCommandSelections(
             runID: runID,
             inProjectAt: projectRoot
         )
-        let approvals = try packageStore.loadApprovals(
+        let approvals = try storage.loadApprovals(
             runID: runID,
             inProjectAt: projectRoot
         )
@@ -104,7 +114,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
                     "stage result missing: stages/\(stageDirectory.lastPathComponent)/result.json"
                 )
             }
-            let result = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
+            let result = try storage.readJSON(FlowStageResult.self, from: resultURL)
             results.append(result)
             resultDirectoryStageIDs.append(stageDirectory.lastPathComponent)
         }
@@ -164,7 +174,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
         guard fileExists(planURL) else {
             return nil
         }
-        return try packageStore.readJSON(FlowRunPlan.self, from: planURL)
+        return try storage.readJSON(FlowRunPlan.self, from: planURL)
     }
 
     private func loadToolchain(from runDirectory: URL) throws -> FlowToolchainManifest? {
@@ -172,7 +182,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
         guard fileExists(toolchainURL) else {
             return nil
         }
-        return try packageStore.readJSON(FlowToolchainManifest.self, from: toolchainURL)
+        return try storage.readJSON(FlowToolchainManifest.self, from: toolchainURL)
     }
 
     private func loadDesignDiff(from runDirectory: URL) throws -> XcircuiteDesignDiff? {
@@ -180,7 +190,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
         guard fileExists(designDiffURL) else {
             return nil
         }
-        return try packageStore.readJSON(XcircuiteDesignDiff.self, from: designDiffURL)
+        return try storage.readJSON(XcircuiteDesignDiff.self, from: designDiffURL)
     }
 
     private func directoryExists(_ url: URL) -> Bool {
