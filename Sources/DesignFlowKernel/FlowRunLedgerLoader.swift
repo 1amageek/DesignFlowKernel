@@ -5,19 +5,11 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
     private let progressStore: FlowRunProgressStore
 
     public init(
-        storage: any FlowExecutionStorage,
+        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
         progressStore: FlowRunProgressStore? = nil
     ) {
         self.storage = storage
         self.progressStore = progressStore ?? FlowRunProgressStore(packageStore: storage)
-    }
-
-    @available(*, deprecated, message: "Inject a FlowExecutionStorage implementation.")
-    public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
-        progressStore: FlowRunProgressStore = FlowRunProgressStore()
-    ) {
-        self.init(storage: packageStore, progressStore: progressStore)
     }
 
     public func loadRunLedger(runID: String, projectRoot: URL) throws -> FlowRunLedger {

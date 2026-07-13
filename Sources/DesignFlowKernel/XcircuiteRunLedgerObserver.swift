@@ -5,12 +5,14 @@ public actor XcircuiteRunLedgerObserver {
     private var observationTask: Task<Void, Never>?
     private var continuation: AsyncThrowingStream<[XcircuiteRunSnapshot], any Error>.Continuation?
 
-    public init(storage: any XcircuiteRunLedgerStoring) {
+    public init(
+        storage: any XcircuiteRunLedgerStoring = DesignFlowStorageDefaults.makeLedgerStorage()
+    ) {
         self.store = storage
     }
 
     @available(*, deprecated, message: "Inject a ledger storage implementation with init(storage:).")
-    public init(store: any XcircuiteRunLedgerStoring = XcircuitePackageStore()) {
+    public init(store: any XcircuiteRunLedgerStoring) {
         self.store = store
     }
 
