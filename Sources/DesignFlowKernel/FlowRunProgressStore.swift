@@ -6,7 +6,9 @@ public struct FlowRunProgressStore: Sendable {
 
     private let packageStore: any FlowExecutionStorage
 
-    public init(packageStore: any FlowExecutionStorage = XcircuitePackageStore()) {
+    public init(
+        packageStore: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
+    ) {
         self.packageStore = packageStore
     }
 

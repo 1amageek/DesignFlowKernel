@@ -5,7 +5,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
     private let hasher: XcircuiteHasher
 
     public init(
-        packageStore: any FlowExecutionStorage = XcircuitePackageStore(),
+        packageStore: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
         hasher: XcircuiteHasher = XcircuiteHasher()
     ) {
         self.packageStore = packageStore
