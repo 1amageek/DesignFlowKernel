@@ -1,4 +1,5 @@
 import DesignFlowKernel
+import CircuiteFoundation
 import DesignFlowCLISupport
 import Foundation
 import Testing
@@ -212,7 +213,26 @@ struct SummaryStageExecutor: FlowStageExecutor {
             stageID: stage.stageID,
             status: status,
             gates: gates,
-            artifacts: resolvedArtifacts
+            artifacts: try resolvedArtifacts.map { try foundationReference(from: $0) }
+        )
+    }
+
+    private func foundationReference(
+        from legacy: XcircuiteFileReference
+    ) throws -> ArtifactReference {
+        ArtifactReference(
+            id: try legacy.artifactID.map { try ArtifactID(rawValue: $0) },
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: legacy.path),
+                role: .output,
+                kind: try ArtifactKind(rawValue: legacy.kind.rawValue),
+                format: try ArtifactFormat(rawValue: legacy.format.rawValue.lowercased())
+            ),
+            digest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: legacy.sha256 ?? String(repeating: "0", count: 64)
+            ),
+            byteCount: UInt64(legacy.byteCount ?? 0)
         )
     }
 }

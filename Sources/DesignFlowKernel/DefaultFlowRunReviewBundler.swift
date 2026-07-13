@@ -188,18 +188,19 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 )
             )
             artifacts.append(
-                contentsOf: stage.artifacts.map { reference in
-                    FlowRunReviewArtifact(
-                        role: reviewRole(for: reference),
-                        artifactID: reference.artifactID,
+                contentsOf: try stage.artifacts.map { reference in
+                    let legacyReference = try reference.legacyXcircuiteReference()
+                    return FlowRunReviewArtifact(
+                        role: reviewRole(for: legacyReference),
+                        artifactID: legacyReference.artifactID,
                         stageID: stage.stageID,
-                        path: reference.path,
-                        kind: reference.kind,
-                        format: reference.format,
-                        sha256: reference.sha256,
-                        byteCount: reference.byteCount,
+                        path: legacyReference.path,
+                        kind: legacyReference.kind,
+                        format: legacyReference.format,
+                        sha256: legacyReference.sha256,
+                        byteCount: legacyReference.byteCount,
                         integrity: artifactIntegrity(
-                            for: reference,
+                            for: legacyReference,
                             stageID: stage.stageID,
                             projectRoot: projectRoot
                         )

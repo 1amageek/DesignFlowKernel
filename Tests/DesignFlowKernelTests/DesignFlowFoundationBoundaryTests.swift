@@ -8,12 +8,18 @@ import DesignFlowKernel
 struct DesignFlowFoundationBoundaryTests {
     @Test("flow evidence preserves opaque artifact identity and canonical format")
     func preservesOpaqueArtifactIdentity() throws {
-        let artifact = XcircuiteFileReference(
-            artifactID: "rtl-netlist",
-            path: "runs/run-1/design.sv",
-            kind: .rtl,
-            format: .systemVerilog,
-            sha256: String(repeating: "a", count: 64),
+        let artifact = ArtifactReference(
+            id: try ArtifactID(rawValue: "rtl-netlist"),
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: "runs/run-1/design.sv"),
+                role: .output,
+                kind: .rtl,
+                format: .systemVerilog
+            ),
+            digest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "a", count: 64)
+            ),
             byteCount: 32
         )
         let result = FlowRunResult(
@@ -56,11 +62,17 @@ struct DesignFlowFoundationBoundaryTests {
 
     @Test("flow evidence derives a deterministic identity when legacy ID is absent")
     func derivesDeterministicIdentityForLegacyReference() throws {
-        let artifact = XcircuiteFileReference(
-            path: "runs/run-1/report.json",
-            kind: .report,
-            format: .json,
-            sha256: String(repeating: "b", count: 64),
+        let artifact = ArtifactReference(
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: "runs/run-1/report.json"),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            digest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "b", count: 64)
+            ),
             byteCount: 16
         )
         let result = FlowRunResult(

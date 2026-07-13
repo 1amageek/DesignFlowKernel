@@ -1,4 +1,5 @@
 import DesignFlowKernel
+import CircuiteFoundation
 import DesignFlowCLISupport
 import Foundation
 import Testing
@@ -655,7 +656,14 @@ extension FlowRunLedgerSummaryTests {
         FlowStageResult.self,
         from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
     )
-    result.artifacts[0].byteCount = 1
+    let originalArtifact = result.artifacts[0]
+    result.artifacts[0] = ArtifactReference(
+        id: originalArtifact.id,
+        locator: originalArtifact.locator,
+        digest: originalArtifact.digest,
+        byteCount: 1,
+        producer: originalArtifact.producer
+    )
     try XcircuitePackageStore().writeJSON(
         result,
         to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"),

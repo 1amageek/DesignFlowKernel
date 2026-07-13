@@ -22,7 +22,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         try XcircuiteAgentLoopProfileValidator().validate(profile)
         let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
         let envelopes = try loadArtifactEnvelopes(from: ledger)
-        let artifactReferences = availableArtifactReferences(from: ledger, envelopes: envelopes)
+        let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
         let iterations = buildIterations(from: ledger, envelopes: envelopes)
         let snapshot = buildSnapshot(
             from: ledger,
@@ -186,10 +186,12 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     private func availableArtifactReferences(
         from ledger: FlowRunLedger,
         envelopes: [XcircuiteArtifactEnvelope]
-    ) -> [XcircuiteFileReference] {
+    ) throws -> [XcircuiteFileReference] {
         var references: [XcircuiteFileReference] = []
         references.append(contentsOf: ledger.runManifest.artifacts)
-        references.append(contentsOf: ledger.stages.flatMap(\.artifacts))
+        references.append(contentsOf: try ledger.stages
+            .flatMap(\.artifacts)
+            .map { try $0.legacyXcircuiteReference() })
         references.append(contentsOf: envelopes.map(\.reference))
         return stableUniqueReferences(references)
     }

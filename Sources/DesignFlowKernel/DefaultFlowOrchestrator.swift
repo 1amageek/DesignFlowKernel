@@ -1,4 +1,5 @@
 import Foundation
+import CircuiteFoundation
 import ToolQualification
 
 public struct DefaultFlowOrchestrator: Sendable {
@@ -1292,7 +1293,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             projectRoot: request.projectRoot,
             runDirectory: runDirectory
         )
-        updated.artifacts = mergedArtifacts(updated.artifacts + [reference])
+        updated.artifacts = mergedFoundationArtifacts(updated.artifacts + [reference])
         return updated
     }
 
@@ -1302,7 +1303,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         runID: String,
         projectRoot: URL,
         runDirectory: URL
-    ) throws -> XcircuiteFileReference {
+    ) throws -> ArtifactReference {
         let relativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/stages/\(stageID)/attempts.json"
         let attemptsURL = runDirectory
             .appending(path: "stages")
@@ -1310,7 +1311,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             .appending(path: "attempts.json")
         try packageStore.ensureDirectory(at: attemptsURL.deletingLastPathComponent())
         try packageStore.writeJSON(attempts, to: attemptsURL, forProjectAt: projectRoot)
-        return try packageStore.fileReference(
+        let legacyReference = try packageStore.fileReference(
             forProjectRelativePath: relativePath,
             artifactID: "\(stageID)-attempts",
             kind: .other,
@@ -1318,6 +1319,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             inProjectAt: projectRoot,
             producedByRunID: runID
         )
+        return try legacyReference.foundationArtifactReference()
     }
 
     private func diagnosticCodes(from result: FlowStageResult) -> [String] {
@@ -1445,9 +1447,12 @@ public struct DefaultFlowOrchestrator: Sendable {
             projectRoot: projectRoot,
             runDirectory: runDirectory
         )
+        let stageArtifacts = try result.stages
+            .flatMap(\.artifacts)
+            .map { try $0.legacyXcircuiteReference() }
         let artifacts = mergedArtifacts(
             runLevelArtifacts
-                + result.stages.flatMap(\.artifacts)
+                + stageArtifacts
                 + stageResultArtifacts
                 + progressArtifacts
                 + [toolchainReference]
@@ -1518,6 +1523,16 @@ public struct DefaultFlowOrchestrator: Sendable {
             byPath[artifact.path] = artifact
         }
         return byPath.values.sorted { $0.path < $1.path }
+    }
+
+    private func mergedFoundationArtifacts(
+        _ artifacts: [ArtifactReference]
+    ) -> [ArtifactReference] {
+        var byIdentity: [String: ArtifactReference] = [:]
+        for artifact in artifacts {
+            byIdentity[artifact.id.rawValue] = artifact
+        }
+        return byIdentity.values.sorted { $0.path < $1.path }
     }
 
     private func persistToolchainManifest(

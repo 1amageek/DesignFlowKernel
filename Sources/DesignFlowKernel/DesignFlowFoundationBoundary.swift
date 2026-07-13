@@ -46,7 +46,7 @@ public struct DesignFlowFoundationEvidence: Sendable, Hashable, Codable, Artifac
     ) throws {
         let references = try result.stages
             .flatMap(\.artifacts)
-            .map(Self.makeArtifactReference)
+            .map { try Self.makeArtifactReference($0) }
         self.evidence = EvidenceManifest(
             provenance: provenance,
             artifacts: references
@@ -57,102 +57,27 @@ public struct DesignFlowFoundationEvidence: Sendable, Hashable, Codable, Artifac
     }
 
     private static func makeArtifactReference(
-        _ reference: XcircuiteFileReference
+        _ reference: ArtifactReference
     ) throws -> ArtifactReference {
-        guard let sha256 = reference.sha256, !sha256.isEmpty else {
+        guard !reference.digest.hexadecimalValue.isEmpty else {
             throw DesignFlowFoundationBoundaryError.missingDigest(reference.path)
         }
-        guard let byteCount = reference.byteCount else {
-            throw DesignFlowFoundationBoundaryError.missingByteCount(reference.path)
-        }
-        guard byteCount >= 0 else {
+        guard reference.byteCount <= UInt64(Int64.max) else {
             throw DesignFlowFoundationBoundaryError.invalidByteCount(reference.path)
         }
-
-        let location: ArtifactLocation
-        do {
-            if reference.path.hasPrefix("/") {
-                location = try ArtifactLocation(fileURL: URL(fileURLWithPath: reference.path))
-            } else {
-                location = try ArtifactLocation(workspaceRelativePath: reference.path)
-            }
-        } catch {
-            throw DesignFlowFoundationBoundaryError.invalidArtifactLocation(reference.path)
-        }
-
-        let artifactID: ArtifactID?
-        if let rawArtifactID = reference.artifactID {
-            do {
-                artifactID = try ArtifactID(rawValue: rawArtifactID)
-            } catch {
-                throw DesignFlowFoundationBoundaryError.invalidArtifactIdentifier(rawArtifactID)
-            }
-        } else {
-            artifactID = nil
-        }
-        let digest = try ContentDigest(algorithm: .sha256, hexadecimalValue: sha256)
         let kind = try ArtifactKind(rawValue: "flow.\(reference.kind.rawValue)")
-        let format = try makeArtifactFormat(reference.format)
-
         return ArtifactReference(
-            id: artifactID,
-            locator: ArtifactLocator(location: location, kind: kind, format: format),
-            digest: digest,
-            byteCount: UInt64(byteCount)
+            id: reference.id,
+            locator: ArtifactLocator(
+                location: reference.locator.location,
+                role: reference.locator.role,
+                kind: kind,
+                format: reference.locator.format
+            ),
+            digest: reference.digest,
+            byteCount: reference.byteCount,
+            producer: reference.producer
         )
-    }
-
-    private static func makeArtifactFormat(
-        _ format: XcircuiteFileFormat
-    ) throws -> ArtifactFormat {
-        switch format {
-        case .spice:
-            return .spice
-        case .systemVerilog:
-            return .systemVerilog
-        case .verilog:
-            return .verilog
-        case .oasis:
-            return .oasis
-        case .gdsii:
-            return .gdsii
-        case .lef:
-            return .lef
-        case .def:
-            return .def
-        case .spef:
-            return .spef
-        case .dspf:
-            return .dspf
-        case .liberty:
-            return .liberty
-        case .sdc:
-            return try ArtifactFormat(rawValue: "sdc")
-        case .sdf:
-            return .sdf
-        case .upf:
-            return try ArtifactFormat(rawValue: "upf")
-        case .cpf:
-            return try ArtifactFormat(rawValue: "cpf")
-        case .vcd:
-            return .vcd
-        case .fst:
-            return try ArtifactFormat(rawValue: "fst")
-        case .stil:
-            return try ArtifactFormat(rawValue: "stil")
-        case .wgl:
-            return try ArtifactFormat(rawValue: "wgl")
-        case .json:
-            return .json
-        case .raw:
-            return try ArtifactFormat(rawValue: "raw")
-        case .csv:
-            return try ArtifactFormat(rawValue: "csv")
-        case .text:
-            return try ArtifactFormat(rawValue: "text")
-        case .unknown:
-            return try ArtifactFormat(rawValue: "unknown")
-        }
     }
 
     private static func makeDiagnostic(_ diagnostic: FlowDiagnostic) throws -> DesignDiagnostic {

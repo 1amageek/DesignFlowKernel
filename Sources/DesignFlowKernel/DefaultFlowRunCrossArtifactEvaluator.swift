@@ -21,7 +21,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     ) throws -> FlowRunCrossArtifactEvaluationResult {
         let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
         let envelopes = try loadArtifactEnvelopes(from: ledger)
-        let artifactReferences = availableArtifactReferences(from: ledger, envelopes: envelopes)
+        let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
         let channelResults = buildChannelResults(
             ledger: ledger,
             envelopes: envelopes,
@@ -363,10 +363,10 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private func availableArtifactReferences(
         from ledger: FlowRunLedger,
         envelopes: [XcircuiteArtifactEnvelope]
-    ) -> [XcircuiteFileReference] {
+    ) throws -> [XcircuiteFileReference] {
         stableUniqueReferences(
             ledger.runManifest.artifacts
-                + ledger.stages.flatMap(\.artifacts)
+                + (try ledger.stages.flatMap(\.artifacts).map { try $0.legacyXcircuiteReference() })
                 + envelopes.map(\.reference)
         )
     }
