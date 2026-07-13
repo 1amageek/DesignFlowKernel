@@ -22,8 +22,22 @@ extension ArtifactReference {
             kind: kind,
             format: format,
             sha256: sha256,
-            byteCount: Int64(byteCount)
+            byteCount: Int64(byteCount),
+            producedByRunID: producedByRunIDFromPath
         )
+    }
+
+    /// Legacy run records carried the run identifier separately from the
+    /// canonical Foundation reference. Preserve it when projecting a
+    /// run-relative artifact back into the frozen storage record.
+    private var producedByRunIDFromPath: String? {
+        let components = path.split(separator: "/").map(String.init)
+        guard components.count > 2,
+              components[0] == ".xcircuite",
+              components[1] == "runs" else {
+            return nil
+        }
+        return components[2]
     }
 
     private var legacyKindRawValue: String {
