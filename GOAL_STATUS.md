@@ -6,6 +6,7 @@
 | Foundation Engine boundary | Complete | `FlowEngine`, `FlowEngineRequest`, `DefaultFlowEngine`. |
 | Foundation evidence boundary | Complete | `DesignFlowFoundationEvidence` is a Codable/Hashable `ArtifactProducing`, `EvidenceProviding` and `DiagnosticReporting` projection with deterministic legacy identity handling. |
 | Preserve run lifecycle ownership | Complete | Existing orchestrator owns lifecycle; `FlowRunLedgerPersisting` defines the injectable async storage seam. |
+| Foundation-first execution storage | Complete | `FlowExecutionStorage.makeArtifactReference` and `registerArtifact` expose canonical `ArtifactReference` values; progress artifacts use the new API, while legacy entry points are deprecated for migration. |
 | Document implementation contract | Complete | README, DESIGN.md, REQUIREMENTS.md. |
 | Build | Passed | `swift build` after adding the persistence contract. |
 

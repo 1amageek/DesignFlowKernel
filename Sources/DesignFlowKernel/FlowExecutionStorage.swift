@@ -58,6 +58,29 @@ public protocol FlowExecutionStorage: Sendable {
 
     func readJSON<T: Decodable>(_ type: T.Type, from url: URL) throws -> T
 
+    /// Creates the canonical Foundation artifact reference for a project file.
+    ///
+    /// Implementations may use a legacy persistence format internally, but the
+    /// execution boundary never exposes that representation to new callers.
+    func makeArtifactReference(
+        forProjectRelativePath path: String,
+        artifactID: String?,
+        role: ArtifactRole,
+        kind: ArtifactKind,
+        format: ArtifactFormat,
+        inProjectAt projectRoot: URL,
+        producedByRunID: String?,
+        verifiedByRunID: String?
+    ) throws -> ArtifactReference
+
+    /// Registers a canonical artifact in the run ledger.
+    func registerArtifact(
+        _ reference: ArtifactReference,
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws
+
+    @available(*, deprecated, message: "Use makeArtifactReference(forProjectRelativePath:artifactID:role:kind:format:inProjectAt:producedByRunID:verifiedByRunID:).")
     func fileReference(
         forProjectRelativePath path: String,
         artifactID: String?,
@@ -68,6 +91,7 @@ public protocol FlowExecutionStorage: Sendable {
         verifiedByRunID: String?
     ) throws -> XcircuiteFileReference
 
+    @available(*, deprecated, message: "Use registerArtifact(_:runID:inProjectAt:).")
     func upsertRunArtifact(
         _ reference: XcircuiteFileReference,
         runID: String,
@@ -117,6 +141,55 @@ public extension FlowExecutionStorage {
 }
 
 extension XcircuitePackageStore: FlowExecutionStorage {
+    public func makeArtifactReference(
+        forProjectRelativePath path: String,
+        artifactID: String?,
+        role: ArtifactRole = .legacyUnspecified,
+        kind: ArtifactKind,
+        format: ArtifactFormat,
+        inProjectAt projectRoot: URL,
+        producedByRunID: String? = nil,
+        verifiedByRunID: String? = nil
+    ) throws -> ArtifactReference {
+        let legacyReference = try fileReference(
+            forProjectRelativePath: path,
+            artifactID: artifactID,
+            kind: XcircuiteFileKind(foundationRawValue: kind.rawValue),
+            format: XcircuiteFileFormat(foundationRawValue: format.rawValue),
+            inProjectAt: projectRoot,
+            producedByRunID: producedByRunID,
+            verifiedByRunID: verifiedByRunID
+        )
+        let foundationReference = try legacyReference.foundationArtifactReference()
+        guard role != .legacyUnspecified else {
+            return foundationReference
+        }
+        return ArtifactReference(
+            id: foundationReference.id,
+            locator: ArtifactLocator(
+                location: foundationReference.locator.location,
+                role: role,
+                kind: foundationReference.locator.kind,
+                format: foundationReference.locator.format
+            ),
+            digest: foundationReference.digest,
+            byteCount: foundationReference.byteCount,
+            producer: foundationReference.producer
+        )
+    }
+
+    public func registerArtifact(
+        _ reference: ArtifactReference,
+        runID: String,
+        inProjectAt projectRoot: URL
+    ) throws {
+        try upsertRunArtifact(
+            reference.legacyXcircuiteReference(),
+            runID: runID,
+            inProjectAt: projectRoot
+        )
+    }
+
     public func runDirectory(
         for runID: String,
         inProjectAt projectRoot: URL
@@ -132,5 +205,28 @@ extension XcircuitePackageStore: FlowExecutionStorage {
             runID: runID,
             projectRoot: projectRoot
         )
+    }
+}
+
+private extension XcircuiteFileKind {
+    init(foundationRawValue rawValue: String) {
+        switch rawValue {
+        case "power-intent": self = .powerIntent
+        case "timing-library": self = .timingLibrary
+        case "test-pattern": self = .testPattern
+        case "rule-deck": self = .ruleDeck
+        case "design-diff": self = .designDiff
+        case "parasitics": self = .parasitic
+        default: self = XcircuiteFileKind(rawValue: rawValue) ?? .other
+        }
+    }
+}
+
+private extension XcircuiteFileFormat {
+    init(foundationRawValue rawValue: String) {
+        switch rawValue {
+        case "system-verilog": self = .systemVerilog
+        default: self = XcircuiteFileFormat(rawValue: rawValue.uppercased()) ?? .unknown
+        }
     }
 }

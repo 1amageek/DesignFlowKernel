@@ -6,6 +6,50 @@ import DesignFlowKernel
 
 @Suite("Design-flow Foundation boundary")
 struct DesignFlowFoundationBoundaryTests {
+    @Test("execution storage publishes Foundation artifact references")
+    func executionStoragePublishesFoundationArtifactReferences() throws {
+        let projectRoot = FileManager.default.temporaryDirectory
+            .appending(path: "design-flow-foundation-\(UUID().uuidString)")
+        defer {
+            do {
+                try FileManager.default.removeItem(at: projectRoot)
+            } catch {
+                assertionFailure("Failed to remove test project: \(error.localizedDescription)")
+            }
+        }
+
+        let storage: any FlowExecutionStorage = XcircuitePackageStore()
+        try storage.ensureRunDirectory(for: "run-1", inProjectAt: projectRoot)
+        let artifactURL = projectRoot
+            .appending(path: XcircuitePackage.directoryName)
+            .appending(path: "runs/run-1/result.json")
+        try FileManager.default.createDirectory(
+            at: artifactURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("result".utf8).write(to: artifactURL, options: .atomic)
+
+        let reference = try storage.makeArtifactReference(
+            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/run-1/result.json",
+            artifactID: "run-result",
+            role: .output,
+            kind: .report,
+            format: .json,
+            inProjectAt: projectRoot,
+            producedByRunID: "run-1",
+            verifiedByRunID: nil
+        )
+        #expect(reference.id.rawValue == "run-result")
+        #expect(reference.locator.role == .output)
+        #expect(reference.locator.kind == .report)
+        #expect(reference.locator.format == .json)
+        #expect(reference.byteCount == 6)
+
+        try storage.registerArtifact(reference, runID: "run-1", inProjectAt: projectRoot)
+        let manifest = try storage.loadRunManifest(runID: "run-1", inProjectAt: projectRoot)
+        #expect(manifest.artifacts.contains { $0.artifactID == "run-result" })
+    }
+
     @Test("flow evidence preserves opaque artifact identity and canonical format")
     func preservesOpaqueArtifactIdentity() throws {
         let artifact = ArtifactReference(

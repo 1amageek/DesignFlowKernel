@@ -31,6 +31,11 @@ flowchart TD
 - `FlowRunLedgerPersisting` is the asynchronous storage seam for run recovery.
   Implementations own durable writes and integrity checks; the kernel does not
   choose a filesystem layout.
+- `FlowExecutionStorage` is Foundation-first for new artifact operations:
+  `makeArtifactReference` returns `CircuiteFoundation.ArtifactReference` and
+  `registerArtifact` accepts that canonical value. Legacy `fileReference` and
+  `upsertRunArtifact` entry points remain deprecated for decode/persistence
+  migration only and are not used by the progress writer.
 - `FlowOperationRequest`, stage results, and the run ledger remain domain and
   persistence models owned by this package.
 

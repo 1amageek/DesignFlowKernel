@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct FlowRunProgressStore: Sendable {
@@ -254,15 +255,18 @@ public struct FlowRunProgressStore: Sendable {
         guard fileExists(runDirectoryURL(runID: runID, projectRoot: projectRoot).appending(path: "manifest.json")) else {
             return
         }
-        let reference = try packageStore.fileReference(
+        let foundationFormat: ArtifactFormat = format == .json ? .json : .text
+        let reference = try packageStore.makeArtifactReference(
             forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)",
             artifactID: artifactID,
+            role: .output,
             kind: .other,
-            format: format,
+            format: foundationFormat,
             inProjectAt: projectRoot,
-            producedByRunID: runID
+            producedByRunID: runID,
+            verifiedByRunID: nil
         )
-        try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
     }
 
     private func ensureDirectory(_ url: URL) throws {
