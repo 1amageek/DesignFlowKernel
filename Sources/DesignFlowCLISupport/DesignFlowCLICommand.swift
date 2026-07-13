@@ -657,7 +657,7 @@ public enum DesignFlowCLICommand {
         let reference = try storage.makeArtifactReference(
             forProjectRelativePath: try projectRelativePath(
                 for: indexURL,
-                inProjectAt: projectRoot
+                relativeTo: projectRoot
             ),
             artifactID: "qualification-retention-index",
             role: .output,
@@ -896,7 +896,7 @@ public enum DesignFlowCLICommand {
     /// validating and resolving the path when it is persisted.
     private static func projectRelativePath(
         for url: URL,
-        inProjectAt projectRoot: URL
+        relativeTo projectRoot: URL
     ) throws -> String {
         let rootPath = projectRoot.standardizedFileURL.path(percentEncoded: false)
         let filePath = url.standardizedFileURL.path(percentEncoded: false)
