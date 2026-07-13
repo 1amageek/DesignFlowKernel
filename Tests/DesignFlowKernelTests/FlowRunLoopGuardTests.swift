@@ -1,8 +1,8 @@
 import DesignFlowCLISupport
 import DesignFlowKernel
+import CircuiteFoundation
 import Foundation
 import Testing
-import DesignFlowKernel
 
 @Suite("Flow run loop guard", .timeLimit(.minutes(1)))
 struct FlowRunLoopGuardTests {
@@ -252,13 +252,10 @@ struct FlowRunLoopGuardTests {
             withIntermediateDirectories: true
         )
         try Data(#"{"status":"accepted"}"#.utf8).write(to: summaryURL, options: .atomic)
-        let reference = try store.fileReference(
-            forProjectRelativePath: summaryPath,
+        let reference = try foundationReference(
+            path: summaryPath,
             artifactID: "simulation-summary",
-            kind: .report,
-            format: .json,
-            inProjectAt: root,
-            producedByRunID: runID
+            projectRoot: root
         )
         let envelope = XcircuiteArtifactEnvelope(
             artifactID: "simulation-summary",
@@ -290,13 +287,10 @@ struct FlowRunLoopGuardTests {
             withIntermediateDirectories: true
         )
         try Data(#"{"violationCount":2}"#.utf8).write(to: summaryURL, options: .atomic)
-        let reference = try store.fileReference(
-            forProjectRelativePath: summaryPath,
+        let reference = try foundationReference(
+            path: summaryPath,
             artifactID: "drc-summary",
-            kind: .report,
-            format: .json,
-            inProjectAt: root,
-            producedByRunID: runID
+            projectRoot: root
         )
         let envelope = XcircuiteArtifactEnvelope(
             artifactID: "drc-summary",
@@ -327,6 +321,30 @@ struct FlowRunLoopGuardTests {
             )
         )
         try store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
+    }
+
+    private func foundationReference(
+        path: String,
+        artifactID: String,
+        projectRoot: URL
+    ) throws -> ArtifactReference {
+        let locator = ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: path),
+            role: .output,
+            kind: .report,
+            format: .json
+        )
+        let reference = try LocalArtifactReferencer().reference(
+            locator,
+            relativeTo: projectRoot
+        )
+        return ArtifactReference(
+            id: try ArtifactID(rawValue: artifactID),
+            locator: reference.locator,
+            digest: reference.digest,
+            byteCount: reference.byteCount,
+            producer: reference.producer
+        )
     }
 
     private func makeTemporaryRoot(_ name: String) throws -> URL {
