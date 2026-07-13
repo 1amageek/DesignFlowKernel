@@ -4,9 +4,9 @@ public struct FlowRunProgressStore: Sendable {
     public static let progressRelativePath = "progress.jsonl"
     public static let cancellationRelativePath = "cancellation.json"
 
-    private let packageStore: XcircuitePackageStore
+    private let packageStore: any FlowExecutionStorage
 
-    public init(packageStore: XcircuitePackageStore = XcircuitePackageStore()) {
+    public init(packageStore: any FlowExecutionStorage = XcircuitePackageStore()) {
         self.packageStore = packageStore
     }
 

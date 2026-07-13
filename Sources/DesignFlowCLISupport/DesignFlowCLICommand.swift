@@ -55,7 +55,10 @@ public enum DesignFlowCLICommand {
         case "compare-artifacts":
             return try compareArtifacts(arguments: Array(arguments.dropFirst()))
         case "progress-run":
-            return try progressRunSnapshot(arguments: Array(arguments.dropFirst()))
+            return try progressRunSnapshot(
+                arguments: Array(arguments.dropFirst()),
+                storage: storage
+            )
         case "--help", "-h", "help":
             return helpText
         default:
@@ -85,7 +88,11 @@ public enum DesignFlowCLICommand {
 
         switch command {
         case "progress-run":
-            return try await progressRun(arguments: Array(arguments.dropFirst()), emit: emit)
+            return try await progressRun(
+                arguments: Array(arguments.dropFirst()),
+                storage: storage,
+                emit: emit
+            )
         default:
             return try run(arguments: arguments, storage: storage)
         }
@@ -706,7 +713,10 @@ public enum DesignFlowCLICommand {
         return try encode(result, pretty: pretty)
     }
 
-    private static func progressRunSnapshot(arguments: [String]) throws -> String {
+    private static func progressRunSnapshot(
+        arguments: [String],
+        storage: any FlowExecutionStorage
+    ) throws -> String {
         if arguments.contains("--help") || arguments.contains("-h") {
             return progressRunHelpText
         }
@@ -725,7 +735,7 @@ public enum DesignFlowCLICommand {
                 expected: "use runStreaming for wait mode"
             )
         }
-        let snapshot = try DefaultFlowRunProgressSubscriber().snapshot(
+        let snapshot = try DefaultFlowRunProgressSubscriber(storage: storage).snapshot(
             request: options.request
         )
         return try encode(snapshot, pretty: options.pretty)
@@ -733,13 +743,14 @@ public enum DesignFlowCLICommand {
 
     private static func progressRun(
         arguments: [String],
+        storage: any FlowExecutionStorage,
         emit: @Sendable (String) async throws -> Void
     ) async throws -> String {
         if arguments.contains("--help") || arguments.contains("-h") {
             return progressRunHelpText
         }
         let options = try parseProgressRunOptions(arguments: arguments)
-        let subscriber = DefaultFlowRunProgressSubscriber()
+        let subscriber = DefaultFlowRunProgressSubscriber(storage: storage)
         if options.follow {
             if options.pretty {
                 throw DesignFlowCLIError.invalidValue(

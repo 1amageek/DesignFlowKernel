@@ -7,6 +7,10 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
         self.progressStore = progressStore
     }
 
+    public init(storage: any FlowExecutionStorage) {
+        self.progressStore = FlowRunProgressStore(packageStore: storage)
+    }
+
     public func snapshot(
         request: FlowRunProgressSubscriptionRequest
     ) throws -> FlowRunProgressSnapshot {

@@ -8,6 +8,8 @@ import Foundation
 /// an in-memory fixture, or a remote workspace implementation without
 /// changing stage executors.
 public protocol FlowExecutionStorage: Sendable {
+    func ensurePackageDirectory(forProjectAt projectRoot: URL) throws
+
     @discardableResult
     func ensureRunDirectory(
         for runID: String,
