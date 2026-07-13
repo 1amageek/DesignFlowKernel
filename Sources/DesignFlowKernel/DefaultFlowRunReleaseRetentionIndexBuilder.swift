@@ -1,12 +1,12 @@
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentionIndexBuilding {
-    private let packageStore: XcircuitePackageStore
+    private let packageStore: any FlowExecutionStorage
     private let hasher: XcircuiteHasher
     private let validator: any FlowRunReleaseRetentionIndexValidating
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        packageStore: any FlowExecutionStorage = XcircuitePackageStore(),
         hasher: XcircuiteHasher = XcircuiteHasher(),
         validator: any FlowRunReleaseRetentionIndexValidating = DefaultFlowRunReleaseRetentionIndexValidator()
     ) {

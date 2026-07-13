@@ -1,11 +1,11 @@
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetentionIndexValidating {
-    private let packageStore: XcircuitePackageStore
+    private let packageStore: any FlowExecutionStorage
     private let hasher: XcircuiteHasher
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        packageStore: any FlowExecutionStorage = XcircuitePackageStore(),
         hasher: XcircuiteHasher = XcircuiteHasher()
     ) {
         self.packageStore = packageStore

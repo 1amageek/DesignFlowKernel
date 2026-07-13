@@ -3,6 +3,18 @@ import Foundation
 
 public enum DesignFlowCLICommand {
     public static func run(arguments: [String]) throws -> String {
+        try run(arguments: arguments, storage: XcircuitePackageStore())
+    }
+
+    /// Runs a command with an injected flow storage capability.
+    ///
+    /// This overload keeps CLI parsing independent from the concrete
+    /// `.xcircuite` filesystem implementation. Hosts can provide a store
+    /// backed by another workspace boundary or an isolated test fixture.
+    public static func run(
+        arguments: [String],
+        storage: any FlowExecutionStorage
+    ) throws -> String {
         guard let command = arguments.first else {
             throw DesignFlowCLIError.usage
         }
@@ -17,9 +29,15 @@ public enum DesignFlowCLICommand {
         case "build-release-envelope":
             return try buildReleaseEnvelope(arguments: Array(arguments.dropFirst()))
         case "build-retention-index":
-            return try buildRetentionIndex(arguments: Array(arguments.dropFirst()))
+            return try buildRetentionIndex(
+                arguments: Array(arguments.dropFirst()),
+                storage: storage
+            )
         case "validate-retention-index":
-            return try validateRetentionIndex(arguments: Array(arguments.dropFirst()))
+            return try validateRetentionIndex(
+                arguments: Array(arguments.dropFirst()),
+                storage: storage
+            )
         case "approve-gate":
             return try approveGate(arguments: Array(arguments.dropFirst()))
         case "request-cancel":
@@ -49,6 +67,18 @@ public enum DesignFlowCLICommand {
         arguments: [String],
         emit: @Sendable (String) async throws -> Void
     ) async throws -> String {
+        try await runStreaming(
+            arguments: arguments,
+            storage: XcircuitePackageStore(),
+            emit: emit
+        )
+    }
+
+    public static func runStreaming(
+        arguments: [String],
+        storage: any FlowExecutionStorage,
+        emit: @Sendable (String) async throws -> Void
+    ) async throws -> String {
         guard let command = arguments.first else {
             throw DesignFlowCLIError.usage
         }
@@ -57,7 +87,7 @@ public enum DesignFlowCLICommand {
         case "progress-run":
             return try await progressRun(arguments: Array(arguments.dropFirst()), emit: emit)
         default:
-            return try run(arguments: arguments)
+            return try run(arguments: arguments, storage: storage)
         }
     }
 
@@ -65,7 +95,15 @@ public enum DesignFlowCLICommand {
         arguments: [String],
         emit: @Sendable (String) async throws -> Void = { _ in }
     ) async throws -> DesignFlowCLIExecutionResult {
-        let output = try await runStreaming(arguments: arguments, emit: emit)
+        try await runProcess(arguments: arguments, storage: XcircuitePackageStore(), emit: emit)
+    }
+
+    public static func runProcess(
+        arguments: [String],
+        storage: any FlowExecutionStorage,
+        emit: @Sendable (String) async throws -> Void = { _ in }
+    ) async throws -> DesignFlowCLIExecutionResult {
+        let output = try await runStreaming(arguments: arguments, storage: storage, emit: emit)
         return DesignFlowCLIExecutionResult(
             output: output,
             exitCode: processExitCode(for: arguments, output: output)
@@ -506,7 +544,10 @@ public enum DesignFlowCLICommand {
         return try encode(result, pretty: pretty)
     }
 
-    private static func buildRetentionIndex(arguments: [String]) throws -> String {
+    private static func buildRetentionIndex(
+        arguments: [String],
+        storage: any FlowExecutionStorage
+    ) throws -> String {
         var parser = DesignFlowCLIArgumentParser(arguments: arguments)
         var projectRoot: URL?
         var runID: String?
@@ -573,12 +614,14 @@ public enum DesignFlowCLICommand {
             throw DesignFlowCLIError.missingOption("--minimum-retention-days")
         }
 
-        let packageStore = XcircuitePackageStore()
-        try packageStore.ensureRunDirectory(
+        try storage.ensureRunDirectory(
             for: runID,
             inProjectAt: projectRoot
         )
-        let index = try DefaultFlowRunReleaseRetentionIndexBuilder(packageStore: packageStore).build(
+        let index = try DefaultFlowRunReleaseRetentionIndexBuilder(
+            packageStore: storage,
+            validator: DefaultFlowRunReleaseRetentionIndexValidator(packageStore: storage)
+        ).build(
             runID: runID,
             workflowRunID: workflowRunID,
             projectRoot: projectRoot,
@@ -589,28 +632,35 @@ public enum DesignFlowCLICommand {
             minimumRetentionDays: minimumRetentionDays,
             recordedAt: recordedAt
         )
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try storage.runDirectory(
+            for: runID,
+            inProjectAt: projectRoot
+        )
         let qualificationDirectory = runDirectory.appending(path: "qualification")
-        try packageStore.ensureDirectory(at: qualificationDirectory)
+        try storage.ensureDirectory(at: qualificationDirectory)
         let indexURL = qualificationDirectory.appending(path: "retention-index.json")
-        try packageStore.writeJSON(index, to: indexURL, forProjectAt: projectRoot)
+        try storage.writeJSON(index, to: indexURL, forProjectAt: projectRoot)
         let relativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json"
-        let reference = try packageStore.fileReference(
+        let reference = try storage.fileReference(
             forProjectRelativePath: relativePath,
             artifactID: "qualification-retention-index",
             kind: .release,
             format: .json,
             inProjectAt: projectRoot,
-            producedByRunID: runID
+            producedByRunID: runID,
+            verifiedByRunID: nil
         )
-        try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try storage.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return try encode(
             FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: reference),
             pretty: pretty
         )
     }
 
-    private static func validateRetentionIndex(arguments: [String]) throws -> String {
+    private static func validateRetentionIndex(
+        arguments: [String],
+        storage: any FlowExecutionStorage
+    ) throws -> String {
         var parser = DesignFlowCLIArgumentParser(arguments: arguments)
         var projectRoot: URL?
         var runID: String?
@@ -641,13 +691,12 @@ public enum DesignFlowCLICommand {
             throw DesignFlowCLIError.missingOption("--run-id")
         }
 
-        let packageStore = XcircuitePackageStore()
-        let indexURL = try packageStore.url(
+        let indexURL = try storage.url(
             forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json",
             inProjectAt: projectRoot
         )
-        let index = try packageStore.readJSON(FlowRunReleaseRetentionIndex.self, from: indexURL)
-        let result = try DefaultFlowRunReleaseRetentionIndexValidator(packageStore: packageStore).validate(
+        let index = try storage.readJSON(FlowRunReleaseRetentionIndex.self, from: indexURL)
+        let result = try DefaultFlowRunReleaseRetentionIndexValidator(packageStore: storage).validate(
             index: index,
             runID: runID,
             projectRoot: projectRoot,
