@@ -13,6 +13,7 @@
 | Reproducibility | Persist request, stage results, events, and artifact references through `FlowRunLedgerPersisting`. |
 | Agent operation | Keep typed CLI/API state and structured diagnostics. |
 | Human review | Preserve approval, diff, artifact, and failure evidence. |
+| Foundation-first storage | Expose `makeArtifactReference` and `registerArtifact` with `CircuiteFoundation` types; retain deprecated legacy persistence calls only for migration reads/writes. |
 
 ## Foundation contract
 
