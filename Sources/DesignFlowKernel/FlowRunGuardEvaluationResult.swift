@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct FlowRunGuardEvaluationResult: Sendable, Hashable, Codable {
@@ -5,14 +6,15 @@ public struct FlowRunGuardEvaluationResult: Sendable, Hashable, Codable {
     public var profileID: String
     public var snapshot: XcircuiteAgentLoopSnapshot
     public var verdict: XcircuiteRunGuardVerdict
-    public var artifactReferences: [XcircuiteFileReference]
+    /// Canonical artifacts produced or consumed while evaluating the guard.
+    public var artifactReferences: [ArtifactReference]
 
     public init(
         runID: String,
         profileID: String,
         snapshot: XcircuiteAgentLoopSnapshot,
         verdict: XcircuiteRunGuardVerdict,
-        artifactReferences: [XcircuiteFileReference] = []
+        artifactReferences: [ArtifactReference] = []
     ) {
         self.runID = runID
         self.profileID = profileID
@@ -21,4 +23,3 @@ public struct FlowRunGuardEvaluationResult: Sendable, Hashable, Codable {
         self.artifactReferences = artifactReferences
     }
 }
-

@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuilding {
@@ -854,7 +855,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         _ envelope: FlowRunReleaseEnvelope,
         runID: String,
         projectRoot: URL
-    ) throws -> XcircuiteFileReference {
+    ) throws -> ArtifactReference {
         let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let qualificationDirectory = runDirectory.appending(path: "qualification")
         try packageStore.ensureDirectory(at: qualificationDirectory)
@@ -862,16 +863,18 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         try packageStore.writeJSON(envelope, to: envelopeURL, forProjectAt: projectRoot)
 
         let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.fileReference(
+        let reference = try packageStore.makeArtifactReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
+            role: .output,
             kind: .report,
             format: .json,
             inProjectAt: projectRoot,
-            producedByRunID: runID
+            producedByRunID: runID,
+            verifiedByRunID: nil
         )
         do {
-            try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         } catch {
             guard envelope.diagnostics.contains(where: { $0.code == "release-envelope-run-manifest-unreadable" }) else {
                 throw error

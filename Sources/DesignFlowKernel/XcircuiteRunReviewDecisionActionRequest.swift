@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct XcircuiteRunReviewDecisionActionRequest: Sendable, Hashable, Codable {
@@ -11,8 +12,8 @@ public struct XcircuiteRunReviewDecisionActionRequest: Sendable, Hashable, Codab
     public var targetPath: String?
     public var reason: String
     public var status: XcircuiteRunActionStatus
-    public var inputs: [XcircuiteFileReference]
-    public var outputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
+    public var outputs: [ArtifactReference]
     public var diagnostics: [XcircuiteRunActionDiagnostic]
     public var metadata: [String: XcircuiteJSONValue]
     public var createdAt: Date
@@ -28,8 +29,8 @@ public struct XcircuiteRunReviewDecisionActionRequest: Sendable, Hashable, Codab
         targetPath: String? = nil,
         reason: String = "",
         status: XcircuiteRunActionStatus = .succeeded,
-        inputs: [XcircuiteFileReference] = [],
-        outputs: [XcircuiteFileReference] = [],
+        inputs: [ArtifactReference] = [],
+        outputs: [ArtifactReference] = [],
         diagnostics: [XcircuiteRunActionDiagnostic] = [],
         metadata: [String: XcircuiteJSONValue] = [:],
         createdAt: Date = Date()

@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct XcircuiteRunGuardVerdict: Sendable, Hashable, Codable {
@@ -93,7 +94,8 @@ public struct XcircuiteRunGuardVerdict: Sendable, Hashable, Codable {
     public var triggeredDetectors: [DetectorResult]
     public var requiredActions: [RequiredAction]
     public var suggestedCommands: [SuggestedCommand]
-    public var artifactReferences: [XcircuiteFileReference]
+    /// Canonical artifacts used as evidence for this verdict.
+    public var artifactReferences: [ArtifactReference]
     public var metadata: [String: XcircuiteJSONValue]
 
     public init(
@@ -107,7 +109,7 @@ public struct XcircuiteRunGuardVerdict: Sendable, Hashable, Codable {
         triggeredDetectors: [DetectorResult] = [],
         requiredActions: [RequiredAction] = [],
         suggestedCommands: [SuggestedCommand] = [],
-        artifactReferences: [XcircuiteFileReference] = [],
+        artifactReferences: [ArtifactReference] = [],
         metadata: [String: XcircuiteJSONValue] = [:]
     ) {
         self.schemaVersion = schemaVersion
@@ -124,4 +126,3 @@ public struct XcircuiteRunGuardVerdict: Sendable, Hashable, Codable {
         self.metadata = metadata
     }
 }
-

@@ -33,8 +33,8 @@ extension FlowRunLedgerSummaryTests {
         projectRoot: root
     )
 
-    #expect(result.artifact.artifactID == "qualification-release-envelope")
-    #expect(result.artifact.path == ".xcircuite/runs/run-1/qualification/release-envelope.json")
+    #expect(result.artifact.id.rawValue == "qualification-release-envelope")
+    #expect(result.artifact.locator.location.value == ".xcircuite/runs/run-1/qualification/release-envelope.json")
     #expect(result.envelope.status == .blocked)
     #expect(result.envelope.requirements.contains {
         $0.requirementID == "decision-packet-validation" && $0.status == .needsReview

@@ -99,6 +99,7 @@ extension XcircuitePackageStore {
         try validateApprovalIdentifiers(record.runID, stageID: record.stageID)
         let approvalReference = try writeApprovalArtifact(record, inProjectAt: projectRoot)
         let approvalPath = approvalReference.path
+        let foundationApprovalReference = try approvalReference.foundationArtifactReference()
 
         return try appendReviewDecisionAction(
             XcircuiteRunReviewDecisionActionRequest(
@@ -111,7 +112,7 @@ extension XcircuitePackageStore {
                 targetID: record.stageID,
                 targetPath: approvalPath,
                 reason: record.note,
-                outputs: [approvalReference],
+                outputs: [foundationApprovalReference],
                 diagnostics: [
                     XcircuiteRunActionDiagnostic(
                         severity: record.verdict == .approved ? .info : .warning,

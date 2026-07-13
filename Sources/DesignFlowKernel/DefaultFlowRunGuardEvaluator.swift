@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunGuardEvaluator: Sendable {
@@ -26,6 +27,9 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             generatedAt: generatedAt,
             persist: persist
         )
+        let foundationArtifactReferences = try summary.artifactReferences.map {
+            try $0.foundationArtifactReference()
+        }
         let verdict = buildVerdict(
             runID: runID,
             projectRoot: projectRoot,
@@ -33,13 +37,15 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             snapshot: summary.snapshot,
             iterations: summary.iterations,
             generatedAt: generatedAt,
-            artifactReferences: summary.artifactReferences
+            artifactReferences: foundationArtifactReferences
         )
-        var artifactReferences = summary.artifactReferences
+        var artifactReferences = foundationArtifactReferences
         if persist {
-            artifactReferences.append(
-                try packageStore.writeRunGuardVerdict(verdict, inProjectAt: projectRoot)
+            let verdictArtifact = try packageStore.writeRunGuardVerdict(
+                verdict,
+                inProjectAt: projectRoot
             )
+            artifactReferences.append(try verdictArtifact.foundationArtifactReference())
         }
         return FlowRunGuardEvaluationResult(
             runID: runID,
@@ -57,7 +63,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         snapshot: XcircuiteAgentLoopSnapshot,
         iterations: [XcircuiteLoopIterationSummary],
         generatedAt: Date,
-        artifactReferences: [XcircuiteFileReference]
+        artifactReferences: [ArtifactReference]
     ) -> XcircuiteRunGuardVerdict {
         var detectors: [XcircuiteRunGuardVerdict.DetectorResult] = []
         var requiredActions: [XcircuiteRunGuardVerdict.RequiredAction] = []
@@ -427,4 +433,3 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         return result
     }
 }
-

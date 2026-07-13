@@ -19,8 +19,8 @@ extension XcircuitePackageStore {
             actor: request.actor,
             actionKind: request.decisionKind.rawValue,
             status: request.status,
-            inputs: request.inputs,
-            outputs: request.outputs,
+            inputs: try request.inputs.map { try $0.legacyXcircuiteReference() },
+            outputs: try request.outputs.map { try $0.legacyXcircuiteReference() },
             diagnostics: request.diagnostics,
             metadata: reviewDecisionMetadata(for: request),
             createdAt: request.createdAt
