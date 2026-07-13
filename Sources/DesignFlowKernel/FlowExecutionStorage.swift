@@ -98,6 +98,18 @@ public protocol FlowExecutionStorage: Sendable {
         inProjectAt projectRoot: URL
     ) throws
 
+    /// Registers a project-level artifact in the workspace manifest.
+    ///
+    /// Planning and qualification fixtures may be shared by more than one
+    /// run. New flow code should prefer the Foundation artifact envelope or a
+    /// run-ledger registration, while this operation remains available at the
+    /// legacy filesystem boundary during migration.
+    @available(*, deprecated, message: "Use a workspace artifact registration API.")
+    func upsertFileReference(
+        _ reference: XcircuiteFileReference,
+        forProjectAt projectRoot: URL
+    ) throws
+
     func writeArtifactEnvelope(
         _ envelope: XcircuiteArtifactEnvelope,
         runID: String,
