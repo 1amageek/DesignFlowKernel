@@ -2,7 +2,7 @@ import DesignFlowCLISupport
 import DesignFlowKernel
 import Foundation
 import Testing
-import XcircuitePackage
+import DesignFlowKernel
 
 @Suite("Flow run loop guard", .timeLimit(.minutes(1)))
 struct FlowRunLoopGuardTests {

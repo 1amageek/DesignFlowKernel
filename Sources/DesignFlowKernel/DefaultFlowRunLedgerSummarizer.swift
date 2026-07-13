@@ -1,6 +1,5 @@
 import Foundation
 import ToolQualification
-import XcircuitePackage
 
 public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
     private let identifierPolicy = FlowRunReviewIdentifierPolicy()

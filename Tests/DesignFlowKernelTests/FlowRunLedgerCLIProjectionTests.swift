@@ -3,7 +3,7 @@ import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
-import XcircuitePackage
+import DesignFlowKernel
 
 extension FlowRunLedgerSummaryTests {
 @Test func inspectRunCLICommandEmitsSummaryJSON() async throws {

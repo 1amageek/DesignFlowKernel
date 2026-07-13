@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 private struct RetainedHistoryReviewSignal {
     var artifactPaths: Set<String> = []

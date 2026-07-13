@@ -9,14 +9,14 @@ let package = Package(
         .executable(name: "design-flow", targets: ["DesignFlowCLI"]),
     ],
     dependencies: [
-        .package(path: "../XcircuitePackage"),
+        .package(path: "../CircuiteFoundation"),
         .package(path: "../ToolQualification"),
     ],
     targets: [
         .target(
             name: "DesignFlowKernel",
             dependencies: [
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
             ]
         ),
@@ -33,6 +33,7 @@ let package = Package(
             dependencies: [
                 "DesignFlowKernel",
                 "DesignFlowCLISupport",
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
             ]
         ),
     ]

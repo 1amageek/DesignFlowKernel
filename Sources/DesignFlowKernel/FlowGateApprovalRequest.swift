@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
     public var projectRoot: URL

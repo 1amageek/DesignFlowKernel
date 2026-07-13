@@ -1,6 +1,5 @@
 import Foundation
 import ToolQualification
-import XcircuitePackage
 
 public struct DefaultFlowRunResumer: FlowRunResuming {
     private let loader: FlowRunLedgerLoading

@@ -3,7 +3,7 @@ import DesignFlowCLISupport
 import DesignFlowKernel
 import Testing
 import ToolQualification
-import XcircuitePackage
+import DesignFlowKernel
 
 @Suite("Default flow orchestrator")
 struct DefaultFlowOrchestratorTests {

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunGuardEvaluator: Sendable {
     private let snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder

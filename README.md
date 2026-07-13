@@ -1,5 +1,36 @@
 # DesignFlowKernel
 
+## CircuiteFoundation boundary
+
+DesignFlowKernel is an independent flow coordinator. It owns stage ordering,
+tool trust gates, retry policy, approval decisions, run persistence, and resume.
+It does not own circuit, layout, simulation, DRC, LVS, or PEX algorithms.
+`CircuiteFoundation` supplies the shared `Engine`, artifact, evidence,
+provenance, diagnostic, and design-object contracts.
+
+```mermaid
+flowchart LR
+    Request["FlowEngineRequest"] --> Engine["DefaultFlowEngine"]
+    Engine --> Orchestrator["Flow orchestrator"]
+    Orchestrator --> Domain["Independent domain engines"]
+    Orchestrator --> Ledger["Run ledger / gates / resume"]
+    Ledger --> Evidence["DesignFlowFoundationEvidence"]
+    Evidence --> Foundation["EvidenceManifest + DesignDiagnostic"]
+```
+
+Use `DefaultFlowEngine` when a caller needs the Foundation `Engine` protocol;
+use `DefaultFlowOrchestrator` directly when constructing a flow with explicit
+runtime dependencies. `DesignFlowFoundationEvidence` is the cross-engine view
+and is deliberately strict: an artifact without a valid SHA-256 digest and
+byte count cannot be promoted to Foundation evidence.
+
+Persistence is injected through `FlowRunLedgerPersisting`; the kernel does not
+select a filesystem format or create a `.xcircuite` directory. `Xcircuite`
+provides the concrete `XcircuiteWorkspaceStore` and
+`XcircuiteRunLedgerStore` implementations. The Foundation boundary is an
+explicit projection from a flow result, while lifecycle and approval remain
+kernel-owned.
+
 Shared flow kernel for the semiconductor design platform. Humans (circuit-studio),
 agents, and CI run the same flow through this kernel so that tool selection, trust
 gates, stage results, and artifacts have one meaning. The kernel owns ordering,
@@ -13,7 +44,7 @@ gating, persistence, and resume — it contains no SPICE/DRC/LVS/PEX domain logi
 | `FlowOperationRequest` | Project root, run ID, intent, stage sequence |
 | `FlowStageDefinition` | Stage ID, display name, tool trust requirement, `requiresApproval`, retry policy |
 | `FlowStageExecutor` | Protocol: delegates domain-specific stage execution to engine adapters |
-| `DefaultFlowOrchestrator` | Creates `.xcircuite/runs/<run-id>/`, applies tool trust gates, executes stages, applies the approval gate, persists results |
+| `DefaultFlowOrchestrator` | Applies tool trust gates, executes stages, applies the approval gate, and persists results through an injected ledger boundary |
 | `FlowStageResult` / `FlowStageStatus` | Typed stage outcome: status, diagnostics, gate results, artifact references, attempt records |
 | `FlowStageRetryPolicy` / `FlowStageAttemptRecord` | Bounded stage retry contract and persisted per-attempt audit trail |
 | `FlowGateResult` / `FlowGateStatus` | Pass/fail/waived/incomplete per gate |
@@ -108,8 +139,8 @@ is directly reproducible from a clean CI workspace.
 
 ## Review contract
 
-`DefaultFlowRunReviewBundler` loads the same `.xcircuite/runs/<run-id>/` ledger as
-the flow kernel and emits a `FlowRunReviewBundle`. The bundle does not invent UI
+`DefaultFlowRunReviewBundler` loads a `FlowRunLedger` through the injected ledger
+boundary and emits a `FlowRunReviewBundle`. The bundle does not invent UI
 state. It points review items back to ledger artifacts such as `manifest.json`,
 `plan.json`, `toolchain.json`, `design-diff.json`, stage `result.json`, stage
 artifacts, and approval records. Stage artifacts preserve their stable
@@ -120,9 +151,9 @@ guessing. Stage artifacts also carry `integrity.status`, `expectedSHA256`,
 possible. Missing files, missing digests, missing byte counts, invalid digests,
 invalid byte counts, byte-count mismatches, digest mismatches, invalid paths, and
 unreadable artifacts become typed review state instead of silent UI warnings. The
-underlying path, symlink, digest, and byte-count checks come from
-`XcircuiteFileReferenceVerifier` in `XcircuitePackage`, so runtime input resolution
-and review use the same artifact-integrity rules.
+underlying path, symlink, digest, and byte-count checks come from the
+Foundation `LocalArtifactVerifier`; the concrete Xcircuite workspace store
+applies the filesystem boundary before the kernel receives a ledger.
 Failed or incomplete `*-artifacts` gates are surfaced separately as artifact
 coverage repair work, which lets agents distinguish "the engine found a design
 problem" from "the engine produced evidence that the flow ledger did not index."
@@ -166,7 +197,10 @@ design-flow approve-gate --project-root <path> --run-id <id> --stage-id <id> --v
 
 ## Dependencies
 
-`XcircuitePackage` (artifact contract), `ToolQualification` (trust gates).
+`CircuiteFoundation` (shared engine/evidence/artifact contracts),
+`Xcircuite workspace` (local `.xcircuite/` run ledger and persistence), and
+`ToolQualification` (tool trust gates). Foundation is the cross-package
+contract; DesignFlowKernel remains the owner of flow lifecycle and resume.
 
 ## Build & test
 

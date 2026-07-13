@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuilding {
     public static let artifactID = "qualification-release-envelope"

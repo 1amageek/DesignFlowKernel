@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
     public struct CoverageRef: Sendable, Hashable, Codable {

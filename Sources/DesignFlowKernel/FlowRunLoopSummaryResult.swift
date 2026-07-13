@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunLoopSummaryResult: Sendable, Hashable, Codable {
     public var runID: String

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public enum FlowRunResumeError: Error, Equatable, LocalizedError {
     case missingPlan(String)

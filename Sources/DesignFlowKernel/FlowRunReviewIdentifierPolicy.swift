@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 struct FlowRunReviewIdentifierPolicy: Sendable {
     private let validator: XcircuiteIdentifierValidator

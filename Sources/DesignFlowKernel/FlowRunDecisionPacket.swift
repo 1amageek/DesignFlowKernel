@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
     public enum Readiness: String, Sendable, Hashable, Codable {

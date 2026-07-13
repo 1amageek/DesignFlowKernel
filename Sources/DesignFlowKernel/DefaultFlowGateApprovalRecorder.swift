@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
     private let packageStore: XcircuitePackageStore

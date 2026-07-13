@@ -1,6 +1,5 @@
 import Foundation
 import ToolQualification
-import XcircuitePackage
 
 public struct FlowExecutionContext: Sendable {
     public var projectRoot: URL

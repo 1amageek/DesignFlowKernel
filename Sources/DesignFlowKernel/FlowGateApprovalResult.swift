@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowGateApprovalResult: Sendable, Hashable, Codable {
     public var approval: XcircuiteApprovalRecord

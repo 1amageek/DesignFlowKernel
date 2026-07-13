@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReviewArtifact: Sendable, Hashable, Codable {
     public var role: String

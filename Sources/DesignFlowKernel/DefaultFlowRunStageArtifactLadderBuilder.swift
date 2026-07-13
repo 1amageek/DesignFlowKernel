@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadderBuilding {
     public static let artifactID = "review-stage-artifact-ladder"

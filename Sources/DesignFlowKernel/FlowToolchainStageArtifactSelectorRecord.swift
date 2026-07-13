@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowToolchainStageArtifactSelectorRecord: Sendable, Hashable, Codable {
     public var stageID: String

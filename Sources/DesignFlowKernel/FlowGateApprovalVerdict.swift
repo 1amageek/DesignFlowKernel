@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public enum FlowGateApprovalVerdict: String, Sendable, Hashable, Codable {
     case approved

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1

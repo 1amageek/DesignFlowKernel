@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding {
     public static let artifactID = "review-decision-packet"

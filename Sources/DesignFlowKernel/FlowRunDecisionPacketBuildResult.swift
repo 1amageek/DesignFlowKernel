@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunDecisionPacketBuildResult: Sendable, Hashable, Codable {
     public var packet: FlowRunDecisionPacket

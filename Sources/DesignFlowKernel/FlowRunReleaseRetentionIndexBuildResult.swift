@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReleaseRetentionIndexBuildResult: Sendable, Hashable, Codable {
     public var index: FlowRunReleaseRetentionIndex

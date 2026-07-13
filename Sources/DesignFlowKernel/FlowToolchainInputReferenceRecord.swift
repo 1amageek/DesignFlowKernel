@@ -1,7 +1,10 @@
 import Foundation
+import CircuiteFoundation
 
 public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
     case path(String)
+    case artifact(XcircuiteFileReference)
+    case foundationArtifact(ArtifactReference)
     case stageArtifact(FlowToolchainStageArtifactSelectorRecord)
     case stageRawArtifact(FlowToolchainStageRawArtifactRecord)
 
@@ -12,6 +15,8 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
 
     private enum Kind: String, Codable {
         case path
+        case artifact
+        case foundationArtifact
         case stageArtifact
         case stageRawArtifact
     }
@@ -22,6 +27,10 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
         switch kind {
         case .path:
             self = .path(try container.decode(String.self, forKey: .value))
+        case .artifact:
+            self = .artifact(try container.decode(XcircuiteFileReference.self, forKey: .value))
+        case .foundationArtifact:
+            self = .foundationArtifact(try container.decode(ArtifactReference.self, forKey: .value))
         case .stageArtifact:
             self = .stageArtifact(
                 try container.decode(FlowToolchainStageArtifactSelectorRecord.self, forKey: .value)
@@ -39,6 +48,12 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
         case .path(let path):
             try container.encode(Kind.path, forKey: .kind)
             try container.encode(path, forKey: .value)
+        case .artifact(let artifact):
+            try container.encode(Kind.artifact, forKey: .kind)
+            try container.encode(artifact, forKey: .value)
+        case .foundationArtifact(let artifact):
+            try container.encode(Kind.foundationArtifact, forKey: .kind)
+            try container.encode(artifact, forKey: .value)
         case .stageArtifact(let artifact):
             try container.encode(Kind.stageArtifact, forKey: .kind)
             try container.encode(artifact, forKey: .value)

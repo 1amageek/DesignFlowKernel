@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceCollecting {
     public static let corpusHistoryArtifactID = "qualification-corpus-history"

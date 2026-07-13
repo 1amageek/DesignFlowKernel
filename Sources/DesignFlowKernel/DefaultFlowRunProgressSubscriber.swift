@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
     private let progressStore: FlowRunProgressStore

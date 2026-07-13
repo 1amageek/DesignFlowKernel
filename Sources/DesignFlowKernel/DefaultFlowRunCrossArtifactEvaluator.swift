@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private let loader: any FlowRunLedgerLoading

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunDesignDiffSummary: Sendable, Hashable, Codable {
     public var title: String

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetentionIndexValidating {
     private let packageStore: XcircuitePackageStore

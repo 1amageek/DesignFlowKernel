@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunStageArtifactLadderBuildResult: Sendable, Hashable, Codable {
     public var ladder: FlowRunStageArtifactLadder

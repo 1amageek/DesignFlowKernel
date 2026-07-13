@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunProgressStore: Sendable {
     public static let progressRelativePath = "progress.jsonl"

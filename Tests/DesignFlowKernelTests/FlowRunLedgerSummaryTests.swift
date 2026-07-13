@@ -3,7 +3,7 @@ import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
-import XcircuitePackage
+import DesignFlowKernel
 
 @Suite("Flow run ledger summary")
 struct FlowRunLedgerSummaryTests {}

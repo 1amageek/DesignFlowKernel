@@ -2,7 +2,7 @@ import DesignFlowKernel
 import DesignFlowCLISupport
 import Foundation
 import Testing
-import XcircuitePackage
+import DesignFlowKernel
 
 @Suite("Release retention index")
 struct FlowRunReleaseRetentionIndexTests {

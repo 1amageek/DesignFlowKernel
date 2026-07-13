@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReleaseCorpusHistory: Sendable, Hashable, Codable {
     public struct DomainSummary: Sendable, Hashable, Codable {

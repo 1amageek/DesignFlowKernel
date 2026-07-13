@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
     private let packageStore: XcircuitePackageStore

@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
     public enum Status: String, Sendable, Hashable, Codable {

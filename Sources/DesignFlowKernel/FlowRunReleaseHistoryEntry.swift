@@ -1,5 +1,4 @@
 import Foundation
-import XcircuitePackage
 
 public struct FlowRunReleaseHistoryEntry: Sendable, Hashable, Codable {
     public var sequence: Int
