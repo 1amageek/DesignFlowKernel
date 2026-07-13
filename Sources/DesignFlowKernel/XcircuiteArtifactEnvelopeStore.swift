@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 extension XcircuitePackageStore {
@@ -6,7 +7,7 @@ extension XcircuitePackageStore {
         _ envelope: XcircuiteArtifactEnvelope,
         runID: String,
         inProjectAt projectRoot: URL
-    ) throws -> XcircuiteFileReference {
+    ) throws -> ArtifactReference {
         try XcircuiteIdentifierValidator().validate(runID, kind: .runID)
         try XcircuiteArtifactEnvelopeValidator().validate(envelope)
         try verifyArtifactEnvelopeReference(envelope.reference, projectRoot: projectRoot)
@@ -36,7 +37,7 @@ extension XcircuitePackageStore {
             producedByRunID: runID
         )
         try upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
-        return reference
+        return try reference.foundationArtifactReference()
     }
 
     public func loadArtifactEnvelope(
@@ -83,18 +84,14 @@ extension XcircuitePackageStore {
     }
 
     private func verifyArtifactEnvelopeReference(
-        _ reference: XcircuiteFileReference,
+        _ reference: ArtifactReference,
         projectRoot: URL
     ) throws {
-        let integrity = XcircuiteFileReferenceVerifier().verify(
-            reference,
-            projectRoot: projectRoot
-        )
-        guard integrity.status == .verified else {
+        let integrity = LocalArtifactVerifier().verify(reference, relativeTo: projectRoot)
+        guard integrity.isVerified else {
             throw XcircuiteArtifactEnvelopeValidationError.referenceIntegrityFailed(
                 path: reference.path,
-                status: integrity.status,
-                message: integrity.message
+                message: integrity.issues.map { $0.code.rawValue }.joined(separator: ", ")
             )
         }
     }

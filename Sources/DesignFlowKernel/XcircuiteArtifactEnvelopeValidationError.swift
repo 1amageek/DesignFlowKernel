@@ -6,7 +6,7 @@ public enum XcircuiteArtifactEnvelopeValidationError: Error, LocalizedError, Equ
     case invalidIdentifier(field: String, value: String)
     case artifactIDMismatch(envelopeArtifactID: String, referenceArtifactID: String)
     case negativeByteCount(Int64)
-    case referenceIntegrityFailed(path: String, status: XcircuiteFileReferenceIntegrityStatus, message: String)
+    case referenceIntegrityFailed(path: String, message: String)
     case invalidConfidence(field: String, value: Double)
     case invalidPosteriorVariance(field: String, value: Double)
 
@@ -22,8 +22,8 @@ public enum XcircuiteArtifactEnvelopeValidationError: Error, LocalizedError, Equ
             "Artifact envelope ID \(envelopeArtifactID) does not match file reference artifact ID \(referenceArtifactID)."
         case .negativeByteCount(let byteCount):
             "Artifact envelope file reference byte count must be non-negative: \(byteCount)."
-        case .referenceIntegrityFailed(let path, let status, let message):
-            "Artifact envelope file reference integrity failed for \(path): \(status.rawValue). \(message)"
+        case .referenceIntegrityFailed(let path, let message):
+            "Artifact envelope file reference integrity failed for \(path): \(message)"
         case .invalidConfidence(let field, let value):
             "Artifact envelope confidence value must be in 0...1: \(field)=\(value)."
         case .invalidPosteriorVariance(let field, let value):

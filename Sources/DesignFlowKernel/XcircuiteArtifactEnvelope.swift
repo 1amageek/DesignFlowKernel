@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct XcircuiteArtifactEnvelope: Sendable, Hashable, Codable {
@@ -5,7 +6,7 @@ public struct XcircuiteArtifactEnvelope: Sendable, Hashable, Codable {
     public var artifactID: String
     public var role: String
     public var stageID: String?
-    public var reference: XcircuiteFileReference
+    public var reference: ArtifactReference
     public var producer: XcircuiteArtifactProducer?
     public var inputs: [XcircuiteArtifactDependency]
     public var dependencies: [XcircuiteArtifactDependency]
@@ -20,7 +21,7 @@ public struct XcircuiteArtifactEnvelope: Sendable, Hashable, Codable {
         artifactID: String,
         role: String,
         stageID: String? = nil,
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         producer: XcircuiteArtifactProducer? = nil,
         inputs: [XcircuiteArtifactDependency] = [],
         dependencies: [XcircuiteArtifactDependency] = [],
@@ -44,4 +45,5 @@ public struct XcircuiteArtifactEnvelope: Sendable, Hashable, Codable {
         self.delegationCertificate = delegationCertificate
         self.metadata = metadata
     }
+
 }

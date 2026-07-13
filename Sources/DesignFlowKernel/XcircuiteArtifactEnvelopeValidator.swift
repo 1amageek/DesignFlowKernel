@@ -14,15 +14,11 @@ public struct XcircuiteArtifactEnvelopeValidator: Sendable {
         try validateIdentifier(envelope.artifactID, field: "artifactID", kind: .artifactID)
         try validateNonEmpty(envelope.role, field: "role")
         try validateNonEmpty(envelope.reference.path, field: "reference.path")
-        if let referenceArtifactID = envelope.reference.artifactID,
-           referenceArtifactID != envelope.artifactID {
+        if envelope.reference.artifactID != envelope.artifactID {
             throw XcircuiteArtifactEnvelopeValidationError.artifactIDMismatch(
                 envelopeArtifactID: envelope.artifactID,
-                referenceArtifactID: referenceArtifactID
+                referenceArtifactID: envelope.reference.artifactID
             )
-        }
-        if let byteCount = envelope.reference.byteCount, byteCount < 0 {
-            throw XcircuiteArtifactEnvelopeValidationError.negativeByteCount(byteCount)
         }
         try validateProducer(envelope.producer)
         try validateDependencies(envelope.inputs, field: "inputs")

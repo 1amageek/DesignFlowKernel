@@ -24,7 +24,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         let envelopes = try loadArtifactEnvelopes(from: ledger)
         let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
         let iterations = buildIterations(from: ledger, envelopes: envelopes)
-        let snapshot = buildSnapshot(
+        let snapshot = try buildSnapshot(
             from: ledger,
             profile: profile,
             iterations: iterations,
@@ -117,8 +117,8 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         envelopes: [XcircuiteArtifactEnvelope],
         generatedAt: Date,
         projectRoot: URL
-    ) -> XcircuiteAgentLoopSnapshot {
-        let evidenceCoverage = evidenceCoverage(
+    ) throws -> XcircuiteAgentLoopSnapshot {
+        let evidenceCoverage = try evidenceCoverage(
             profile: profile,
             artifactReferences: artifactReferences,
             envelopes: envelopes,
@@ -192,7 +192,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         references.append(contentsOf: try ledger.stages
             .flatMap(\.artifacts)
             .map { try $0.legacyXcircuiteReference() })
-        references.append(contentsOf: envelopes.map(\.reference))
+        references.append(contentsOf: try envelopes.map { try $0.reference.legacyXcircuiteReference() })
         return stableUniqueReferences(references)
     }
 
@@ -232,12 +232,12 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         envelopes: [XcircuiteArtifactEnvelope],
         generatedAt: Date,
         projectRoot: URL
-    ) -> XcircuiteAgentLoopSnapshot.EvidenceCoverage {
+    ) throws -> XcircuiteAgentLoopSnapshot.EvidenceCoverage {
         let availableArtifactIDs = stableUnique(
             artifactReferences.compactMap(\.artifactID) + envelopes.map(\.artifactID)
         )
-        let items = profile.requiredEvidence.map { requiredEvidence in
-            evidenceCoverageItem(
+        let items = try profile.requiredEvidence.map { requiredEvidence in
+            try evidenceCoverageItem(
                 requiredEvidence,
                 artifactReferences: artifactReferences,
                 envelopes: envelopes,
@@ -264,12 +264,12 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         envelopes: [XcircuiteArtifactEnvelope],
         generatedAt: Date,
         projectRoot: URL
-    ) -> XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item {
+    ) throws -> XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item {
         let matchingEnvelopes = envelopes.filter { envelope in
             evidenceMatches(requiredEvidence, envelope: envelope)
         }
         let matchingReferences = stableUniqueReferences(
-            matchingEnvelopes.map(\.reference) + artifactReferences.filter { reference in
+            (try matchingEnvelopes.map { try $0.reference.legacyXcircuiteReference() }) + artifactReferences.filter { reference in
                 evidenceMatches(requiredEvidence, reference: reference)
             }
         )
