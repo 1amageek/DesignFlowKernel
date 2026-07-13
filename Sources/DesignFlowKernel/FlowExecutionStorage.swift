@@ -75,6 +75,30 @@ public protocol FlowExecutionStorage: Sendable {
     ) throws -> FlowRunCancellationRequest?
 }
 
+public extension FlowExecutionStorage {
+    /// Convenience overload preserving the store API's optional provenance
+    /// arguments while callers migrate to the protocol.
+    func fileReference(
+        forProjectRelativePath path: String,
+        artifactID: String? = nil,
+        kind: XcircuiteFileKind,
+        format: XcircuiteFileFormat,
+        inProjectAt projectRoot: URL,
+        producedByRunID: String? = nil,
+        verifiedByRunID: String? = nil
+    ) throws -> XcircuiteFileReference {
+        try fileReference(
+            forProjectRelativePath: path,
+            artifactID: artifactID,
+            kind: kind,
+            format: format,
+            inProjectAt: projectRoot,
+            producedByRunID: producedByRunID,
+            verifiedByRunID: verifiedByRunID
+        )
+    }
+}
+
 extension XcircuitePackageStore: FlowExecutionStorage {
     public func runDirectory(
         for runID: String,
