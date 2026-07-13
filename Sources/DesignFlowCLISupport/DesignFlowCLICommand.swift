@@ -3,7 +3,10 @@ import Foundation
 
 public enum DesignFlowCLICommand {
     public static func run(arguments: [String]) throws -> String {
-        try run(arguments: arguments, storage: XcircuitePackageStore())
+        try run(
+            arguments: arguments,
+            storage: DesignFlowStorageDefaults.makeExecutionStorage()
+        )
     }
 
     /// Runs a command with an injected flow storage capability.
@@ -72,7 +75,7 @@ public enum DesignFlowCLICommand {
     ) async throws -> String {
         try await runStreaming(
             arguments: arguments,
-            storage: XcircuitePackageStore(),
+            storage: DesignFlowStorageDefaults.makeExecutionStorage(),
             emit: emit
         )
     }
@@ -102,7 +105,11 @@ public enum DesignFlowCLICommand {
         arguments: [String],
         emit: @Sendable (String) async throws -> Void = { _ in }
     ) async throws -> DesignFlowCLIExecutionResult {
-        try await runProcess(arguments: arguments, storage: XcircuitePackageStore(), emit: emit)
+        try await runProcess(
+            arguments: arguments,
+            storage: DesignFlowStorageDefaults.makeExecutionStorage(),
+            emit: emit
+        )
     }
 
     public static func runProcess(
@@ -647,19 +654,26 @@ public enum DesignFlowCLICommand {
         try storage.ensureDirectory(at: qualificationDirectory)
         let indexURL = qualificationDirectory.appending(path: "retention-index.json")
         try storage.writeJSON(index, to: indexURL, forProjectAt: projectRoot)
-        let relativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json"
-        let reference = try storage.fileReference(
-            forProjectRelativePath: relativePath,
+        let reference = try storage.makeArtifactReference(
+            forProjectRelativePath: try projectRelativePath(
+                for: indexURL,
+                inProjectAt: projectRoot
+            ),
             artifactID: "qualification-retention-index",
+            role: .output,
             kind: .release,
             format: .json,
             inProjectAt: projectRoot,
             producedByRunID: runID,
             verifiedByRunID: nil
         )
-        try storage.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        // The retention result remains a frozen legacy record until its
+        // public schema is migrated. Keep this conversion at the CLI output
+        // boundary; storage and registration stay Foundation-native.
+        let legacyReference = try reference.legacyXcircuiteReference()
         return try encode(
-            FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: reference),
+            FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: legacyReference),
             pretty: pretty
         )
     }
@@ -698,10 +712,13 @@ public enum DesignFlowCLICommand {
             throw DesignFlowCLIError.missingOption("--run-id")
         }
 
-        let indexURL = try storage.url(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/qualification/retention-index.json",
+        let runDirectory = try storage.runDirectory(
+            for: runID,
             inProjectAt: projectRoot
         )
+        let indexURL = runDirectory
+            .appending(path: "qualification")
+            .appending(path: "retention-index.json")
         let index = try storage.readJSON(FlowRunReleaseRetentionIndex.self, from: indexURL)
         let result = try DefaultFlowRunReleaseRetentionIndexValidator(packageStore: storage).validate(
             index: index,
@@ -872,6 +889,26 @@ public enum DesignFlowCLICommand {
             value: value,
             expected: "ISO 8601 timestamp"
         )
+    }
+
+    /// Returns a project-relative path without depending on a concrete
+    /// workspace package layout. The injected storage remains responsible for
+    /// validating and resolving the path when it is persisted.
+    private static func projectRelativePath(
+        for url: URL,
+        inProjectAt projectRoot: URL
+    ) throws -> String {
+        let rootPath = projectRoot.standardizedFileURL.path(percentEncoded: false)
+        let filePath = url.standardizedFileURL.path(percentEncoded: false)
+        let prefix = rootPath == "/" ? "/" : rootPath + "/"
+        guard filePath.hasPrefix(prefix) else {
+            throw DesignFlowCLIError.invalidValue(
+                option: "--project-root",
+                value: filePath,
+                expected: "an artifact inside the project root"
+            )
+        }
+        return String(filePath.dropFirst(prefix.count))
     }
 
     private static func parseLoopOptions(arguments: [String]) throws -> LoopCommandOptions {

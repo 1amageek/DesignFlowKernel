@@ -10,7 +10,7 @@ private enum LegacyArtifactProjectionError: Error {
 /// expose this representation.
 @available(*, deprecated, message: "Use CircuiteFoundation.ArtifactReference directly.")
 extension ArtifactReference {
-    func legacyXcircuiteReference() throws -> XcircuiteFileReference {
+    public func legacyXcircuiteReference() throws -> XcircuiteFileReference {
         let kind = XcircuiteFileKind(rawValue: legacyKindRawValue) ?? .other
         let format = XcircuiteFileFormat(rawValue: legacyFormatRawValue) ?? .unknown
         guard byteCount <= UInt64(Int64.max) else {
