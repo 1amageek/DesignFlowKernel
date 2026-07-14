@@ -41,9 +41,10 @@ flowchart LR
     Result --> Review["Human + Agent review"]
 ```
 
-The frozen filesystem manifest remains a storage boundary during migration;
-new flow APIs must use `FlowExecutionStorage.makeArtifactReference` and
-`registerArtifact` instead of constructing a filesystem-specific file record.
+The filesystem manifest is an external storage boundary; flow APIs must use
+`FlowExecutionStorage.makeArtifactReference` and `registerArtifact` instead of
+constructing a filesystem-specific file record. Unsupported record shapes are
+rejected at the decode boundary.
 
 Persistence is injected through `FlowRunLedgerPersisting`; the kernel does not
 select a filesystem format or create a `.xcircuite` directory. `Xcircuite`
