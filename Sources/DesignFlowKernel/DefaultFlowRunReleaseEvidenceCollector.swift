@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceCollecting {
@@ -322,7 +323,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
         contractAudit: FlowRunReleaseContractAudit
-    ) throws -> [XcircuiteFileReference] {
+    ) throws -> [ArtifactReference] {
         let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let qualificationDirectory = runDirectory.appending(path: "qualification")
         try packageStore.ensureDirectory(at: qualificationDirectory)
@@ -332,19 +333,20 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             ("qualification/performance-envelope.json", Self.performanceEnvelopeArtifactID, performanceEnvelope),
             ("qualification/contract-audit.json", Self.contractAuditArtifactID, contractAudit),
         ]
-        var references: [XcircuiteFileReference] = []
+        var references: [ArtifactReference] = []
         for spec in artifactSpecs {
             let url = runDirectory.appending(path: spec.path)
             try packageStore.writeJSON(spec.value, to: url, forProjectAt: projectRoot)
-            let reference = try packageStore.fileReference(
+            let reference = try packageStore.makeArtifactReference(
                 forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(spec.path)",
                 artifactID: spec.artifactID,
+                role: .output,
                 kind: .report,
                 format: .json,
                 inProjectAt: projectRoot,
                 producedByRunID: runID
             )
-            try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
             references.append(reference)
         }
         return references

@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding {
@@ -28,15 +29,16 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
         try packageStore.writeJSON(packet, to: packetURL, forProjectAt: projectRoot)
 
         let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.fileReference(
+        let reference = try packageStore.makeArtifactReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
+            role: .output,
             kind: .report,
             format: .json,
             inProjectAt: projectRoot,
             producedByRunID: runID
         )
-        try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return FlowRunDecisionPacketBuildResult(packet: packet, artifact: reference)
     }
 

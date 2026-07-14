@@ -24,6 +24,27 @@ runtime dependencies. `DesignFlowFoundationEvidence` is the cross-engine view
 and is deliberately strict: an artifact without a valid SHA-256 digest and
 byte count cannot be promoted to Foundation evidence.
 
+### Canonical artifact results
+
+Build and evaluation result envelopes expose `CircuiteFoundation.ArtifactReference`
+directly. This includes decision packets, stage-artifact ladders, cross-artifact
+evaluations, release-evidence collections, and retention indexes. Result
+decoders still accept the pre-migration `XcircuiteFileReference` shape once, but
+newly encoded JSON always uses Foundation's locator, role, kind, format, digest,
+byte count, and producer fields.
+
+```mermaid
+flowchart LR
+    Store[".xcircuite storage"] --> Legacy["Legacy decode only"]
+    Legacy --> Canonical["ArtifactReference"]
+    Canonical --> Result["Flow result / CLI JSON"]
+    Result --> Review["Human + Agent review"]
+```
+
+The frozen filesystem manifest remains a storage boundary during migration;
+new flow APIs must use `FlowExecutionStorage.makeArtifactReference` and
+`registerArtifact` instead of constructing a legacy file reference.
+
 Persistence is injected through `FlowRunLedgerPersisting`; the kernel does not
 select a filesystem format or create a `.xcircuite` directory. `Xcircuite`
 provides the concrete `XcircuiteWorkspaceStore` and

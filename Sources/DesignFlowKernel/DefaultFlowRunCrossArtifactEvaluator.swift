@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
@@ -52,14 +53,13 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             ]
         )
 
-        var producedReferences: [XcircuiteFileReference] = []
+        var producedReferences: [ArtifactReference] = []
         if persist {
-            producedReferences.append(
-                try packageStore.writeCrossArtifactEvaluation(
-                    evaluation,
-                    inProjectAt: projectRoot
-                )
+            let legacyReference = try packageStore.writeCrossArtifactEvaluation(
+                evaluation,
+                inProjectAt: projectRoot
             )
+            producedReferences.append(try legacyReference.foundationArtifactReference())
         }
 
         return FlowRunCrossArtifactEvaluationResult(

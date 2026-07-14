@@ -668,12 +668,8 @@ public enum DesignFlowCLICommand {
             verifiedByRunID: nil
         )
         try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
-        // The retention result remains a frozen legacy record until its
-        // public schema is migrated. Keep this conversion at the CLI output
-        // boundary; storage and registration stay Foundation-native.
-        let legacyReference = try reference.legacyXcircuiteReference()
         return try encode(
-            FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: legacyReference),
+            FlowRunReleaseRetentionIndexBuildResult(index: index, artifact: reference),
             pretty: pretty
         )
     }
