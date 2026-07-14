@@ -5,10 +5,8 @@ private enum LegacyArtifactProjectionError: Error {
     case byteCountOutOfRange(String)
 }
 
-/// Transitional projection used only by legacy review/report records that have
-/// not yet moved to the Foundation artifact model. New flow results never
-/// expose this representation.
-@available(*, deprecated, message: "Use CircuiteFoundation.ArtifactReference directly.")
+/// Storage-boundary projection used by the frozen run-ledger record format.
+/// New flow results remain in the Foundation artifact model until persistence.
 extension ArtifactReference {
     public func legacyXcircuiteReference() throws -> XcircuiteFileReference {
         let kind = XcircuiteFileKind(rawValue: legacyKindRawValue) ?? .other

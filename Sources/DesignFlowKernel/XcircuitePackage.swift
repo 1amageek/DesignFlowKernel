@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use Xcircuite workspace persistence.")
 public struct XcircuitePackage: Sendable, Hashable {
     public static let directoryName = ".xcircuite"
     public static let manifestFileName = "project.json"

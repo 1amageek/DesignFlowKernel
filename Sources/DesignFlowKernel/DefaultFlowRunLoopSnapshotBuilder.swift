@@ -465,7 +465,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     ) -> XcircuiteLoopIterationSummary.EvaluationDelta {
         let scopedEnvelopes = envelopes.filter { envelope in
             outputArtifactIDs.contains(envelope.artifactID)
-                || outputArtifactIDs.contains(envelope.reference.artifactID ?? "")
+                || outputArtifactIDs.contains(envelope.reference.artifactID)
         }
         let selectedEnvelopes = scopedEnvelopes.isEmpty ? [] : scopedEnvelopes
         var accepted = 0

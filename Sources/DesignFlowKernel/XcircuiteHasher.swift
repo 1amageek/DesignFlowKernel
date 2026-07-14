@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 
-@available(*, deprecated, message: "Use CircuiteFoundation.ContentDigester.")
 public struct XcircuiteHasher: Sendable {
     public init() {}
 

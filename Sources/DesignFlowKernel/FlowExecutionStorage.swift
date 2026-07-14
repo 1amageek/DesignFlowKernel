@@ -80,7 +80,6 @@ public protocol FlowExecutionStorage: Sendable {
         inProjectAt projectRoot: URL
     ) throws
 
-    @available(*, deprecated, message: "Use makeArtifactReference(forProjectRelativePath:artifactID:role:kind:format:inProjectAt:producedByRunID:verifiedByRunID:).")
     func fileReference(
         forProjectRelativePath path: String,
         artifactID: String?,
@@ -91,7 +90,6 @@ public protocol FlowExecutionStorage: Sendable {
         verifiedByRunID: String?
     ) throws -> XcircuiteFileReference
 
-    @available(*, deprecated, message: "Use registerArtifact(_:runID:inProjectAt:).")
     func upsertRunArtifact(
         _ reference: XcircuiteFileReference,
         runID: String,
@@ -104,7 +102,6 @@ public protocol FlowExecutionStorage: Sendable {
     /// run. New flow code should prefer the Foundation artifact envelope or a
     /// run-ledger registration, while this operation remains available at the
     /// legacy filesystem boundary during migration.
-    @available(*, deprecated, message: "Use a workspace artifact registration API.")
     func upsertFileReference(
         _ reference: XcircuiteFileReference,
         forProjectAt projectRoot: URL

@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use CircuiteFoundation.ArtifactKind.")
 public enum XcircuiteFileKind: String, Sendable, Hashable, Codable {
     case request
     case rtl

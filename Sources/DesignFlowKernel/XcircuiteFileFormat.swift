@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use CircuiteFoundation.ArtifactFormat.")
 public enum XcircuiteFileFormat: String, Sendable, Hashable, Codable {
     case spice = "SPICE"
     case systemVerilog = "SYSTEM_VERILOG"

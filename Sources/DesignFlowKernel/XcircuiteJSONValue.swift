@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use a domain-specific Codable record.")
 public enum XcircuiteJSONValue: Sendable, Hashable, Codable {
     case null
     case bool(Bool)

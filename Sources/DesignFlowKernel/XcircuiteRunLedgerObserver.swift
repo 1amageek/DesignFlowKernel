@@ -11,11 +11,6 @@ public actor XcircuiteRunLedgerObserver {
         self.store = storage
     }
 
-    @available(*, deprecated, message: "Inject a ledger storage implementation with init(storage:).")
-    public init(store: any XcircuiteRunLedgerStoring) {
-        self.store = store
-    }
-
     public func snapshots(
         projectRoot: URL,
         pollingInterval: Duration = .milliseconds(500)

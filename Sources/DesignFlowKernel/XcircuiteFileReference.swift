@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use CircuiteFoundation.ArtifactReference.")
 public struct XcircuiteFileReference: Sendable, Hashable, Codable {
     public var artifactID: String?
     public var path: String

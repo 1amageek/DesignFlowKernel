@@ -1,6 +1,5 @@
 import Foundation
 
-@available(*, deprecated, message: "Use Xcircuite workspace/run ledger stores.")
 public struct XcircuitePackageStore: Sendable {
     private let hasher: XcircuiteHasher
     private let identifierValidator: XcircuiteIdentifierValidator

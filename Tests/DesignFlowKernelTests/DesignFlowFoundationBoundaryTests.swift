@@ -6,111 +6,6 @@ import DesignFlowKernel
 
 @Suite("Design-flow Foundation boundary")
 struct DesignFlowFoundationBoundaryTests {
-    @Test("review action requests decode legacy artifact references")
-    func decodesLegacyReviewActionArtifacts() throws {
-        let digest = String(repeating: "a", count: 64)
-        let legacyPayload: [String: Any] = [
-            "actionID": "waive-width",
-            "runID": "run-1",
-            "stageID": "001-drc",
-            "actor": ["kind": "human", "identifier": "reviewer-1"],
-            "decisionKind": "review.waiverDecision",
-            "decision": "waived",
-            "targetID": "drc-width-1",
-            "targetPath": ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json",
-            "reason": "Known fixture exception.",
-            "status": "succeeded",
-            "inputs": [[
-                "artifactID": "drc-input",
-                "path": ".xcircuite/runs/run-1/stages/001-drc/input.json",
-                "kind": "report",
-                "format": "JSON",
-                "sha256": digest,
-                "byteCount": 12,
-            ]],
-            "outputs": [],
-            "diagnostics": [],
-            "metadata": [:],
-            "createdAt": 0.0,
-        ]
-        let legacyData = try JSONSerialization.data(withJSONObject: legacyPayload)
-        let request = try JSONDecoder().decode(
-            XcircuiteRunReviewDecisionActionRequest.self,
-            from: legacyData
-        )
-
-        #expect(request.inputs.count == 1)
-        #expect(request.inputs[0].id.rawValue == "drc-input")
-        #expect(request.inputs[0].locator.role == .legacyUnspecified)
-        #expect(request.inputs[0].locator.format == .json)
-
-        let encodedData = try JSONEncoder().encode(request)
-        let encodedObject = try #require(
-            JSONSerialization.jsonObject(with: encodedData) as? [String: Any]
-        )
-        let encodedInputs = try #require(encodedObject["inputs"] as? [[String: Any]])
-        #expect(encodedInputs[0]["locator"] != nil)
-        #expect(encodedInputs[0]["path"] == nil)
-    }
-
-    @Test("release envelope results decode legacy artifact references")
-    func decodesLegacyReleaseEnvelopeArtifact() throws {
-        let artifact = ArtifactReference(
-            id: try ArtifactID(rawValue: "qualification-release-envelope"),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(
-                    workspaceRelativePath: ".xcircuite/runs/run-1/qualification/release-envelope.json"
-                ),
-                role: .output,
-                kind: .report,
-                format: .json
-            ),
-            digest: try ContentDigest(
-                algorithm: .sha256,
-                hexadecimalValue: String(repeating: "b", count: 64)
-            ),
-            byteCount: 8
-        )
-        let envelope = FlowRunReleaseEnvelope(
-            envelopeID: "release-envelope-run-1",
-            runID: "run-1",
-            status: .blocked,
-            decisionPacketValidation: FlowRunDecisionPacketValidationResult(
-                runID: "run-1",
-                packetPath: ".xcircuite/runs/run-1/review/decision-packet.json",
-                status: .blocked
-            ),
-            requirements: []
-        )
-        let canonical = FlowRunReleaseEnvelopeBuildResult(
-            envelope: envelope,
-            artifact: artifact
-        )
-        var object = try #require(
-            JSONSerialization.jsonObject(
-                with: JSONEncoder().encode(canonical)
-            ) as? [String: Any]
-        )
-        object["artifact"] = [
-            "artifactID": "qualification-release-envelope",
-            "path": ".xcircuite/runs/run-1/qualification/release-envelope.json",
-            "kind": "report",
-            "format": "JSON",
-            "sha256": String(repeating: "b", count: 64),
-            "byteCount": 8,
-        ]
-        let legacyData = try JSONSerialization.data(withJSONObject: object)
-        let decoded = try JSONDecoder().decode(
-            FlowRunReleaseEnvelopeBuildResult.self,
-            from: legacyData
-        )
-
-        #expect(decoded.artifact.id.rawValue == artifact.id.rawValue)
-        #expect(decoded.artifact.locator.role == .legacyUnspecified)
-        #expect(decoded.artifact.locator.location.value == artifact.locator.location.value)
-    }
-
-
     @Test("execution storage publishes Foundation artifact references")
     func executionStoragePublishesFoundationArtifactReferences() throws {
         let projectRoot = FileManager.default.temporaryDirectory
@@ -209,8 +104,8 @@ struct DesignFlowFoundationBoundaryTests {
         #expect(decoded == evidence)
     }
 
-    @Test("flow evidence derives a deterministic identity when legacy ID is absent")
-    func derivesDeterministicIdentityForLegacyReference() throws {
+    @Test("flow evidence derives a deterministic identity when ID is absent")
+    func derivesDeterministicIdentityWithoutExplicitID() throws {
         let artifact = ArtifactReference(
             locator: ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: "runs/run-1/report.json"),
