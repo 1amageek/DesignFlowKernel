@@ -34,8 +34,8 @@ flowchart TD
 - `FlowExecutionStorage` is Foundation-first for new artifact operations:
   `makeArtifactReference` returns `CircuiteFoundation.ArtifactReference` and
   `registerArtifact` accepts that canonical value. Legacy `fileReference` and
-  `upsertRunArtifact` entry points remain deprecated for decode/persistence
-  migration only and are not used by the progress writer.
+  run-artifact registration is performed through the canonical workspace storage
+  boundary and is not exposed as a compatibility entry point.
 - `FlowOperationRequest`, stage results, and the run ledger remain domain and
   persistence models owned by this package.
 
