@@ -1319,7 +1319,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             inProjectAt: projectRoot,
             producedByRunID: runID
         )
-        return try legacyReference.foundationArtifactReference()
+        return try legacyReference.foundationArtifactReference(role: .output)
     }
 
     private func diagnosticCodes(from result: FlowStageResult) -> [String] {

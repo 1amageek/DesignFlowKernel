@@ -20,12 +20,7 @@ public struct FlowRunCrossArtifactEvaluationResult: Sendable, Hashable, Codable 
         let container = try decoder.container(keyedBy: CodingKeys.self)
         runID = try container.decode(String.self, forKey: .runID)
         evaluation = try container.decode(XcircuiteCrossArtifactEvaluation.self, forKey: .evaluation)
-        do {
-            artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
-        } catch {
-            let legacy = try container.decode([XcircuiteFileReference].self, forKey: .artifactReferences)
-            artifactReferences = try legacy.map { try $0.foundationArtifactReference() }
-        }
+        artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
     }
 
     private enum CodingKeys: String, CodingKey {

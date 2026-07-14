@@ -36,12 +36,7 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
         corpusHistory = try container.decode(FlowRunReleaseCorpusHistory.self, forKey: .corpusHistory)
         performanceEnvelope = try container.decode(FlowRunReleasePerformanceEnvelope.self, forKey: .performanceEnvelope)
         contractAudit = try container.decode(FlowRunReleaseContractAudit.self, forKey: .contractAudit)
-        do {
-            artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
-        } catch {
-            let legacy = try container.decode([XcircuiteFileReference].self, forKey: .artifacts)
-            artifacts = try legacy.map { try $0.foundationArtifactReference() }
-        }
+        artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
         diagnostics = try container.decode([FlowDiagnostic].self, forKey: .diagnostics)
     }
 

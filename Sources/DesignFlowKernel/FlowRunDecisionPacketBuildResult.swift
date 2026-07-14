@@ -17,12 +17,7 @@ public struct FlowRunDecisionPacketBuildResult: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         packet = try container.decode(FlowRunDecisionPacket.self, forKey: .packet)
-        do {
-            artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
-        } catch {
-            let legacy = try container.decode(XcircuiteFileReference.self, forKey: .artifact)
-            artifact = try legacy.foundationArtifactReference()
-        }
+        artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
     }
 
     private enum CodingKeys: String, CodingKey {

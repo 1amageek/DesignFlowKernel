@@ -17,12 +17,7 @@ public struct FlowRunStageArtifactLadderBuildResult: Sendable, Hashable, Codable
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         ladder = try container.decode(FlowRunStageArtifactLadder.self, forKey: .ladder)
-        do {
-            artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
-        } catch {
-            let legacy = try container.decode(XcircuiteFileReference.self, forKey: .artifact)
-            artifact = try legacy.foundationArtifactReference()
-        }
+        artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
     }
 
     private enum CodingKeys: String, CodingKey {

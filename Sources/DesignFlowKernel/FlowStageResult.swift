@@ -9,8 +9,7 @@ public struct FlowStageResult: Sendable, Hashable, Codable {
     /// Canonical artifacts emitted by this stage.
     ///
     /// The Foundation reference is the only representation persisted by the
-    /// current schema. Legacy Xcircuite references are accepted by the custom
-    /// decoder solely to read pre-migration run results.
+    /// current schema.
     public var artifacts: [ArtifactReference]
     public var attempts: [FlowStageAttemptRecord]
 
@@ -47,15 +46,7 @@ public struct FlowStageResult: Sendable, Hashable, Codable {
         gates = try container.decode([FlowGateResult].self, forKey: .gates)
         attempts = try container.decode([FlowStageAttemptRecord].self, forKey: .attempts)
 
-        do {
-            artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
-        } catch {
-            // Pre-migration stage results encoded XcircuiteFileReference.
-            // Convert only while decoding; all newly encoded results use the
-            // Foundation schema above.
-            let legacy = try container.decode([XcircuiteFileReference].self, forKey: .artifacts)
-            artifacts = try legacy.map { try $0.foundationArtifactReference() }
-        }
+        artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
     }
 
 }

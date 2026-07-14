@@ -43,7 +43,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                 verdict,
                 inProjectAt: projectRoot
             )
-            artifactReferences.append(try verdictArtifact.foundationArtifactReference())
+            artifactReferences.append(try verdictArtifact.foundationArtifactReference(role: .output))
         }
         return FlowRunGuardEvaluationResult(
             runID: runID,

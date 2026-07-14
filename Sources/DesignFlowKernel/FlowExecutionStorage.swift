@@ -153,7 +153,7 @@ extension XcircuitePackageStore: FlowExecutionStorage {
     public func makeArtifactReference(
         forProjectRelativePath path: String,
         artifactID: String?,
-        role: ArtifactRole = .legacyUnspecified,
+        role: ArtifactRole,
         kind: ArtifactKind,
         format: ArtifactFormat,
         inProjectAt projectRoot: URL,
@@ -169,22 +169,7 @@ extension XcircuitePackageStore: FlowExecutionStorage {
             producedByRunID: producedByRunID,
             verifiedByRunID: verifiedByRunID
         )
-        let foundationReference = try legacyReference.foundationArtifactReference()
-        guard role != .legacyUnspecified else {
-            return foundationReference
-        }
-        return ArtifactReference(
-            id: foundationReference.id,
-            locator: ArtifactLocator(
-                location: foundationReference.locator.location,
-                role: role,
-                kind: foundationReference.locator.kind,
-                format: foundationReference.locator.format
-            ),
-            digest: foundationReference.digest,
-            byteCount: foundationReference.byteCount,
-            producer: foundationReference.producer
-        )
+        return try legacyReference.foundationArtifactReference(role: role)
     }
 
     public func registerArtifact(

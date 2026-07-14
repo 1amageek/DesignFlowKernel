@@ -99,7 +99,7 @@ extension XcircuitePackageStore {
         try validateApprovalIdentifiers(record.runID, stageID: record.stageID)
         let approvalReference = try writeApprovalArtifact(record, inProjectAt: projectRoot)
         let approvalPath = approvalReference.path
-        let foundationApprovalReference = try approvalReference.foundationArtifactReference()
+        let foundationApprovalReference = try approvalReference.foundationArtifactReference(role: .output)
 
         return try appendReviewDecisionAction(
             XcircuiteRunReviewDecisionActionRequest(

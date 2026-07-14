@@ -61,7 +61,7 @@ extension ArtifactReference {
 extension XcircuiteFileReference {
     /// Decode-only projection from the frozen pre-Foundation artifact shape.
     /// Callers must not persist the returned legacy value again.
-    func foundationArtifactReference() throws -> ArtifactReference {
+    func foundationArtifactReference(role: ArtifactRole) throws -> ArtifactReference {
         guard let sha256, !sha256.isEmpty else {
             throw DecodingError.dataCorrupted(
                 .init(codingPath: [], debugDescription: "Legacy artifact is missing sha256: \(path)")
@@ -86,7 +86,7 @@ extension XcircuiteFileReference {
             id: id,
             locator: ArtifactLocator(
                 location: location,
-                role: .legacyUnspecified,
+                role: role,
                 kind: kind,
                 format: format
             ),

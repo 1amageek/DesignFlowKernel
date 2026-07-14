@@ -37,7 +37,7 @@ extension XcircuitePackageStore {
             producedByRunID: runID
         )
         try upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
-        return try reference.foundationArtifactReference()
+        return try reference.foundationArtifactReference(role: .output)
     }
 
     public func loadArtifactEnvelope(

@@ -94,18 +94,10 @@ public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
                 artifactID = try container.decodeIfPresent(String.self, forKey: .artifactID)
                 stageID = try container.decodeIfPresent(String.self, forKey: .stageID)
                 status = try container.decode(Status.self, forKey: .status)
-                do {
-                    artifactReferences = try container.decode(
-                        [ArtifactReference].self,
-                        forKey: .artifactReferences
-                    )
-                } catch {
-                    let legacy = try container.decode(
-                        [XcircuiteFileReference].self,
-                        forKey: .artifactReferences
-                    )
-                    artifactReferences = try legacy.map { try $0.foundationArtifactReference() }
-                }
+                artifactReferences = try container.decode(
+                    [ArtifactReference].self,
+                    forKey: .artifactReferences
+                )
                 reason = try container.decodeIfPresent(String.self, forKey: .reason)
             }
         }

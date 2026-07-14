@@ -17,12 +17,7 @@ public struct FlowRunReleaseRetentionIndexBuildResult: Sendable, Hashable, Codab
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         index = try container.decode(FlowRunReleaseRetentionIndex.self, forKey: .index)
-        do {
-            artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
-        } catch {
-            let legacy = try container.decode(XcircuiteFileReference.self, forKey: .artifact)
-            artifact = try legacy.foundationArtifactReference()
-        }
+        artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
     }
 
     private enum CodingKeys: String, CodingKey {

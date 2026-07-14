@@ -42,9 +42,9 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 runID: runID,
                 inProjectAt: projectRoot
             )
-            producedReferences.append(try iterationsReference.foundationArtifactReference())
+            producedReferences.append(try iterationsReference.foundationArtifactReference(role: .output))
             let snapshotReference = try packageStore.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
-            producedReferences.append(try snapshotReference.foundationArtifactReference())
+            producedReferences.append(try snapshotReference.foundationArtifactReference(role: .output))
         }
 
         return FlowRunLoopSummaryResult(
@@ -273,7 +273,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             }
         )
         let foundationMatchingReferences = try matchingReferences.map {
-            try $0.foundationArtifactReference()
+            try $0.foundationArtifactReference(role: .output)
         }
         guard !matchingReferences.isEmpty else {
             return XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item(

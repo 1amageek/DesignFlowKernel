@@ -368,7 +368,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         envelopes: [XcircuiteArtifactEnvelope]
     ) throws -> [ArtifactReference] {
         stableUniqueReferences(
-            (try ledger.runManifest.artifacts.map { try $0.foundationArtifactReference() })
+            (try ledger.runManifest.artifacts.map { try $0.foundationArtifactReference(role: .output) })
                 + ledger.stages.flatMap(\.artifacts)
                 + envelopes.map(\.reference)
         )

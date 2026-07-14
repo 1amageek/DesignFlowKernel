@@ -3,8 +3,7 @@ import CircuiteFoundation
 
 public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
     case path(String)
-    /// Canonical artifact input. The decoder accepts both legacy artifact
-    /// payloads and the temporary `foundationArtifact` discriminator.
+    /// Canonical artifact input.
     case artifact(ArtifactReference)
     case stageArtifact(FlowToolchainStageArtifactSelectorRecord)
     case stageRawArtifact(FlowToolchainStageRawArtifactRecord)
@@ -17,7 +16,6 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
     private enum Kind: String, Codable {
         case path
         case artifact
-        case foundationArtifact
         case stageArtifact
         case stageRawArtifact
     }
@@ -29,13 +27,6 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
         case .path:
             self = .path(try container.decode(String.self, forKey: .value))
         case .artifact:
-            do {
-                self = .artifact(try container.decode(ArtifactReference.self, forKey: .value))
-            } catch {
-                let legacy = try container.decode(XcircuiteFileReference.self, forKey: .value)
-                self = .artifact(try legacy.foundationArtifactReference())
-            }
-        case .foundationArtifact:
             self = .artifact(try container.decode(ArtifactReference.self, forKey: .value))
         case .stageArtifact:
             self = .stageArtifact(

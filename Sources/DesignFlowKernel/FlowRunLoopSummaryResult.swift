@@ -28,12 +28,7 @@ public struct FlowRunLoopSummaryResult: Sendable, Hashable, Codable {
         profileID = try container.decode(String.self, forKey: .profileID)
         iterations = try container.decode([XcircuiteLoopIterationSummary].self, forKey: .iterations)
         snapshot = try container.decode(XcircuiteAgentLoopSnapshot.self, forKey: .snapshot)
-        do {
-            artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
-        } catch {
-            let legacy = try container.decode([XcircuiteFileReference].self, forKey: .artifactReferences)
-            artifactReferences = try legacy.map { try $0.foundationArtifactReference() }
-        }
+        artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
     }
 
     private enum CodingKeys: String, CodingKey {
