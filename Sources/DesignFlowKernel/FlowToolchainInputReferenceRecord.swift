@@ -3,8 +3,9 @@ import CircuiteFoundation
 
 public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
     case path(String)
-    case artifact(XcircuiteFileReference)
-    case foundationArtifact(ArtifactReference)
+    /// Canonical artifact input. The decoder accepts both legacy artifact
+    /// payloads and the temporary `foundationArtifact` discriminator.
+    case artifact(ArtifactReference)
     case stageArtifact(FlowToolchainStageArtifactSelectorRecord)
     case stageRawArtifact(FlowToolchainStageRawArtifactRecord)
 
@@ -28,9 +29,14 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
         case .path:
             self = .path(try container.decode(String.self, forKey: .value))
         case .artifact:
-            self = .artifact(try container.decode(XcircuiteFileReference.self, forKey: .value))
+            do {
+                self = .artifact(try container.decode(ArtifactReference.self, forKey: .value))
+            } catch {
+                let legacy = try container.decode(XcircuiteFileReference.self, forKey: .value)
+                self = .artifact(try legacy.foundationArtifactReference())
+            }
         case .foundationArtifact:
-            self = .foundationArtifact(try container.decode(ArtifactReference.self, forKey: .value))
+            self = .artifact(try container.decode(ArtifactReference.self, forKey: .value))
         case .stageArtifact:
             self = .stageArtifact(
                 try container.decode(FlowToolchainStageArtifactSelectorRecord.self, forKey: .value)
@@ -50,9 +56,6 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
             try container.encode(path, forKey: .value)
         case .artifact(let artifact):
             try container.encode(Kind.artifact, forKey: .kind)
-            try container.encode(artifact, forKey: .value)
-        case .foundationArtifact(let artifact):
-            try container.encode(Kind.foundationArtifact, forKey: .kind)
             try container.encode(artifact, forKey: .value)
         case .stageArtifact(let artifact):
             try container.encode(Kind.stageArtifact, forKey: .kind)
