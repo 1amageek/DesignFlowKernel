@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
@@ -34,18 +35,16 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             projectRoot: projectRoot
         )
 
-        var producedReferences: [XcircuiteFileReference] = []
+        var producedReferences: [ArtifactReference] = []
         if persist {
-            producedReferences.append(
-                try packageStore.writeLoopIterationSummaries(
-                    iterations,
-                    runID: runID,
-                    inProjectAt: projectRoot
-                )
+            let iterationsReference = try packageStore.writeLoopIterationSummaries(
+                iterations,
+                runID: runID,
+                inProjectAt: projectRoot
             )
-            producedReferences.append(
-                try packageStore.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
-            )
+            producedReferences.append(try iterationsReference.foundationArtifactReference())
+            let snapshotReference = try packageStore.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
+            producedReferences.append(try snapshotReference.foundationArtifactReference())
         }
 
         return FlowRunLoopSummaryResult(

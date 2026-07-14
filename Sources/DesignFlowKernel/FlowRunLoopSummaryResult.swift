@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct FlowRunLoopSummaryResult: Sendable, Hashable, Codable {
@@ -5,14 +6,14 @@ public struct FlowRunLoopSummaryResult: Sendable, Hashable, Codable {
     public var profileID: String
     public var iterations: [XcircuiteLoopIterationSummary]
     public var snapshot: XcircuiteAgentLoopSnapshot
-    public var artifactReferences: [XcircuiteFileReference]
+    public var artifactReferences: [ArtifactReference]
 
     public init(
         runID: String,
         profileID: String,
         iterations: [XcircuiteLoopIterationSummary],
         snapshot: XcircuiteAgentLoopSnapshot,
-        artifactReferences: [XcircuiteFileReference] = []
+        artifactReferences: [ArtifactReference] = []
     ) {
         self.runID = runID
         self.profileID = profileID
@@ -20,5 +21,26 @@ public struct FlowRunLoopSummaryResult: Sendable, Hashable, Codable {
         self.snapshot = snapshot
         self.artifactReferences = artifactReferences
     }
-}
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        runID = try container.decode(String.self, forKey: .runID)
+        profileID = try container.decode(String.self, forKey: .profileID)
+        iterations = try container.decode([XcircuiteLoopIterationSummary].self, forKey: .iterations)
+        snapshot = try container.decode(XcircuiteAgentLoopSnapshot.self, forKey: .snapshot)
+        do {
+            artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
+        } catch {
+            let legacy = try container.decode([XcircuiteFileReference].self, forKey: .artifactReferences)
+            artifactReferences = try legacy.map { try $0.foundationArtifactReference() }
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case runID
+        case profileID
+        case iterations
+        case snapshot
+        case artifactReferences
+    }
+}

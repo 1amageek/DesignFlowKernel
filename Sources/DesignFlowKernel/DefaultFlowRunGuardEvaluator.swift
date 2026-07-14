@@ -27,9 +27,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             generatedAt: generatedAt,
             persist: persist
         )
-        let foundationArtifactReferences = try summary.artifactReferences.map {
-            try $0.foundationArtifactReference()
-        }
+        let foundationArtifactReferences = summary.artifactReferences
         let verdict = buildVerdict(
             runID: runID,
             projectRoot: projectRoot,
