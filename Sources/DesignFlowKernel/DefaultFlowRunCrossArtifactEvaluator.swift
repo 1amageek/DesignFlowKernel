@@ -348,8 +348,9 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
                 includingPropertiesForKeys: nil
             )
         } catch {
-            throw XcircuitePackageError.readFailed(
-                "evidence: \(error.localizedDescription)"
+            throw FlowRunCrossArtifactEvaluationError.evidenceDirectoryReadFailed(
+                path: evidenceDirectory.path(percentEncoded: false),
+                reason: error.localizedDescription
             )
         }
         var envelopes: [XcircuiteArtifactEnvelope] = []
