@@ -1,18 +1,18 @@
 import Foundation
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     public func appendRunAction(
         _ record: XcircuiteRunActionRecord,
         inProjectAt projectRoot: URL
     ) throws {
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let runDirectory = try package.runDirectoryURL(for: record.runID)
         guard runActionDirectoryExists(runDirectory) else {
-            throw XcircuitePackageError.readFailed("run directory does not exist: \(record.runID)")
+            throw XcircuiteWorkspaceError.readFailed("run directory does not exist: \(record.runID)")
         }
         try appendJSONLine(record, to: runDirectory.appending(path: "actions.jsonl"))
         let reference = try fileReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(record.runID)/actions.jsonl",
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(record.runID)/actions.jsonl",
             artifactID: "run-action-ledger",
             kind: .other,
             format: .text,
@@ -26,7 +26,7 @@ extension XcircuitePackageStore {
         runID: String,
         inProjectAt projectRoot: URL
     ) throws -> [XcircuiteRunActionRecord] {
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let actionsURL = try package.runDirectoryURL(for: runID)
             .appending(path: "actions.jsonl")
         guard runActionFileExists(actionsURL) else {
@@ -37,7 +37,7 @@ extension XcircuitePackageStore {
         do {
             text = try String(contentsOf: actionsURL, encoding: .utf8)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(actionsURL.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -49,7 +49,7 @@ extension XcircuitePackageStore {
             do {
                 records.append(try decoder.decode(XcircuiteRunActionRecord.self, from: data))
             } catch {
-                throw XcircuitePackageError.decodeFailed(
+                throw XcircuiteWorkspaceError.decodeFailed(
                     "\(actionsURL.lastPathComponent): \(error.localizedDescription)"
                 )
             }
@@ -84,7 +84,7 @@ extension XcircuitePackageStore {
         do {
             data = try encoder.encode(value)
         } catch {
-            throw XcircuitePackageError.encodeFailed(error.localizedDescription)
+            throw XcircuiteWorkspaceError.encodeFailed(error.localizedDescription)
         }
 
         var line = data
@@ -97,7 +97,7 @@ extension XcircuitePackageStore {
                 try handle.write(contentsOf: line)
                 try handle.close()
             } catch {
-                throw XcircuitePackageError.writeFailed(
+                throw XcircuiteWorkspaceError.writeFailed(
                     "\(url.lastPathComponent): \(error.localizedDescription)"
                 )
             }
@@ -105,7 +105,7 @@ extension XcircuitePackageStore {
             do {
                 try line.write(to: url, options: .atomic)
             } catch {
-                throw XcircuitePackageError.writeFailed(
+                throw XcircuiteWorkspaceError.writeFailed(
                     "\(url.lastPathComponent): \(error.localizedDescription)"
                 )
             }

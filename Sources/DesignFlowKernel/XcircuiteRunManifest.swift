@@ -102,7 +102,7 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
-            throw XcircuitePackageError.invalidRunManifest(
+            throw XcircuiteWorkspaceError.invalidRunManifest(
                 runID: runID,
                 reason: "schemaVersion must be \(Self.currentSchemaVersion)."
             )
@@ -111,41 +111,41 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
         if let parentRunID {
             try XcircuiteIdentifierValidator().validate(parentRunID, kind: .runID)
             guard parentRunID != runID else {
-                throw XcircuitePackageError.invalidRunManifest(
+                throw XcircuiteWorkspaceError.invalidRunManifest(
                     runID: runID,
                     reason: "parentRunID must identify a different run."
                 )
             }
         }
         guard revision >= 0 else {
-            throw XcircuitePackageError.invalidRunManifest(
+            throw XcircuiteWorkspaceError.invalidRunManifest(
                 runID: runID,
                 reason: "revision must be non-negative."
             )
         }
         guard !actor.identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw XcircuitePackageError.invalidRunManifest(
+            throw XcircuiteWorkspaceError.invalidRunManifest(
                 runID: runID,
                 reason: "actor.identifier must not be empty."
             )
         }
         if let intent {
             guard !intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw XcircuitePackageError.invalidRunManifest(
+                throw XcircuiteWorkspaceError.invalidRunManifest(
                     runID: runID,
                     reason: "intent must be absent or non-empty."
                 )
             }
         }
         guard updatedAt >= createdAt else {
-            throw XcircuitePackageError.invalidRunManifest(
+            throw XcircuiteWorkspaceError.invalidRunManifest(
                 runID: runID,
                 reason: "updatedAt must not precede createdAt."
             )
         }
         if let startedAt {
             guard startedAt >= createdAt else {
-                throw XcircuitePackageError.invalidRunManifest(
+                throw XcircuiteWorkspaceError.invalidRunManifest(
                     runID: runID,
                     reason: "startedAt must not precede createdAt."
                 )
@@ -153,7 +153,7 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
         }
         if let finishedAt {
             guard let startedAt, finishedAt >= startedAt, updatedAt >= finishedAt else {
-                throw XcircuitePackageError.invalidRunManifest(
+                throw XcircuiteWorkspaceError.invalidRunManifest(
                     runID: runID,
                     reason: "finishedAt must follow startedAt and must not follow updatedAt."
                 )
@@ -164,7 +164,7 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
         for artifact in artifacts {
             try Self.validateArtifactPath(artifact.path, runID: runID)
             guard artifactPaths.insert(artifact.path).inserted else {
-                throw XcircuitePackageError.invalidRunManifest(
+                throw XcircuiteWorkspaceError.invalidRunManifest(
                     runID: runID,
                     reason: "artifact path '\(artifact.path)' must be unique."
                 )
@@ -172,7 +172,7 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
             if let artifactID = artifact.artifactID {
                 try XcircuiteIdentifierValidator().validate(artifactID, kind: .artifactID)
                 guard artifactIDs.insert(artifactID).inserted else {
-                    throw XcircuitePackageError.invalidRunManifest(
+                    throw XcircuiteWorkspaceError.invalidRunManifest(
                         runID: runID,
                         reason: "artifactID '\(artifactID)' must be unique."
                     )
@@ -196,15 +196,15 @@ public struct XcircuiteRunManifest: Sendable, Hashable, Codable {
         }
     }
 
-    private func lifecycleTimestampError(_ reason: String) -> XcircuitePackageError {
+    private func lifecycleTimestampError(_ reason: String) -> XcircuiteWorkspaceError {
         .invalidRunManifest(runID: runID, reason: reason)
     }
 
     private static func validateArtifactPath(_ path: String, runID: String) throws {
         do {
-            try XcircuitePackage.validateProjectRelativePath(path)
+            try XcircuiteWorkspace.validateProjectRelativePath(path)
         } catch {
-            throw XcircuitePackageError.invalidRunManifest(
+            throw XcircuiteWorkspaceError.invalidRunManifest(
                 runID: runID,
                 reason: "artifact path '\(path)' must be project-relative."
             )

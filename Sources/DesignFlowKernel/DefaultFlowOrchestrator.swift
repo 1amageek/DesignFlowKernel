@@ -3,16 +3,16 @@ import CircuiteFoundation
 import ToolQualification
 
 public struct DefaultFlowOrchestrator: Sendable {
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let evaluator: ToolTrustEvaluator
     private let progressStore: FlowRunProgressStore
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
         evaluator: ToolTrustEvaluator = ToolTrustEvaluator(),
         progressStore: FlowRunProgressStore = FlowRunProgressStore()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.evaluator = evaluator
         self.progressStore = progressStore
     }
@@ -34,7 +34,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         let executorsByStageID = try indexExecutors(executors)
         try validateExecutorCoverage(request: request, executorsByStageID: executorsByStageID)
 
-        try packageStore.createPackage(at: request.projectRoot)
+        try storage.createWorkspace(at: request.projectRoot)
         try validateRunDirectoryAvailability(request)
         let previousRunArtifacts: [XcircuiteFileReference]
         if request.allowExistingRunDirectory {
@@ -50,7 +50,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             request: request,
             runDirectory: runDirectory
         )
-        _ = try packageStore.transitionRun(
+        _ = try storage.transitionRun(
             runID: request.runID,
             transition: XcircuiteRunTransition(
                 status: .running,
@@ -70,7 +70,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             projectRoot: request.projectRoot,
             runID: request.runID,
             runDirectory: runDirectory,
-            packageStore: packageStore,
+            storage: storage,
             toolRegistry: toolRegistry,
             healthResults: healthResults
         )
@@ -710,7 +710,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         executor: (any FlowStageExecutor)?,
         context: FlowExecutionContext
     ) throws -> PersistedApprovalResolution {
-        guard let record = try packageStore.loadApproval(
+        guard let record = try storage.loadApproval(
             runID: request.runID,
             stageID: stage.stageID,
             inProjectAt: request.projectRoot
@@ -726,7 +726,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 .appending(path: "stages")
                 .appending(path: stage.stageID)
                 .appending(path: "result.json")
-            let reviewedResult = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
+            let reviewedResult = try storage.readJSON(FlowStageResult.self, from: resultURL)
             if isApprovalApplied(to: reviewedResult) {
                 let approvalInputURL = approvalInputURL(
                     stageID: stage.stageID,
@@ -797,13 +797,13 @@ public struct DefaultFlowOrchestrator: Sendable {
                 stageID: stage.stageID,
                 runDirectory: runDirectory
             )
-            try packageStore.writeJSON(
+            try storage.writeJSON(
                 reviewedResult,
                 to: approvalInputURL,
                 forProjectAt: request.projectRoot
             )
-            let relativeApprovalInputPath = "\(XcircuitePackage.directoryName)/runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
-            let approvalInputReference = try packageStore.fileReference(
+            let relativeApprovalInputPath = "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
+            let approvalInputReference = try storage.fileReference(
                 forProjectRelativePath: relativeApprovalInputPath,
                 artifactID: "approval-review-\(stage.stageID.replacingOccurrences(of: ".", with: "-"))",
                 kind: .report,
@@ -811,7 +811,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 inProjectAt: request.projectRoot,
                 producedByRunID: request.runID
             )
-            try packageStore.upsertRunArtifact(
+            try storage.upsertRunArtifact(
                 approvalInputReference,
                 runID: request.runID,
                 inProjectAt: request.projectRoot
@@ -1069,7 +1069,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         var updated = result
         guard result.status == .succeeded else { return result }
 
-        let record = try packageStore.loadApproval(
+        let record = try storage.loadApproval(
             runID: request.runID,
             stageID: result.stageID,
             inProjectAt: request.projectRoot
@@ -1146,7 +1146,7 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func validateRunDirectoryAvailability(_ request: FlowOperationRequest) throws {
         guard !request.allowExistingRunDirectory else { return }
-        let runDirectory = try XcircuitePackage(projectRoot: request.projectRoot)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: request.projectRoot)
             .runDirectoryURL(for: request.runID)
         guard !FileManager.default.fileExists(atPath: runDirectory.path(percentEncoded: false)) else {
             throw FlowExecutionError.duplicateRunID(request.runID)
@@ -1159,13 +1159,13 @@ public struct DefaultFlowOrchestrator: Sendable {
             intent: request.intent
         )
         if request.allowExistingRunDirectory {
-            return try packageStore.ensureRunDirectory(
+            return try storage.ensureRunDirectory(
                 for: request.runID,
                 descriptor: descriptor,
                 inProjectAt: request.projectRoot
             )
         }
-        return try packageStore.createRunDirectory(
+        return try storage.createRunDirectory(
             for: request.runID,
             descriptor: descriptor,
             inProjectAt: request.projectRoot
@@ -1304,14 +1304,14 @@ public struct DefaultFlowOrchestrator: Sendable {
         projectRoot: URL,
         runDirectory: URL
     ) throws -> ArtifactReference {
-        let relativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/stages/\(stageID)/attempts.json"
+        let relativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/stages/\(stageID)/attempts.json"
         let attemptsURL = runDirectory
             .appending(path: "stages")
             .appending(path: stageID)
             .appending(path: "attempts.json")
-        try packageStore.ensureDirectory(at: attemptsURL.deletingLastPathComponent())
-        try packageStore.writeJSON(attempts, to: attemptsURL, forProjectAt: projectRoot)
-        let legacyReference = try packageStore.fileReference(
+        try storage.ensureDirectory(at: attemptsURL.deletingLastPathComponent())
+        try storage.writeJSON(attempts, to: attemptsURL, forProjectAt: projectRoot)
+        let legacyReference = try storage.fileReference(
             forProjectRelativePath: relativePath,
             artifactID: "\(stageID)-attempts",
             kind: .other,
@@ -1332,8 +1332,8 @@ public struct DefaultFlowOrchestrator: Sendable {
         runDirectory: URL
     ) throws {
         let stageDirectory = runDirectory.appending(path: "stages").appending(path: result.stageID)
-        try packageStore.ensureDirectory(at: stageDirectory)
-        try packageStore.writeJSON(
+        try storage.ensureDirectory(at: stageDirectory)
+        try storage.writeJSON(
             result,
             to: stageDirectory.appending(path: "result.json"),
             forProjectAt: projectRoot
@@ -1351,7 +1351,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         guard FileManager.default.fileExists(atPath: resultURL.path(percentEncoded: false)) else {
             return nil
         }
-        let result = try packageStore.readJSON(FlowStageResult.self, from: resultURL)
+        let result = try storage.readJSON(FlowStageResult.self, from: resultURL)
         guard result.stageID == stage.stageID, result.status == .succeeded else {
             return nil
         }
@@ -1431,8 +1431,8 @@ public struct DefaultFlowOrchestrator: Sendable {
             projectRoot: projectRoot
         )
         let stageResultArtifacts = try result.stages.map { stage in
-            try packageStore.fileReference(
-                forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(result.runID)/stages/\(stage.stageID)/result.json",
+            try storage.fileReference(
+                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(result.runID)/stages/\(stage.stageID)/result.json",
                 artifactID: "\(stage.stageID)-result",
                 kind: .other,
                 format: .json,
@@ -1457,7 +1457,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 + progressArtifacts
                 + [toolchainReference]
         )
-        _ = try packageStore.transitionRun(
+        _ = try storage.transitionRun(
             runID: result.runID,
             transition: XcircuiteRunTransition(
                 status: xcircuiteStatus(result.status),
@@ -1480,21 +1480,21 @@ public struct DefaultFlowOrchestrator: Sendable {
         let planURL = runDirectory.appending(path: "plan.json")
         if request.allowExistingRunDirectory,
            FileManager.default.fileExists(atPath: planURL.path(percentEncoded: false)) {
-            let existingPlan = try packageStore.readJSON(FlowRunPlan.self, from: planURL)
+            let existingPlan = try storage.readJSON(FlowRunPlan.self, from: planURL)
             guard existingPlan == plan else {
                 throw FlowExecutionError.existingRunPlanMismatch(request.runID)
             }
-            return try packageStore.fileReference(
-                forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(request.runID)/plan.json",
+            return try storage.fileReference(
+                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/plan.json",
                 kind: .other,
                 format: .json,
                 inProjectAt: request.projectRoot,
                 producedByRunID: request.runID
             )
         }
-        try packageStore.writeJSON(plan, to: planURL, forProjectAt: request.projectRoot)
-        return try packageStore.fileReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(request.runID)/plan.json",
+        try storage.writeJSON(plan, to: planURL, forProjectAt: request.projectRoot)
+        return try storage.fileReference(
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/plan.json",
             kind: .other,
             format: .json,
             inProjectAt: request.projectRoot,
@@ -1506,12 +1506,12 @@ public struct DefaultFlowOrchestrator: Sendable {
         runID: String,
         projectRoot: URL
     ) throws -> [XcircuiteFileReference] {
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let manifestURL = runDirectory.appending(path: "manifest.json")
         guard FileManager.default.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
             return []
         }
-        return try packageStore.loadRunManifest(
+        return try storage.loadRunManifest(
             runID: runID,
             inProjectAt: projectRoot
         ).artifacts
@@ -1544,9 +1544,9 @@ public struct DefaultFlowOrchestrator: Sendable {
     ) throws -> XcircuiteFileReference {
         let toolchainURL = runDirectory.appending(path: "toolchain.json")
         let manifest = FlowToolchainManifest(runID: runID, profile: profile, stages: records)
-        try packageStore.writeJSON(manifest, to: toolchainURL, forProjectAt: projectRoot)
-        return try packageStore.fileReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/toolchain.json",
+        try storage.writeJSON(manifest, to: toolchainURL, forProjectAt: projectRoot)
+        return try storage.fileReference(
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/toolchain.json",
             kind: .other,
             format: .json,
             inProjectAt: projectRoot,

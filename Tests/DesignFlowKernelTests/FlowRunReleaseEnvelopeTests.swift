@@ -46,7 +46,7 @@ extension FlowRunLedgerSummaryTests {
         $0.code == "release-envelope-corpus-history-missing"
     })
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
@@ -238,7 +238,7 @@ extension FlowRunLedgerSummaryTests {
               "contracts": [
                 {
                   "contractID": "xcircuite.run-manifest.v2",
-                  "owner": "XcircuitePackage",
+                  "owner": "XcircuiteWorkspace",
                   "status": "passed",
                   "expectedVersion": 1,
                   "observedVersion": 1,
@@ -459,7 +459,7 @@ extension FlowRunLedgerSummaryTests {
               "contracts": [
                 {
                   "contractID": "xcircuite.run-manifest.v2",
-                  "owner": "XcircuitePackage",
+                  "owner": "XcircuiteWorkspace",
                   "status": "failed",
                   "expectedVersion": 1,
                   "observedVersion": 2,
@@ -586,7 +586,7 @@ extension FlowRunLedgerSummaryTests {
       "contracts": [
         {
           "id": "xcircuite.run-manifest.v2",
-          "owner": "XcircuitePackage",
+          "owner": "XcircuiteWorkspace",
           "status": "passed",
           "expectedVersion": 1,
           "observedVersion": 1,
@@ -687,7 +687,7 @@ extension FlowRunLedgerSummaryTests {
       "contracts": [
         {
           "id": "xcircuite.run-manifest.v2",
-          "owner": "XcircuitePackage",
+          "owner": "XcircuiteWorkspace",
           "status": "passed"
         }
       ]

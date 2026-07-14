@@ -169,7 +169,7 @@ func writeRunArtifact(
         withIntermediateDirectories: true
     )
     try payload.write(to: root.appending(path: path), options: .atomic)
-    let reference = try XcircuitePackageStore().fileReference(
+    let reference = try XcircuiteWorkspaceStore().fileReference(
         forProjectRelativePath: path,
         artifactID: artifactID,
         kind: .other,
@@ -177,7 +177,7 @@ func writeRunArtifact(
         inProjectAt: root,
         producedByRunID: runID
     )
-    try XcircuitePackageStore().upsertRunArtifact(reference, runID: runID, inProjectAt: root)
+    try XcircuiteWorkspaceStore().upsertRunArtifact(reference, runID: runID, inProjectAt: root)
 }
 }
 

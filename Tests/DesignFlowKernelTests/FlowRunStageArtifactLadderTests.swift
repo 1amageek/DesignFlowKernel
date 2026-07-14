@@ -230,14 +230,14 @@ extension FlowRunLedgerSummaryTests {
         $0.commandID == "build-stage-artifact-ladder" && $0.readiness == .ready
     })
 
-    let stored = try XcircuitePackageStore().readJSON(
+    let stored = try XcircuiteWorkspaceStore().readJSON(
         FlowRunStageArtifactLadder.self,
         from: root.appending(path: ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json")
     )
     #expect(stored.stages.map(\.stageID) == result.ladder.stages.map(\.stageID))
     #expect(stored.signoffManifestCoverage == result.ladder.signoffManifestCoverage)
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
     )
@@ -338,12 +338,12 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: payload]
     )
     let resultPath = ".xcircuite/runs/\(runID)/stages/001-drc/result.json"
-    var result = try XcircuitePackageStore().readJSON(
+    var result = try XcircuiteWorkspaceStore().readJSON(
         FlowStageResult.self,
         from: root.appending(path: resultPath)
     )
     result.stageID = "../escape"
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         result,
         to: root.appending(path: resultPath),
         forProjectAt: root

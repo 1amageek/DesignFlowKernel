@@ -8,7 +8,7 @@ import Foundation
 /// an in-memory fixture, or a remote workspace implementation without
 /// changing stage executors.
 public protocol FlowExecutionStorage: Sendable {
-    func ensurePackageDirectory(forProjectAt projectRoot: URL) throws
+    func ensureWorkspaceDirectory(forProjectAt projectRoot: URL) throws
 
     @discardableResult
     func ensureRunDirectory(
@@ -60,8 +60,8 @@ public protocol FlowExecutionStorage: Sendable {
 
     /// Creates the canonical Foundation artifact reference for a project file.
     ///
-    /// Implementations may use a legacy persistence format internally, but the
-    /// execution boundary never exposes that representation to new callers.
+    /// Implementations may use a storage-specific persistence format internally,
+    /// but the execution boundary always exposes the Foundation representation.
     func makeArtifactReference(
         forProjectRelativePath path: String,
         artifactID: String?,
@@ -100,8 +100,7 @@ public protocol FlowExecutionStorage: Sendable {
     ///
     /// Planning and qualification fixtures may be shared by more than one
     /// run. New flow code should prefer the Foundation artifact envelope or a
-    /// run-ledger registration, while this operation remains available at the
-    /// legacy filesystem boundary during migration.
+    /// run-ledger registration when the artifact belongs to a single run.
     func upsertFileReference(
         _ reference: XcircuiteFileReference,
         forProjectAt projectRoot: URL
@@ -149,7 +148,7 @@ public extension FlowExecutionStorage {
     }
 }
 
-extension XcircuitePackageStore: FlowExecutionStorage {
+extension XcircuiteWorkspaceStore: FlowExecutionStorage {
     public func makeArtifactReference(
         forProjectRelativePath path: String,
         artifactID: String?,
@@ -188,14 +187,14 @@ extension XcircuitePackageStore: FlowExecutionStorage {
         for runID: String,
         inProjectAt projectRoot: URL
     ) throws -> URL {
-        try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
     }
 
     public func loadCancellationRequest(
         runID: String,
         projectRoot: URL
     ) throws -> FlowRunCancellationRequest? {
-        try FlowRunProgressStore(packageStore: self).loadCancellationRequest(
+        try FlowRunProgressStore(storage: self).loadCancellationRequest(
             runID: runID,
             projectRoot: projectRoot
         )

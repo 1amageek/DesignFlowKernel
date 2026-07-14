@@ -15,17 +15,17 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
 
     private let loader: any FlowRunLedgerLoading
     private let reviewBundler: any FlowRunReviewBundling
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let identifierPolicy = FlowRunReviewIdentifierPolicy()
 
     public init(
         loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
         reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore()
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
     ) {
         self.loader = loader
         self.reviewBundler = reviewBundler
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     public func makeStageArtifactLadder(
@@ -46,15 +46,15 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         projectRoot: URL
     ) throws -> FlowRunStageArtifactLadderBuildResult {
         let ladder = try makeStageArtifactLadder(runID: runID, projectRoot: projectRoot)
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let reviewDirectory = runDirectory.appending(path: "review")
-        try packageStore.ensureDirectory(at: reviewDirectory)
+        try storage.ensureDirectory(at: reviewDirectory)
 
         let ladderURL = reviewDirectory.appending(path: "stage-artifact-ladder.json")
-        try packageStore.writeJSON(ladder, to: ladderURL, forProjectAt: projectRoot)
+        try storage.writeJSON(ladder, to: ladderURL, forProjectAt: projectRoot)
 
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.makeArtifactReference(
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
+        let reference = try storage.makeArtifactReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
             role: .output,
@@ -63,7 +63,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             inProjectAt: projectRoot,
             producedByRunID: runID
         )
-        try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return FlowRunStageArtifactLadderBuildResult(ladder: ladder, artifact: reference)
     }
 

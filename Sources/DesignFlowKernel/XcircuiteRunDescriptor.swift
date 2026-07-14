@@ -9,7 +9,7 @@ public struct XcircuiteRunDescriptor: Sendable, Hashable {
     public init(
         actor: XcircuiteRunActionActor = XcircuiteRunActionActor(
             kind: .system,
-            identifier: "xcircuite-package"
+            identifier: "xcircuite-workspace"
         ),
         intent: String? = nil,
         parentRunID: String? = nil,

@@ -1,6 +1,6 @@
 import Foundation
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     @discardableResult
     public func appendReviewDecisionAction(
         _ request: XcircuiteRunReviewDecisionActionRequest,

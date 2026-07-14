@@ -3,14 +3,14 @@ import Foundation
 
 public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     private let loader: any FlowRunLedgerLoading
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
 
     public init(
         loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore()
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
     ) {
         self.loader = loader
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     public func summarizeLoop(
@@ -37,13 +37,13 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
 
         var producedReferences: [ArtifactReference] = []
         if persist {
-            let iterationsReference = try packageStore.writeLoopIterationSummaries(
+            let iterationsReference = try storage.writeLoopIterationSummaries(
                 iterations,
                 runID: runID,
                 inProjectAt: projectRoot
             )
             producedReferences.append(try iterationsReference.foundationArtifactReference(role: .output))
-            let snapshotReference = try packageStore.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
+            let snapshotReference = try storage.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
             producedReferences.append(try snapshotReference.foundationArtifactReference(role: .output))
         }
 
@@ -168,7 +168,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 includingPropertiesForKeys: nil
             )
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "evidence: \(error.localizedDescription)"
             )
         }
@@ -177,7 +177,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             guard url.lastPathComponent.hasSuffix("-envelope.json") else {
                 continue
             }
-            envelopes.append(try packageStore.readJSON(XcircuiteArtifactEnvelope.self, from: url))
+            envelopes.append(try storage.readJSON(XcircuiteArtifactEnvelope.self, from: url))
         }
         return envelopes
     }

@@ -36,7 +36,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(fileExists(".xcircuite/runs/run-1/stages/001-preflight/result.json", in: root))
         #expect(fileExists(".xcircuite/runs/run-1/stages/002-drc/result.json", in: root))
 
-        let runManifest = try XcircuitePackageStore().readJSON(
+        let runManifest = try XcircuiteWorkspaceStore().readJSON(
             XcircuiteRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
         )
@@ -93,7 +93,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(summary.progressEventCount == 6)
         #expect(summary.latestProgressEvent?.kind == .runFinished)
 
-        let manifest = try XcircuitePackageStore().readJSON(
+        let manifest = try XcircuiteWorkspaceStore().readJSON(
             XcircuiteRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-progress/manifest.json")
         )
@@ -145,7 +145,7 @@ struct DefaultFlowOrchestratorTests {
         )
 
         #expect(result.status == .succeeded)
-        let plan = try XcircuitePackageStore().readJSON(
+        let plan = try XcircuiteWorkspaceStore().readJSON(
             FlowRunPlan.self,
             from: root.appending(path: ".xcircuite/runs/run-profile/plan.json")
         )
@@ -698,7 +698,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let persisted = try XcircuitePackageStore().readJSON(
+        let persisted = try XcircuiteWorkspaceStore().readJSON(
             FlowStageResult.self,
             from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
         )
@@ -936,7 +936,7 @@ struct DefaultFlowOrchestratorTests {
         )
         #expect(result.status == .blocked)
 
-        try XcircuitePackageStore().writeApproval(
+        try XcircuiteWorkspaceStore().writeApproval(
             XcircuiteApprovalRecord(
                 runID: "run-1",
                 stageID: "001-drc",
@@ -946,7 +946,7 @@ struct DefaultFlowOrchestratorTests {
             ),
             inProjectAt: root
         )
-        try XcircuitePackageStore().writeDesignDiff(
+        try XcircuiteWorkspaceStore().writeDesignDiff(
             XcircuiteDesignDiff(
                 runID: "run-1",
                 title: "DRC review proposal",
@@ -965,7 +965,7 @@ struct DefaultFlowOrchestratorTests {
             ),
             inProjectAt: root
         )
-        try XcircuitePackageStore().appendRunAction(
+        try XcircuiteWorkspaceStore().appendRunAction(
             XcircuiteRunActionRecord(
                 actionID: "action-1",
                 runID: "run-1",
@@ -1049,7 +1049,7 @@ struct DefaultFlowOrchestratorTests {
         do {
             _ = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
             Issue.record("Expected missing stage result to fail closed")
-        } catch let error as XcircuitePackageError {
+        } catch let error as XcircuiteWorkspaceError {
             guard case .readFailed(let message) = error else {
                 Issue.record("Expected readFailed, got \(error)")
                 return
@@ -1065,7 +1065,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("run-ledger-unsafe")
         defer { removeTemporaryRoot(root) }
 
-        #expect(throws: XcircuitePackageError.self) {
+        #expect(throws: XcircuiteWorkspaceError.self) {
             try FlowRunLedgerLoader().loadRunLedger(runID: "../escape", projectRoot: root)
         }
     }
@@ -1186,7 +1186,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(fileExists(".xcircuite/runs/run-1/stages/001-drc/result.json", in: root))
         #expect(!fileExists(".xcircuite/runs/run-1/stages/002-lvs/result.json", in: root))
 
-        let runManifest = try XcircuitePackageStore().readJSON(
+        let runManifest = try XcircuiteWorkspaceStore().readJSON(
             XcircuiteRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
         )
@@ -1244,7 +1244,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.attempts[1].retryDecision.shouldRetry == false)
         #expect(stage.attempts[1].retryDecision.reason == .stageDidNotFail)
 
-        let attempts = try XcircuitePackageStore().readJSON(
+        let attempts = try XcircuiteWorkspaceStore().readJSON(
             [FlowStageAttemptRecord].self,
             from: root.appending(path: ".xcircuite/runs/run-retry-success/stages/001-drc/attempts.json")
         )
@@ -1260,7 +1260,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(summary.stages.first?.retryCount == 1)
         #expect(summary.nextActions.contains { $0.kind == "reviewRetryAttempts" })
 
-        let manifest = try XcircuitePackageStore().readJSON(
+        let manifest = try XcircuiteWorkspaceStore().readJSON(
             XcircuiteRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-retry-success/manifest.json")
         )
@@ -1461,7 +1461,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("unsafe-run-id")
         defer { removeTemporaryRoot(root) }
 
-        await #expect(throws: XcircuitePackageError.self) {
+        await #expect(throws: XcircuiteWorkspaceError.self) {
             try await DefaultFlowOrchestrator().run(
                 request: FlowOperationRequest(
                     projectRoot: root,
@@ -1582,14 +1582,14 @@ struct DefaultFlowOrchestratorTests {
     }
 
     private func readToolchainManifest(in root: URL, runID: String) throws -> FlowToolchainManifest {
-        try XcircuitePackageStore().readJSON(
+        try XcircuiteWorkspaceStore().readJSON(
             FlowToolchainManifest.self,
             from: root.appending(path: ".xcircuite/runs/\(runID)/toolchain.json")
         )
     }
 
     private func assertToolchainArtifact(in root: URL, runID: String) throws -> XcircuiteFileReference {
-        let runManifest = try XcircuitePackageStore().readJSON(
+        let runManifest = try XcircuiteWorkspaceStore().readJSON(
             XcircuiteRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
         )
@@ -1753,7 +1753,7 @@ struct ApprovalGateTests {
 
         // 2. The cockpit records the decision; re-running the same runID
         //    resumes past the gate.
-        try XcircuitePackageStore().writeApproval(
+        try XcircuiteWorkspaceStore().writeApproval(
             XcircuiteApprovalRecord(
                 runID: "run-approve",
                 stageID: "001-drc",
@@ -1792,9 +1792,9 @@ struct ApprovalGateTests {
             ],
             allowExistingRunDirectory: true
         )
-        try XcircuitePackageStore().createPackage(at: root)
-        _ = try XcircuitePackageStore().createRunDirectory(for: "run-reject", inProjectAt: root)
-        try XcircuitePackageStore().writeApproval(
+        try XcircuiteWorkspaceStore().createWorkspace(at: root)
+        _ = try XcircuiteWorkspaceStore().createRunDirectory(for: "run-reject", inProjectAt: root)
+        try XcircuiteWorkspaceStore().writeApproval(
             XcircuiteApprovalRecord(
                 runID: "run-reject",
                 stageID: "001-drc",

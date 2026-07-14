@@ -1,7 +1,7 @@
 import CircuiteFoundation
 import Foundation
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     @discardableResult
     public func writeArtifactEnvelope(
         _ envelope: XcircuiteArtifactEnvelope,
@@ -12,7 +12,7 @@ extension XcircuitePackageStore {
         try XcircuiteArtifactEnvelopeValidator().validate(envelope)
         try verifyArtifactEnvelopeReference(envelope.reference, projectRoot: projectRoot)
 
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let runDirectory = try ensureArtifactEnvelopeRunDirectory(
             runID: runID,
             package: package,
@@ -66,7 +66,7 @@ extension XcircuitePackageStore {
         artifactID: String,
         runID: String
     ) -> String {
-        "\(XcircuitePackage.directoryName)/runs/\(runID)/evidence/\(artifactID)-envelope.json"
+        "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/evidence/\(artifactID)-envelope.json"
     }
 
     private func artifactEnvelopeReferenceID(for artifactID: String) -> String {
@@ -98,7 +98,7 @@ extension XcircuitePackageStore {
 
     private func ensureArtifactEnvelopeRunDirectory(
         runID: String,
-        package: XcircuitePackage,
+        package: XcircuiteWorkspace,
         projectRoot: URL
     ) throws -> URL {
         let runDirectory = try package.runDirectoryURL(for: runID)

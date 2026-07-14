@@ -123,7 +123,7 @@ public struct XcircuiteFileReferenceVerifier: Sendable {
         projectRoot: URL
     ) -> URL? {
         do {
-            return try XcircuitePackage(projectRoot: projectRoot)
+            return try XcircuiteWorkspace(projectRoot: projectRoot)
                 .url(forProjectRelativePath: reference.path)
         } catch {
             return nil

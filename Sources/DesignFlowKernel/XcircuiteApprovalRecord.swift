@@ -86,7 +86,7 @@ public struct XcircuiteApprovalRecord: Sendable, Hashable, Codable {
     }
 }
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     @discardableResult
     public func recordApprovalAction(
         _ record: XcircuiteApprovalRecord,
@@ -137,7 +137,7 @@ extension XcircuitePackageStore {
         try validateApprovalIdentifiers(record.runID, stageID: record.stageID)
         try persistApprovalRecord(record, inProjectAt: projectRoot)
 
-        let approvalPath = "\(XcircuitePackage.directoryName)/runs/\(record.runID)/approvals/\(record.stageID).json"
+        let approvalPath = "\(XcircuiteWorkspace.directoryName)/runs/\(record.runID)/approvals/\(record.stageID).json"
         let approvalReference = try fileReference(
             forProjectRelativePath: approvalPath,
             kind: .other,
@@ -157,7 +157,7 @@ extension XcircuitePackageStore {
         _ = try recordApprovalAction(
             record,
             metadata: [
-                "source": .string("xcircuite-package.write-approval"),
+                "source": .string("xcircuite-workspace.write-approval"),
             ],
             inProjectAt: projectRoot
         )
@@ -170,7 +170,7 @@ extension XcircuitePackageStore {
         var record = record
         try bindApprovalIfPossible(&record, inProjectAt: projectRoot)
         try validateApprovalIdentifiers(record.runID, stageID: record.stageID)
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let directory = try package.runDirectoryURL(for: record.runID)
             .appending(path: "approvals")
         try ensureDirectory(at: directory)
@@ -186,7 +186,7 @@ extension XcircuitePackageStore {
         inProjectAt projectRoot: URL
     ) throws {
         try validateApprovalIdentifiers(record.runID, stageID: record.stageID)
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let runDirectory = try package.runDirectoryURL(for: record.runID)
         if record.planSHA256 == nil || record.planByteCount == nil {
             let planURL = runDirectory.appending(path: "plan.json")
@@ -223,7 +223,7 @@ extension XcircuitePackageStore {
         inProjectAt projectRoot: URL
     ) throws -> XcircuiteApprovalRecord? {
         try validateApprovalIdentifiers(runID, stageID: stageID)
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let url = try package.runDirectoryURL(for: runID)
             .appending(path: "approvals")
             .appending(path: "\(stageID).json")
@@ -234,14 +234,14 @@ extension XcircuitePackageStore {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
         do {
             return try JSONDecoder().decode(XcircuiteApprovalRecord.self, from: data)
         } catch {
-            throw XcircuitePackageError.decodeFailed(
+            throw XcircuiteWorkspaceError.decodeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -252,7 +252,7 @@ extension XcircuitePackageStore {
         runID: String,
         inProjectAt projectRoot: URL
     ) throws -> [XcircuiteApprovalRecord] {
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let directory = try package.runDirectoryURL(for: runID)
             .appending(path: "approvals")
         guard FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) else {
@@ -265,7 +265,7 @@ extension XcircuitePackageStore {
                 includingPropertiesForKeys: nil
             )
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "approvals: \(error.localizedDescription)"
             )
         }

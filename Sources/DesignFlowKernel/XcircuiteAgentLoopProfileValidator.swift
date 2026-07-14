@@ -15,7 +15,7 @@ public struct XcircuiteAgentLoopProfileValidator: Sendable {
             try validateNonEmpty(detector.detectorID, field: "detectors.detectorID")
             try validateNonNegative(detector.windowSize, field: "detectors.windowSize")
             if let threshold = detector.threshold, !threshold.isFinite || threshold < 0 {
-                throw XcircuitePackageError.invalidIdentifier(
+                throw XcircuiteWorkspaceError.invalidIdentifier(
                     kind: "agentLoopProfile",
                     value: "detectors.threshold"
                 )
@@ -39,13 +39,13 @@ public struct XcircuiteAgentLoopProfileValidator: Sendable {
             return
         }
         if value < 0 {
-            throw XcircuitePackageError.invalidIdentifier(kind: "agentLoopProfile", value: field)
+            throw XcircuiteWorkspaceError.invalidIdentifier(kind: "agentLoopProfile", value: field)
         }
     }
 
     private func validateNonEmpty(_ value: String, field: String) throws {
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw XcircuitePackageError.invalidIdentifier(kind: "agentLoopProfile", value: field)
+            throw XcircuiteWorkspaceError.invalidIdentifier(kind: "agentLoopProfile", value: field)
         }
     }
 }

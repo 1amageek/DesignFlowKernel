@@ -1,16 +1,16 @@
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentionIndexBuilding {
-    private let packageStore: any FlowExecutionStorage
+    private let storage: any FlowExecutionStorage
     private let hasher: XcircuiteHasher
     private let validator: any FlowRunReleaseRetentionIndexValidating
 
     public init(
-        packageStore: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
+        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
         hasher: XcircuiteHasher = XcircuiteHasher(),
         validator: any FlowRunReleaseRetentionIndexValidating = DefaultFlowRunReleaseRetentionIndexValidator()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.hasher = hasher
         self.validator = validator
     }
@@ -26,11 +26,11 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
         minimumRetentionDays: Int,
         recordedAt: Date
     ) throws -> FlowRunReleaseRetentionIndex {
-        let dashboardURL = try packageStore.url(
+        let dashboardURL = try storage.url(
             forProjectRelativePath: sourceDashboardPath,
             inProjectAt: projectRoot
         )
-        let historyURL = try packageStore.url(
+        let historyURL = try storage.url(
             forProjectRelativePath: historyPath,
             inProjectAt: projectRoot
         )
@@ -86,7 +86,7 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
 
     private func decodeEntries(_ data: Data) throws -> [FlowRunReleaseHistoryEntry] {
         guard let string = String(data: data, encoding: .utf8) else {
-            throw XcircuitePackageError.decodeFailed("Retention history is not UTF-8 JSONL.")
+            throw XcircuiteWorkspaceError.decodeFailed("Retention history is not UTF-8 JSONL.")
         }
         let decoder = JSONDecoder()
         return try string.split(whereSeparator: { $0.isNewline }).map { line in

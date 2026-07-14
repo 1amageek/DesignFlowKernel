@@ -27,12 +27,12 @@ struct XcircuiteFileLock {
             S_IRUSR | S_IWUSR
         )
         guard descriptor >= 0 else {
-            throw XcircuitePackageError.fileLockFailed(systemError(for: lockURL))
+            throw XcircuiteWorkspaceError.fileLockFailed(systemError(for: lockURL))
         }
         guard flock(descriptor, operation) == 0 else {
             let message = systemError(for: lockURL)
             _ = close(descriptor)
-            throw XcircuitePackageError.fileLockFailed(message)
+            throw XcircuiteWorkspaceError.fileLockFailed(message)
         }
 
         defer {

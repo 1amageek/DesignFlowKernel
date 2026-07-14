@@ -1,6 +1,6 @@
 import Foundation
 
-public struct XcircuitePackage: Sendable, Hashable {
+public struct XcircuiteWorkspace: Sendable, Hashable {
     public static let directoryName = ".xcircuite"
     public static let manifestFileName = "project.json"
 
@@ -10,22 +10,22 @@ public struct XcircuitePackage: Sendable, Hashable {
         self.projectRoot = projectRoot
     }
 
-    public var packageURL: URL {
+    public var workspaceURL: URL {
         projectRoot.appending(path: Self.directoryName)
     }
 
     public var manifestURL: URL {
-        packageURL.appending(path: Self.manifestFileName)
+        workspaceURL.appending(path: Self.manifestFileName)
     }
 
     public func configurationURL(named fileName: String) throws -> URL {
-        try validatePackageFileName(fileName)
-        return packageURL.appending(path: fileName)
+        try validateWorkspaceFileName(fileName)
+        return workspaceURL.appending(path: fileName)
     }
 
     public func runDirectoryURL(for runID: String) throws -> URL {
         try XcircuiteIdentifierValidator().validate(runID, kind: .runID)
-        return packageURL
+        return workspaceURL
             .appending(path: "runs")
             .appending(path: runID)
     }
@@ -38,7 +38,7 @@ public struct XcircuitePackage: Sendable, Hashable {
 
         guard resolved.isContained(in: root),
               resolved.isContainedAfterResolvingExistingPathComponents(in: root) else {
-            throw XcircuitePackageError.unsafeProjectPath(rawPath)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(rawPath)
         }
 
         return resolved
@@ -46,25 +46,25 @@ public struct XcircuitePackage: Sendable, Hashable {
 
     static func validateProjectRelativePath(_ rawPath: String) throws {
         guard !rawPath.isEmpty, rawPath != "." else {
-            throw XcircuitePackageError.unsafeProjectPath(rawPath)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(rawPath)
         }
 
         if rawPath.hasPrefix("/") || rawPath.hasPrefix("~") {
-            throw XcircuitePackageError.unsafeProjectPath(rawPath)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(rawPath)
         }
 
         let components = rawPath.split(separator: "/", omittingEmptySubsequences: false)
         if components.contains(where: { $0.isEmpty || $0 == "." || $0 == ".." }) {
-            throw XcircuitePackageError.unsafeProjectPath(rawPath)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(rawPath)
         }
     }
 
-    private func validatePackageFileName(_ fileName: String) throws {
+    private func validateWorkspaceFileName(_ fileName: String) throws {
         guard !fileName.isEmpty, fileName != ".", fileName != ".." else {
-            throw XcircuitePackageError.unsafeProjectPath(fileName)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(fileName)
         }
         if fileName.hasPrefix("/") || fileName.hasPrefix("~") || fileName.contains("/") {
-            throw XcircuitePackageError.unsafeProjectPath(fileName)
+            throw XcircuiteWorkspaceError.unsafeProjectPath(fileName)
         }
     }
 }

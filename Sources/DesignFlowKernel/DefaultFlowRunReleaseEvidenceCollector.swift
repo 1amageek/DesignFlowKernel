@@ -6,16 +6,16 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
     public static let performanceEnvelopeArtifactID = "qualification-performance-envelope"
     public static let contractAuditArtifactID = "qualification-contract-audit"
 
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let hasher: XcircuiteHasher
     private let currentDate: Date
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
         hasher: XcircuiteHasher = XcircuiteHasher(),
         currentDate: Date = Date()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.hasher = hasher
         self.currentDate = currentDate
     }
@@ -81,14 +81,14 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
         do {
             return try JSONDecoder().decode(XcircuiteJSONValue.self, from: data)
         } catch {
-            throw XcircuitePackageError.decodeFailed(
+            throw XcircuiteWorkspaceError.decodeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -324,9 +324,9 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
         contractAudit: FlowRunReleaseContractAudit
     ) throws -> [ArtifactReference] {
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let qualificationDirectory = runDirectory.appending(path: "qualification")
-        try packageStore.ensureDirectory(at: qualificationDirectory)
+        try storage.ensureDirectory(at: qualificationDirectory)
 
         let artifactSpecs: [(path: String, artifactID: String, value: any Encodable)] = [
             ("qualification/corpus-history.json", Self.corpusHistoryArtifactID, corpusHistory),
@@ -336,9 +336,9 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         var references: [ArtifactReference] = []
         for spec in artifactSpecs {
             let url = runDirectory.appending(path: spec.path)
-            try packageStore.writeJSON(spec.value, to: url, forProjectAt: projectRoot)
-            let reference = try packageStore.makeArtifactReference(
-                forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(spec.path)",
+            try storage.writeJSON(spec.value, to: url, forProjectAt: projectRoot)
+            let reference = try storage.makeArtifactReference(
+                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(spec.path)",
                 artifactID: spec.artifactID,
                 role: .output,
                 kind: .report,
@@ -346,7 +346,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
                 inProjectAt: projectRoot,
                 producedByRunID: runID
             )
-            try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
             references.append(reference)
         }
         return references

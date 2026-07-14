@@ -8,7 +8,7 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
     }
 
     public init(storage: any FlowExecutionStorage) {
-        self.progressStore = FlowRunProgressStore(packageStore: storage)
+        self.progressStore = FlowRunProgressStore(storage: storage)
     }
 
     public func snapshot(

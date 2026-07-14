@@ -1,6 +1,6 @@
 import Foundation
 
-public enum XcircuitePackageError: Error, LocalizedError, Equatable {
+public enum XcircuiteWorkspaceError: Error, LocalizedError, Equatable {
     case createDirectoryFailed(String)
     case encodeFailed(String)
     case writeFailed(String)

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct XcircuitePackageStore: Sendable {
+public struct XcircuiteWorkspaceStore: Sendable {
     private let hasher: XcircuiteHasher
     private let identifierValidator: XcircuiteIdentifierValidator
     let referenceVerifier: XcircuiteFileReferenceVerifier
@@ -14,18 +14,18 @@ public struct XcircuitePackageStore: Sendable {
         self.referenceVerifier = XcircuiteFileReferenceVerifier(hasher: hasher)
     }
 
-    public func packageURL(forProjectAt projectRoot: URL) -> URL {
-        XcircuitePackage(projectRoot: projectRoot).packageURL
+    public func workspaceURL(forProjectAt projectRoot: URL) -> URL {
+        XcircuiteWorkspace(projectRoot: projectRoot).workspaceURL
     }
 
     public func configurationURL(named fileName: String, inProjectAt projectRoot: URL) throws -> URL {
-        try XcircuitePackage(projectRoot: projectRoot).configurationURL(named: fileName)
+        try XcircuiteWorkspace(projectRoot: projectRoot).configurationURL(named: fileName)
     }
 
-    public func createPackage(at projectRoot: URL) throws {
-        try ensurePackageDirectory(forProjectAt: projectRoot)
-        let manifestURL = XcircuitePackage(projectRoot: projectRoot).manifestURL
-        let lockURL = packageURL(forProjectAt: projectRoot).appending(path: ".project.lock")
+    public func createWorkspace(at projectRoot: URL) throws {
+        try ensureWorkspaceDirectory(forProjectAt: projectRoot)
+        let manifestURL = XcircuiteWorkspace(projectRoot: projectRoot).manifestURL
+        let lockURL = workspaceURL(forProjectAt: projectRoot).appending(path: ".project.lock")
         try XcircuiteFileLock.withExclusiveLock(at: lockURL) {
             let path = manifestURL.path(percentEncoded: false)
             if FileManager.default.fileExists(atPath: path) {
@@ -39,15 +39,15 @@ public struct XcircuitePackageStore: Sendable {
         }
     }
 
-    public func isPackage(at projectRoot: URL) -> Bool {
+    public func isWorkspace(at projectRoot: URL) -> Bool {
         var isDirectory: ObjCBool = false
-        let path = packageURL(forProjectAt: projectRoot).path(percentEncoded: false)
+        let path = workspaceURL(forProjectAt: projectRoot).path(percentEncoded: false)
         let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue
     }
 
-    public func ensurePackageDirectory(forProjectAt projectRoot: URL) throws {
-        try ensureDirectory(at: packageURL(forProjectAt: projectRoot))
+    public func ensureWorkspaceDirectory(forProjectAt projectRoot: URL) throws {
+        try ensureDirectory(at: workspaceURL(forProjectAt: projectRoot))
     }
 
     public func ensureDirectory(at url: URL) throws {
@@ -57,18 +57,18 @@ public struct XcircuitePackageStore: Sendable {
                 withIntermediateDirectories: true
             )
         } catch {
-            throw XcircuitePackageError.createDirectoryFailed(error.localizedDescription)
+            throw XcircuiteWorkspaceError.createDirectoryFailed(error.localizedDescription)
         }
     }
 
     public func url(forProjectRelativePath rawPath: String, inProjectAt projectRoot: URL) throws -> URL {
-        try XcircuitePackage(projectRoot: projectRoot).url(forProjectRelativePath: rawPath)
+        try XcircuiteWorkspace(projectRoot: projectRoot).url(forProjectRelativePath: rawPath)
     }
 
     public func loadManifest(forProjectAt projectRoot: URL) throws -> XcircuiteProjectManifest {
         try readJSON(
             XcircuiteProjectManifest.self,
-            named: XcircuitePackage.manifestFileName,
+            named: XcircuiteWorkspace.manifestFileName,
             forProjectAt: projectRoot
         )
     }
@@ -80,7 +80,7 @@ public struct XcircuitePackageStore: Sendable {
         try manifest.validate()
         try writeJSON(
             manifest,
-            named: XcircuitePackage.manifestFileName,
+            named: XcircuiteWorkspace.manifestFileName,
             forProjectAt: projectRoot
         )
     }
@@ -117,7 +117,7 @@ public struct XcircuitePackageStore: Sendable {
         forProjectAt projectRoot: URL
     ) throws {
         guard reference.artifactID != "run-manifest" else {
-            throw XcircuitePackageError.runManifestCannotBeProjectFile(reference.path)
+            throw XcircuiteWorkspaceError.runManifestCannotBeProjectFile(reference.path)
         }
         try updateProjectManifest(forProjectAt: projectRoot) { manifest in
             manifest.files.removeAll { $0.path == reference.path }
@@ -130,7 +130,7 @@ public struct XcircuitePackageStore: Sendable {
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
         } catch {
-            throw XcircuitePackageError.writeFailed(
+            throw XcircuiteWorkspaceError.writeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -150,7 +150,7 @@ public struct XcircuitePackageStore: Sendable {
         to url: URL,
         forProjectAt projectRoot: URL
     ) throws {
-        try ensurePackageDirectory(forProjectAt: projectRoot)
+        try ensureWorkspaceDirectory(forProjectAt: projectRoot)
         try validateProjectWriteURL(url, projectRoot: projectRoot)
 
         let encoder = JSONEncoder()
@@ -160,13 +160,13 @@ public struct XcircuitePackageStore: Sendable {
         do {
             data = try encoder.encode(value)
         } catch {
-            throw XcircuitePackageError.encodeFailed(error.localizedDescription)
+            throw XcircuiteWorkspaceError.encodeFailed(error.localizedDescription)
         }
 
         do {
             try data.write(to: url, options: .atomic)
         } catch {
-            throw XcircuitePackageError.writeFailed(
+            throw XcircuiteWorkspaceError.writeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -176,7 +176,7 @@ public struct XcircuitePackageStore: Sendable {
         let lexicalRoot = projectRoot.standardizedFileURL
         let lexicalDestination = url.standardizedFileURL
         guard lexicalDestination.isContained(in: lexicalRoot) else {
-            throw XcircuitePackageError.unsafeProjectPath(url.path(percentEncoded: false))
+            throw XcircuiteWorkspaceError.unsafeProjectPath(url.path(percentEncoded: false))
         }
 
         let resolvedRoot = projectRoot.resolvingSymlinksInPath().standardizedFileURL
@@ -184,7 +184,7 @@ public struct XcircuitePackageStore: Sendable {
             .resolvingSymlinksInPath()
             .standardizedFileURL
         guard resolvedAncestor.isContained(in: resolvedRoot) else {
-            throw XcircuitePackageError.unsafeProjectPath(url.path(percentEncoded: false))
+            throw XcircuiteWorkspaceError.unsafeProjectPath(url.path(percentEncoded: false))
         }
     }
 
@@ -223,7 +223,7 @@ public struct XcircuitePackageStore: Sendable {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -232,7 +232,7 @@ public struct XcircuitePackageStore: Sendable {
         do {
             return try decoder.decode(type, from: data)
         } catch {
-            throw XcircuitePackageError.decodeFailed(
+            throw XcircuiteWorkspaceError.decodeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }

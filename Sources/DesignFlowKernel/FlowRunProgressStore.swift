@@ -5,12 +5,12 @@ public struct FlowRunProgressStore: Sendable {
     public static let progressRelativePath = "progress.jsonl"
     public static let cancellationRelativePath = "cancellation.json"
 
-    private let packageStore: any FlowExecutionStorage
+    private let storage: any FlowExecutionStorage
 
     public init(
-        packageStore: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
+        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     @discardableResult
@@ -60,7 +60,7 @@ public struct FlowRunProgressStore: Sendable {
             let latest = try decoder.decode(FlowRunProgressEvent.self, from: line)
             return latest.sequence + 1
         } catch {
-            throw XcircuitePackageError.decodeFailed(
+            throw XcircuiteWorkspaceError.decodeFailed(
                 "\(Self.progressRelativePath): latest progress line is invalid: \(error.localizedDescription)"
             )
         }
@@ -78,19 +78,19 @@ public struct FlowRunProgressStore: Sendable {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(Self.progressRelativePath): \(error.localizedDescription)"
             )
         }
         guard let text = String(data: data, encoding: .utf8) else {
-            throw XcircuitePackageError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8")
+            throw XcircuiteWorkspaceError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8")
         }
         let decoder = JSONDecoder()
         return try text
             .split(separator: "\n")
             .map { line in
                 guard let lineData = String(line).data(using: .utf8) else {
-                    throw XcircuitePackageError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8 line")
+                    throw XcircuiteWorkspaceError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8 line")
                 }
                 return try decoder.decode(FlowRunProgressEvent.self, from: lineData)
             }
@@ -102,7 +102,7 @@ public struct FlowRunProgressStore: Sendable {
     ) throws -> FlowRunCancellationResult {
         let url = cancellationURL(runID: request.runID, projectRoot: projectRoot)
         try ensureRunDirectory(runID: request.runID, projectRoot: projectRoot)
-        try packageStore.writeJSON(request, to: url, forProjectAt: projectRoot)
+        try storage.writeJSON(request, to: url, forProjectAt: projectRoot)
         try upsertRunLevelArtifactIfManifestExists(
             runID: request.runID,
             projectRoot: projectRoot,
@@ -113,7 +113,7 @@ public struct FlowRunProgressStore: Sendable {
         return FlowRunCancellationResult(
             status: "recorded",
             request: request,
-            path: "\(XcircuitePackage.directoryName)/runs/\(request.runID)/\(Self.cancellationRelativePath)"
+            path: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/\(Self.cancellationRelativePath)"
         )
     }
 
@@ -125,7 +125,7 @@ public struct FlowRunProgressStore: Sendable {
         guard fileExists(url) else {
             return nil
         }
-        return try packageStore.readJSON(FlowRunCancellationRequest.self, from: url)
+        return try storage.readJSON(FlowRunCancellationRequest.self, from: url)
     }
 
     public func runLevelArtifacts(
@@ -134,8 +134,8 @@ public struct FlowRunProgressStore: Sendable {
     ) throws -> [XcircuiteFileReference] {
         var artifacts: [XcircuiteFileReference] = []
         if fileExists(progressURL(runID: runID, projectRoot: projectRoot)) {
-            artifacts.append(try packageStore.fileReference(
-                forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.progressRelativePath)",
+            artifacts.append(try storage.fileReference(
+                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.progressRelativePath)",
                 artifactID: "run-progress",
                 kind: .other,
                 format: .text,
@@ -144,8 +144,8 @@ public struct FlowRunProgressStore: Sendable {
             ))
         }
         if fileExists(cancellationURL(runID: runID, projectRoot: projectRoot)) {
-            artifacts.append(try packageStore.fileReference(
-                forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.cancellationRelativePath)",
+            artifacts.append(try storage.fileReference(
+                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.cancellationRelativePath)",
                 artifactID: "run-cancellation-request",
                 kind: .other,
                 format: .json,
@@ -168,7 +168,7 @@ public struct FlowRunProgressStore: Sendable {
         do {
             data = try encoder.encode(value)
         } catch {
-            throw XcircuitePackageError.encodeFailed(error.localizedDescription)
+            throw XcircuiteWorkspaceError.encodeFailed(error.localizedDescription)
         }
         var line = data
         line.append(0x0A)
@@ -182,7 +182,7 @@ public struct FlowRunProgressStore: Sendable {
                 try line.write(to: url, options: .atomic)
             }
         } catch {
-            throw XcircuitePackageError.writeFailed(
+            throw XcircuiteWorkspaceError.writeFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -193,7 +193,7 @@ public struct FlowRunProgressStore: Sendable {
         do {
             handle = try FileHandle(forReadingFrom: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(Self.progressRelativePath): \(error.localizedDescription)"
             )
         }
@@ -203,7 +203,7 @@ public struct FlowRunProgressStore: Sendable {
         do {
             fileSize = try handle.seekToEnd()
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(Self.progressRelativePath): \(error.localizedDescription)"
             )
         }
@@ -225,7 +225,7 @@ public struct FlowRunProgressStore: Sendable {
                 combined.append(buffer)
                 buffer = combined
             } catch {
-                throw XcircuitePackageError.readFailed(
+                throw XcircuiteWorkspaceError.readFailed(
                     "\(Self.progressRelativePath): \(error.localizedDescription)"
                 )
             }
@@ -240,8 +240,8 @@ public struct FlowRunProgressStore: Sendable {
     }
 
     private func ensureRunDirectory(runID: String, projectRoot: URL) throws {
-        try packageStore.ensurePackageDirectory(forProjectAt: projectRoot)
-        try ensureDirectory(XcircuitePackage(projectRoot: projectRoot).packageURL.appending(path: "runs"))
+        try storage.ensureWorkspaceDirectory(forProjectAt: projectRoot)
+        try ensureDirectory(XcircuiteWorkspace(projectRoot: projectRoot).workspaceURL.appending(path: "runs"))
         try ensureDirectory(runDirectoryURL(runID: runID, projectRoot: projectRoot))
     }
 
@@ -256,8 +256,8 @@ public struct FlowRunProgressStore: Sendable {
             return
         }
         let foundationFormat: ArtifactFormat = format == .json ? .json : .text
-        let reference = try packageStore.makeArtifactReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)",
+        let reference = try storage.makeArtifactReference(
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)",
             artifactID: artifactID,
             role: .output,
             kind: .other,
@@ -266,11 +266,11 @@ public struct FlowRunProgressStore: Sendable {
             producedByRunID: runID,
             verifiedByRunID: nil
         )
-        try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
     }
 
     private func ensureDirectory(_ url: URL) throws {
-        try packageStore.ensureDirectory(at: url)
+        try storage.ensureDirectory(at: url)
     }
 
     private func progressURL(runID: String, projectRoot: URL) -> URL {
@@ -284,8 +284,8 @@ public struct FlowRunProgressStore: Sendable {
     }
 
     private func runDirectoryURL(runID: String, projectRoot: URL) -> URL {
-        XcircuitePackage(projectRoot: projectRoot)
-            .packageURL
+        XcircuiteWorkspace(projectRoot: projectRoot)
+            .workspaceURL
             .appending(path: "runs")
             .appending(path: runID)
     }

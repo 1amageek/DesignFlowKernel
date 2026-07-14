@@ -1,6 +1,6 @@
 import Foundation
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     @discardableResult
     public func createRunDirectory(
         for runID: String,
@@ -20,16 +20,16 @@ extension XcircuitePackageStore {
         inProjectAt projectRoot: URL
     ) throws -> URL {
         try validateRunIdentity(runID: runID, parentRunID: descriptor.parentRunID)
-        try createPackage(at: projectRoot)
+        try createWorkspace(at: projectRoot)
 
-        let runURL = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runURL = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         try ensureRunDirectoryStructure(at: runURL)
         let manifestURL = runURL.appending(path: "manifest.json")
         let lockURL = runURL.appending(path: ".manifest.lock")
 
         try XcircuiteFileLock.withExclusiveLock(at: lockURL) {
             guard !runLedgerFileExists(manifestURL) else {
-                throw XcircuitePackageError.runDirectoryAlreadyExists(runID)
+                throw XcircuiteWorkspaceError.runDirectoryAlreadyExists(runID)
             }
             let manifest = try newRunManifest(runID: runID, descriptor: descriptor)
             try writeJSON(manifest, to: manifestURL, forProjectAt: projectRoot)
@@ -60,9 +60,9 @@ extension XcircuitePackageStore {
         inProjectAt projectRoot: URL
     ) throws -> URL {
         try validateRunIdentity(runID: runID, parentRunID: descriptor.parentRunID)
-        try createPackage(at: projectRoot)
+        try createWorkspace(at: projectRoot)
 
-        let runURL = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runURL = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         try ensureRunDirectoryStructure(at: runURL)
         let manifestURL = runURL.appending(path: "manifest.json")
         let lockURL = runURL.appending(path: ".manifest.lock")
@@ -71,7 +71,7 @@ extension XcircuitePackageStore {
             if runLedgerFileExists(manifestURL) {
                 let existing = try readJSON(XcircuiteRunManifest.self, from: manifestURL)
                 guard existing.runID == runID else {
-                    throw XcircuitePackageError.runIdentityMismatch(
+                    throw XcircuiteWorkspaceError.runIdentityMismatch(
                         expected: runID,
                         actual: existing.runID
                     )
@@ -138,7 +138,7 @@ extension XcircuitePackageStore {
         ) { manifest in
             let previousStatus = manifest.status
             guard previousStatus.canTransition(to: transition.status) else {
-                throw XcircuitePackageError.invalidRunTransition(
+                throw XcircuiteWorkspaceError.invalidRunTransition(
                     runID: runID,
                     from: previousStatus,
                     to: transition.status
@@ -187,7 +187,7 @@ extension XcircuitePackageStore {
         _ topDesignName: String,
         inProjectAt projectRoot: URL
     ) throws {
-        try createPackage(at: projectRoot)
+        try createWorkspace(at: projectRoot)
         try updateProjectManifest(forProjectAt: projectRoot) { manifest in
             manifest.identity.topDesignName = topDesignName
         }
@@ -197,8 +197,8 @@ extension XcircuitePackageStore {
         forProjectAt projectRoot: URL,
         _ update: (inout XcircuiteProjectManifest) throws -> Void
     ) throws {
-        try ensurePackageDirectory(forProjectAt: projectRoot)
-        let lockURL = packageURL(forProjectAt: projectRoot).appending(path: ".project.lock")
+        try ensureWorkspaceDirectory(forProjectAt: projectRoot)
+        let lockURL = workspaceURL(forProjectAt: projectRoot).appending(path: ".project.lock")
         try XcircuiteFileLock.withExclusiveLock(at: lockURL) {
             var manifest = try loadManifest(forProjectAt: projectRoot)
             let original = manifest
@@ -248,13 +248,13 @@ extension XcircuitePackageStore {
     ) throws {
         let reference = XcircuiteRunReference(
             runID: runID,
-            manifestPath: "\(XcircuitePackage.directoryName)/runs/\(runID)/manifest.json"
+            manifestPath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/manifest.json"
         )
         try XcircuiteFileLock.withExclusiveLock(at: projectLockURL(projectRoot)) {
             var project = try loadManifest(forProjectAt: projectRoot)
             if let existing = project.runs.first(where: { $0.runID == runID }) {
                 guard existing == reference else {
-                    throw XcircuitePackageError.invalidProjectManifest(
+                    throw XcircuiteWorkspaceError.invalidProjectManifest(
                         "run '\(runID)' has a conflicting manifest locator."
                     )
                 }
@@ -272,7 +272,7 @@ extension XcircuitePackageStore {
     }
 
     private func runManifestURL(runID: String, projectRoot: URL) throws -> URL {
-        try XcircuitePackage(projectRoot: projectRoot)
+        try XcircuiteWorkspace(projectRoot: projectRoot)
             .runDirectoryURL(for: runID)
             .appending(path: "manifest.json")
     }
@@ -283,19 +283,19 @@ extension XcircuitePackageStore {
         project: XcircuiteProjectManifest
     ) throws -> XcircuiteRunManifest {
         guard let runReference = project.runs.first(where: { $0.runID == runID }) else {
-            throw XcircuitePackageError.runReferenceNotFound(runID)
+            throw XcircuiteWorkspaceError.runReferenceNotFound(runID)
         }
         guard let projection = project.files.first(where: {
             $0.artifactID == "run-manifest"
                 && $0.producedByRunID == runID
                 && $0.path == runReference.manifestPath
         }) else {
-            throw XcircuitePackageError.runManifestProjectionMissing(runID)
+            throw XcircuiteWorkspaceError.runManifestProjectionMissing(runID)
         }
 
         let integrity = referenceVerifier.verify(projection, projectRoot: projectRoot)
         guard integrity.status == .verified else {
-            throw XcircuitePackageError.runManifestProjectionMismatch(
+            throw XcircuiteWorkspaceError.runManifestProjectionMismatch(
                 runID: runID,
                 reason: integrity.message
             )
@@ -307,7 +307,7 @@ extension XcircuitePackageStore {
         )
         let manifest = try readJSON(XcircuiteRunManifest.self, from: manifestURL)
         guard manifest.runID == runID else {
-            throw XcircuitePackageError.runIdentityMismatch(
+            throw XcircuiteWorkspaceError.runIdentityMismatch(
                 expected: runID,
                 actual: manifest.runID
             )
@@ -334,7 +334,7 @@ extension XcircuitePackageStore {
             let result = try XcircuiteFileLock.withExclusiveLock(at: runLockURL) {
                 var manifest = try readJSON(XcircuiteRunManifest.self, from: manifestURL)
                 guard manifest == projectedManifest else {
-                    throw XcircuitePackageError.runManifestProjectionMismatch(
+                    throw XcircuiteWorkspaceError.runManifestProjectionMismatch(
                         runID: runID,
                         reason: "Manifest changed after its project projection was verified."
                     )
@@ -349,7 +349,7 @@ extension XcircuitePackageStore {
                 manifest.updatedAt = effectiveUpdatedAt
                 try manifest.validate()
                 guard effectiveUpdatedAt >= original.updatedAt else {
-                    throw XcircuitePackageError.invalidRunManifest(
+                    throw XcircuiteWorkspaceError.invalidRunManifest(
                         runID: runID,
                         reason: "updatedAt must not precede its previous value."
                     )
@@ -387,7 +387,7 @@ extension XcircuitePackageStore {
         runID: String,
         projectRoot: URL
     ) throws -> XcircuiteFileReference {
-        let path = "\(XcircuitePackage.directoryName)/runs/\(runID)/manifest.json"
+        let path = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/manifest.json"
         return try fileReference(
             forProjectRelativePath: path,
             artifactID: "run-manifest",
@@ -412,7 +412,7 @@ extension XcircuitePackageStore {
     }
 
     private func projectLockURL(_ projectRoot: URL) -> URL {
-        packageURL(forProjectAt: projectRoot).appending(path: ".project.lock")
+        workspaceURL(forProjectAt: projectRoot).appending(path: ".project.lock")
     }
 
     private func runLedgerFileExists(_ url: URL) -> Bool {

@@ -10,8 +10,8 @@ struct FlowRunLoopGuardTests {
         let root = try makeTemporaryRoot("missing-evidence")
         defer { removeTemporaryRoot(root) }
         let runID = "run-missing-evidence"
-        let store = XcircuitePackageStore()
-        try store.createPackage(at: root)
+        let store = XcircuiteWorkspaceStore()
+        try store.createWorkspace(at: root)
         try store.ensureRunDirectory(for: runID, inProjectAt: root)
         try store.appendRunAction(
             XcircuiteRunActionRecord(
@@ -53,8 +53,8 @@ struct FlowRunLoopGuardTests {
         let root = try makeTemporaryRoot("present-evidence")
         defer { removeTemporaryRoot(root) }
         let runID = "run-present-evidence"
-        let store = XcircuitePackageStore()
-        try store.createPackage(at: root)
+        let store = XcircuiteWorkspaceStore()
+        try store.createWorkspace(at: root)
         try store.ensureRunDirectory(for: runID, inProjectAt: root)
         try store.appendRunAction(
             XcircuiteRunActionRecord(
@@ -102,8 +102,8 @@ struct FlowRunLoopGuardTests {
         let root = try makeTemporaryRoot("cli")
         defer { removeTemporaryRoot(root) }
         let runID = "run-cli-guard"
-        let store = XcircuitePackageStore()
-        try store.createPackage(at: root)
+        let store = XcircuiteWorkspaceStore()
+        try store.createWorkspace(at: root)
         try store.ensureRunDirectory(for: runID, inProjectAt: root)
         try store.appendRunAction(
             XcircuiteRunActionRecord(
@@ -148,8 +148,8 @@ struct FlowRunLoopGuardTests {
         let root = try makeTemporaryRoot("cross-artifact-review")
         defer { removeTemporaryRoot(root) }
         let runID = "run-cross-artifact-review"
-        let store = XcircuitePackageStore()
-        try store.createPackage(at: root)
+        let store = XcircuiteWorkspaceStore()
+        try store.createWorkspace(at: root)
         try store.ensureRunDirectory(for: runID, inProjectAt: root)
         try store.appendRunAction(
             XcircuiteRunActionRecord(
@@ -250,7 +250,7 @@ struct FlowRunLoopGuardTests {
     }
 
     private func writeSimulationSummaryEnvelope(root: URL, runID: String) throws {
-        let store = XcircuitePackageStore()
+        let store = XcircuiteWorkspaceStore()
         let summaryPath = ".xcircuite/runs/\(runID)/evidence/simulation-summary.json"
         let summaryURL = root.appending(path: summaryPath)
         try FileManager.default.createDirectory(
@@ -285,7 +285,7 @@ struct FlowRunLoopGuardTests {
     }
 
     private func writeRejectedDRCSummaryEnvelope(root: URL, runID: String) throws {
-        let store = XcircuitePackageStore()
+        let store = XcircuiteWorkspaceStore()
         let summaryPath = ".xcircuite/runs/\(runID)/evidence/drc-summary.json"
         let summaryURL = root.appending(path: summaryPath)
         try FileManager.default.createDirectory(

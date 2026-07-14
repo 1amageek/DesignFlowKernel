@@ -1,7 +1,7 @@
 import Foundation
 
 public protocol XcircuiteRunLedgerStoring: Sendable {
-    func createPackage(at projectRoot: URL) throws
+    func createWorkspace(at projectRoot: URL) throws
 
     @discardableResult
     func createRunDirectory(
@@ -41,4 +41,4 @@ public protocol XcircuiteRunLedgerStoring: Sendable {
     ) throws -> XcircuiteRunManifest
 }
 
-extension XcircuitePackageStore: XcircuiteRunLedgerStoring {}
+extension XcircuiteWorkspaceStore: XcircuiteRunLedgerStoring {}

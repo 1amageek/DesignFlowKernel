@@ -9,7 +9,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
         progressStore: FlowRunProgressStore? = nil
     ) {
         self.storage = storage
-        self.progressStore = progressStore ?? FlowRunProgressStore(packageStore: storage)
+        self.progressStore = progressStore ?? FlowRunProgressStore(storage: storage)
     }
 
     public func loadRunLedger(runID: String, projectRoot: URL) throws -> FlowRunLedger {
@@ -75,7 +75,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
             if stageResultCompleteness(runStatus) == .complete,
                let plannedStageIDs = plan?.stages.map(\.stageID),
                !plannedStageIDs.isEmpty {
-                throw XcircuitePackageError.readFailed(
+                throw XcircuiteWorkspaceError.readFailed(
                     "stages directory missing for planned stages: \(plannedStageIDs.sorted().joined(separator: ", "))"
                 )
             }
@@ -89,7 +89,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
                 includingPropertiesForKeys: [.isDirectoryKey]
             )
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "stages: \(error.localizedDescription)"
             )
         }
@@ -102,7 +102,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
             }
             let resultURL = stageDirectory.appending(path: "result.json")
             guard fileExists(resultURL) else {
-                throw XcircuitePackageError.readFailed(
+                throw XcircuiteWorkspaceError.readFailed(
                     "stage result missing: stages/\(stageDirectory.lastPathComponent)/result.json"
                 )
             }
@@ -117,7 +117,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
             case .complete:
                 let missingStageIDs = plannedStageIDs.filter { !loadedStageIDs.contains($0) }
                 if !missingStageIDs.isEmpty {
-                    throw XcircuitePackageError.readFailed(
+                    throw XcircuiteWorkspaceError.readFailed(
                         "stage results missing for planned stages: \(missingStageIDs.sorted().joined(separator: ", "))"
                     )
                 }
@@ -133,7 +133,7 @@ public struct FlowRunLedgerLoader: FlowRunLedgerLoading {
                 let executedPrefix = plannedStageIDs.prefix { loadedPlannedStageIDs.contains($0) }
                 let gapStageIDs = loadedPlannedStageIDs.subtracting(executedPrefix)
                 if !gapStageIDs.isEmpty {
-                    throw XcircuitePackageError.readFailed(
+                    throw XcircuiteWorkspaceError.readFailed(
                         "stage results skip earlier planned stages: \(gapStageIDs.sorted().joined(separator: ", "))"
                     )
                 }

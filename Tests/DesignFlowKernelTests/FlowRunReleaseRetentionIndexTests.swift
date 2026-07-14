@@ -75,7 +75,7 @@ struct FlowRunReleaseRetentionIndexTests {
         defer { removeTemporaryRoot(root) }
 
         _ = try makeIndex(root: root)
-        let packageStore = XcircuitePackageStore()
+        let storage = XcircuiteWorkspaceStore()
 
         let build = try await DesignFlowCLICommand.runProcess(arguments: [
             "build-retention-index",
@@ -110,7 +110,7 @@ struct FlowRunReleaseRetentionIndexTests {
 
         #expect(validation.exitCode == 0)
         #expect(validationResult.status == .passed)
-        let manifest = try packageStore.loadRunManifest(runID: "run-1", inProjectAt: root)
+        let manifest = try storage.loadRunManifest(runID: "run-1", inProjectAt: root)
         #expect(manifest.artifacts.contains { $0.artifactID == "qualification-retention-index" })
     }
 

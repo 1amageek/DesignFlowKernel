@@ -6,14 +6,14 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
     public static let artifactRelativePath = "review/decision-packet.json"
 
     private let reviewBundler: any FlowRunReviewBundling
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
 
     public init(
         reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore()
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
     ) {
         self.reviewBundler = reviewBundler
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     public func buildDecisionPacket(
@@ -22,14 +22,14 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
     ) throws -> FlowRunDecisionPacketBuildResult {
         let bundle = try reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
         let packet = makePacket(from: bundle, projectRoot: projectRoot)
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let reviewDirectory = runDirectory.appending(path: "review")
-        try packageStore.ensureDirectory(at: reviewDirectory)
+        try storage.ensureDirectory(at: reviewDirectory)
         let packetURL = reviewDirectory.appending(path: "decision-packet.json")
-        try packageStore.writeJSON(packet, to: packetURL, forProjectAt: projectRoot)
+        try storage.writeJSON(packet, to: packetURL, forProjectAt: projectRoot)
 
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.makeArtifactReference(
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
+        let reference = try storage.makeArtifactReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
             role: .output,
@@ -38,7 +38,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             inProjectAt: projectRoot,
             producedByRunID: runID
         )
-        try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return FlowRunDecisionPacketBuildResult(packet: packet, artifact: reference)
     }
 

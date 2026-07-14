@@ -63,7 +63,7 @@ extension FlowRunLedgerSummaryTests {
             SummaryStageExecutor(stageID: "001-preflight", toolID: "preflight-tool", status: .succeeded),
         ]
     )
-    try XcircuitePackageStore().appendRunAction(
+    try XcircuiteWorkspaceStore().appendRunAction(
         XcircuiteRunActionRecord(
             actionID: "selection-1",
             runID: "run-1",
@@ -123,7 +123,7 @@ extension FlowRunLedgerSummaryTests {
         withIntermediateDirectories: true
     )
     try payload.write(to: root.appending(path: planVerificationPath), options: .atomic)
-    let reference = try XcircuitePackageStore().fileReference(
+    let reference = try XcircuiteWorkspaceStore().fileReference(
         forProjectRelativePath: planVerificationPath,
         artifactID: "planning-plan-verification",
         kind: .other,
@@ -131,7 +131,7 @@ extension FlowRunLedgerSummaryTests {
         inProjectAt: root,
         producedByRunID: "run-1"
     )
-    try XcircuitePackageStore().upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
+    try XcircuiteWorkspaceStore().upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
 
     let json = try DesignFlowCLICommand.run(
         arguments: [

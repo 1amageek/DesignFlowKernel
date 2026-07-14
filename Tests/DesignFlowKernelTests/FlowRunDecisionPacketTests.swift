@@ -62,13 +62,13 @@ extension FlowRunLedgerSummaryTests {
         $0.commandID == "review-run" && $0.readiness == .ready
     })
 
-    let storedPacket = try XcircuitePackageStore().readJSON(
+    let storedPacket = try XcircuiteWorkspaceStore().readJSON(
         FlowRunDecisionPacket.self,
         from: root.appending(path: ".xcircuite/runs/run-1/review/decision-packet.json")
     )
     #expect(storedPacket.packetID == "decision-packet-run-1")
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
@@ -157,7 +157,7 @@ extension FlowRunLedgerSummaryTests {
         $0.code == "decision-packet-unresolved-review-item"
     })
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
@@ -271,7 +271,7 @@ extension FlowRunLedgerSummaryTests {
 	        projectRoot: root
 	    )
 
-	    let store = XcircuitePackageStore()
+	    let store = XcircuiteWorkspaceStore()
 	    let manifest = try store.loadRunManifest(runID: "run-1", inProjectAt: root)
 	    let packetPath = ".xcircuite/runs/run-1/review/decision-packet.json"
 	    var mismatchedReference = try #require(manifest.artifacts.first {
@@ -299,9 +299,9 @@ extension FlowRunLedgerSummaryTests {
 	@Test func validateDecisionPacketCLIBlocksUnreadableRunManifestWithJSONDiagnostics() async throws {
 	    let root = try makeTemporaryRoot("agent-decision-packet-validation-missing-manifest")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuitePackageStore()
-    try store.createPackage(at: root)
-    let runDirectory = try XcircuitePackage(projectRoot: root).runDirectoryURL(for: "run-1")
+    let store = XcircuiteWorkspaceStore()
+    try store.createWorkspace(at: root)
+    let runDirectory = try XcircuiteWorkspace(projectRoot: root).runDirectoryURL(for: "run-1")
     try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
 
     let json = try DesignFlowCLICommand.run(
@@ -332,8 +332,8 @@ extension FlowRunLedgerSummaryTests {
 @Test func decisionPacketBlocksRequiredArtifactWithoutIntegrity() throws {
     let root = try makeTemporaryRoot("agent-decision-packet-unverified-artifact")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuitePackageStore()
-    try store.createPackage(at: root)
+    let store = XcircuiteWorkspaceStore()
+    try store.createWorkspace(at: root)
     _ = try store.createRunDirectory(for: "run-1", inProjectAt: root)
 
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
@@ -414,8 +414,8 @@ extension FlowRunLedgerSummaryTests {
 @Test func decisionPacketValidatorBlocksReadinessMismatchEvenWithVerifiedPacket() throws {
     let root = try makeTemporaryRoot("agent-decision-packet-readiness-mismatch")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuitePackageStore()
-    try store.createPackage(at: root)
+    let store = XcircuiteWorkspaceStore()
+    try store.createWorkspace(at: root)
     _ = try store.createRunDirectory(for: "run-1", inProjectAt: root)
 
     let bundle = FlowRunReviewBundle(

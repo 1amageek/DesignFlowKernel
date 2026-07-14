@@ -88,7 +88,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         _ ledger: FlowRunLedger,
         projectRoot: URL
     ) throws {
-        let planPath = "\(XcircuitePackage.directoryName)/runs/\(ledger.runID)/plan.json"
+        let planPath = "\(XcircuiteWorkspace.directoryName)/runs/\(ledger.runID)/plan.json"
         guard let reference = ledger.runManifest.artifacts.first(where: { $0.path == planPath }) else {
             throw FlowRunResumeError.missingPlanReference(ledger.runID)
         }

@@ -252,7 +252,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         for reference in ledger.runManifest.artifacts {
             references[reference.path] = reference
         }
-        let projectManifest = try XcircuitePackageStore().loadManifest(forProjectAt: projectRoot)
+        let projectManifest = try XcircuiteWorkspaceStore().loadManifest(forProjectAt: projectRoot)
         for reference in projectManifest.files {
             references[reference.path] = reference
         }
@@ -1271,11 +1271,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         recordedReferencesByPath: [String: XcircuiteFileReference],
         into artifacts: inout [FlowRunReviewArtifact]
     ) {
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)"
         let existsInLedger = recordedReferencesByPath[projectRelativePath] != nil
         let existsOnDisk: Bool
         do {
-            let url = try XcircuitePackage(projectRoot: projectRoot)
+            let url = try XcircuiteWorkspace(projectRoot: projectRoot)
                 .url(forProjectRelativePath: projectRelativePath)
             existsOnDisk = FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
         } catch {
@@ -1304,13 +1304,13 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         relativePath: String,
         projectRoot: URL
     ) throws -> T? {
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
-        let url = try XcircuitePackage(projectRoot: projectRoot)
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)"
+        let url = try XcircuiteWorkspace(projectRoot: projectRoot)
             .url(forProjectRelativePath: projectRelativePath)
         guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             return nil
         }
-        return try XcircuitePackageStore().readJSON(type, from: url)
+        return try XcircuiteWorkspaceStore().readJSON(type, from: url)
     }
 
     private func runArtifact(
@@ -1323,11 +1323,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         kind: XcircuiteFileKind = .report,
         format: XcircuiteFileFormat = .json
     ) -> FlowRunReviewArtifact {
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)"
         let artifactID = role
         let artifactURL: URL
         do {
-            artifactURL = try XcircuitePackage(projectRoot: projectRoot)
+            artifactURL = try XcircuiteWorkspace(projectRoot: projectRoot)
                 .url(forProjectRelativePath: projectRelativePath)
         } catch {
             return FlowRunReviewArtifact(

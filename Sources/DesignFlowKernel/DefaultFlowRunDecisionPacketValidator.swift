@@ -4,16 +4,16 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     public static let artifactID = "review-decision-packet-validation"
     public static let artifactRelativePath = "review/decision-packet-validation.json"
 
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let fileReferenceVerifier: XcircuiteFileReferenceVerifier
     private let reviewBundler: any FlowRunReviewBundling
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
         fileReferenceVerifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
         reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.fileReferenceVerifier = fileReferenceVerifier
         self.reviewBundler = reviewBundler
     }
@@ -22,13 +22,13 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         runID: String,
         projectRoot: URL
     ) throws -> FlowRunDecisionPacketValidationResult {
-        let packetPath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(DefaultFlowRunDecisionPacketBuilder.artifactRelativePath)"
+        let packetPath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(DefaultFlowRunDecisionPacketBuilder.artifactRelativePath)"
         var result = makeValidationResult(
             runID: runID,
             projectRoot: projectRoot,
             packetPath: packetPath
         )
-        result.validationArtifactPath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
+        result.validationArtifactPath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
         try persist(result, runID: runID, projectRoot: projectRoot)
         return result
     }
@@ -40,7 +40,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     ) -> FlowRunDecisionPacketValidationResult {
         let manifest: XcircuiteRunManifest
         do {
-            manifest = try packageStore.loadRunManifest(
+            manifest = try storage.loadRunManifest(
                 runID: runID,
                 inProjectAt: projectRoot
             )
@@ -101,7 +101,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
 
         let packet: FlowRunDecisionPacket
         do {
-            packet = try packageStore.readJSON(
+            packet = try storage.readJSON(
                 FlowRunDecisionPacket.self,
                 from: projectRoot.appending(path: packetPath)
             )
@@ -399,14 +399,14 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         runID: String,
         projectRoot: URL
     ) throws {
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let reviewDirectory = runDirectory.appending(path: "review")
-        try packageStore.ensureDirectory(at: reviewDirectory)
+        try storage.ensureDirectory(at: reviewDirectory)
         let validationURL = reviewDirectory.appending(path: "decision-packet-validation.json")
-        try packageStore.writeJSON(result, to: validationURL, forProjectAt: projectRoot)
+        try storage.writeJSON(result, to: validationURL, forProjectAt: projectRoot)
 
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.fileReference(
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
+        let reference = try storage.fileReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
             kind: .report,
@@ -415,7 +415,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             producedByRunID: runID
         )
         do {
-            try packageStore.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            try storage.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
         } catch {
             guard result.diagnostics.contains(where: { $0.code == "decision-packet-run-manifest-unreadable" }) else {
                 throw error

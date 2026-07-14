@@ -1,14 +1,14 @@
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetentionIndexValidating {
-    private let packageStore: any FlowExecutionStorage
+    private let storage: any FlowExecutionStorage
     private let hasher: XcircuiteHasher
 
     public init(
-        packageStore: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
+        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
         hasher: XcircuiteHasher = XcircuiteHasher()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.hasher = hasher
     }
 
@@ -108,7 +108,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
 
     private func decodeHistoryEntries(_ data: Data) throws -> [FlowRunReleaseHistoryEntry] {
         guard let string = String(data: data, encoding: .utf8) else {
-            throw XcircuitePackageError.decodeFailed("Retention history is not UTF-8 JSONL.")
+            throw XcircuiteWorkspaceError.decodeFailed("Retention history is not UTF-8 JSONL.")
         }
         let decoder = JSONDecoder()
         return try string.split(whereSeparator: { $0.isNewline }).map { line in
@@ -161,7 +161,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
     }
 
     private func resolvedProjectURL(_ path: String, projectRoot: URL) throws -> URL {
-        try packageStore.url(forProjectRelativePath: path, inProjectAt: projectRoot)
+        try storage.url(forProjectRelativePath: path, inProjectAt: projectRoot)
     }
 
     private func parseDate(_ value: String) -> Date? {

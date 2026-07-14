@@ -3,14 +3,14 @@ import Foundation
 
 public struct DefaultFlowRunGuardEvaluator: Sendable {
     private let snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
 
     public init(
         snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder = DefaultFlowRunLoopSnapshotBuilder(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore()
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
     ) {
         self.snapshotBuilder = snapshotBuilder
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     public func evaluateRunGuard(
@@ -39,7 +39,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         )
         var artifactReferences = foundationArtifactReferences
         if persist {
-            let verdictArtifact = try packageStore.writeRunGuardVerdict(
+            let verdictArtifact = try storage.writeRunGuardVerdict(
                 verdict,
                 inProjectAt: projectRoot
             )

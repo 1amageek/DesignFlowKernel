@@ -633,8 +633,8 @@ public enum DesignFlowCLICommand {
             inProjectAt: projectRoot
         )
         let index = try DefaultFlowRunReleaseRetentionIndexBuilder(
-            packageStore: storage,
-            validator: DefaultFlowRunReleaseRetentionIndexValidator(packageStore: storage)
+            storage: storage,
+            validator: DefaultFlowRunReleaseRetentionIndexValidator(storage: storage)
         ).build(
             runID: runID,
             workflowRunID: workflowRunID,
@@ -716,7 +716,7 @@ public enum DesignFlowCLICommand {
             .appending(path: "qualification")
             .appending(path: "retention-index.json")
         let index = try storage.readJSON(FlowRunReleaseRetentionIndex.self, from: indexURL)
-        let result = try DefaultFlowRunReleaseRetentionIndexValidator(packageStore: storage).validate(
+        let result = try DefaultFlowRunReleaseRetentionIndexValidator(storage: storage).validate(
             index: index,
             runID: runID,
             projectRoot: projectRoot,
@@ -888,7 +888,7 @@ public enum DesignFlowCLICommand {
     }
 
     /// Returns a project-relative path without depending on a concrete
-    /// workspace package layout. The injected storage remains responsible for
+    /// workspace layout. The injected storage remains responsible for
     /// validating and resolving the path when it is persisted.
     private static func projectRelativePath(
         for url: URL,

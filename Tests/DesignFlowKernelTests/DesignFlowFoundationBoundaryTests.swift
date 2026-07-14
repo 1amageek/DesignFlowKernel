@@ -18,10 +18,10 @@ struct DesignFlowFoundationBoundaryTests {
             }
         }
 
-        let storage: any FlowExecutionStorage = XcircuitePackageStore()
+        let storage: any FlowExecutionStorage = XcircuiteWorkspaceStore()
         try storage.ensureRunDirectory(for: "run-1", inProjectAt: projectRoot)
         let artifactURL = projectRoot
-            .appending(path: XcircuitePackage.directoryName)
+            .appending(path: XcircuiteWorkspace.directoryName)
             .appending(path: "runs/run-1/result.json")
         try FileManager.default.createDirectory(
             at: artifactURL.deletingLastPathComponent(),
@@ -30,7 +30,7 @@ struct DesignFlowFoundationBoundaryTests {
         try Data("result".utf8).write(to: artifactURL, options: .atomic)
 
         let reference = try storage.makeArtifactReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/run-1/result.json",
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/run-1/result.json",
             artifactID: "run-result",
             role: .output,
             kind: .report,

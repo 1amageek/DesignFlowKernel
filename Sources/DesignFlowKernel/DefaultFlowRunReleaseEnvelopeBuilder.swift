@@ -6,18 +6,18 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     public static let artifactRelativePath = "qualification/release-envelope.json"
 
     private let decisionPacketValidator: any FlowRunDecisionPacketValidating
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let fileReferenceVerifier: XcircuiteFileReferenceVerifier
     private let currentDate: Date
 
     public init(
         decisionPacketValidator: any FlowRunDecisionPacketValidating = DefaultFlowRunDecisionPacketValidator(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
         fileReferenceVerifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
         currentDate: Date = Date()
     ) {
         self.decisionPacketValidator = decisionPacketValidator
-        self.packageStore = packageStore
+        self.storage = storage
         self.fileReferenceVerifier = fileReferenceVerifier
         self.currentDate = currentDate
     }
@@ -62,7 +62,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         projectRoot: URL
     ) -> (manifest: XcircuiteRunManifest?, diagnostic: FlowDiagnostic?) {
         do {
-            let manifest = try packageStore.loadRunManifest(
+            let manifest = try storage.loadRunManifest(
                 runID: runID,
                 inProjectAt: projectRoot
             )
@@ -188,7 +188,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         manifest: XcircuiteRunManifest?,
         maxEvidenceAgeDays: Int?
     ) -> FlowRunReleaseEnvelope.Requirement {
-        let path = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(relativePath)"
+        let path = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)"
         let reference = manifest?.artifacts.first { reference in
             reference.artifactID == artifactID && reference.path == path
         }
@@ -315,7 +315,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
         let artifactValue: XcircuiteJSONValue
         do {
-            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
             return ["release-envelope-corpus-history-unreadable"]
         }
@@ -428,7 +428,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
         let artifactValue: XcircuiteJSONValue
         do {
-            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
             return ["release-envelope-performance-envelope-unreadable"]
         }
@@ -512,7 +512,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
         let artifactValue: XcircuiteJSONValue
         do {
-            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
             return ["release-envelope-contract-audit-unreadable"]
         }
@@ -597,7 +597,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
         let artifactValue: XcircuiteJSONValue
         do {
-            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
             return ["release-envelope-release-qualification-unreadable"]
         }
@@ -692,7 +692,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             return ["release-envelope-retention-index-path-invalid"]
         }
         do {
-            let index = try packageStore.readJSON(
+            let index = try storage.readJSON(
                 FlowRunReleaseRetentionIndex.self,
                 from: artifactURL
             )
@@ -728,7 +728,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
         let artifactValue: XcircuiteJSONValue
         do {
-            artifactValue = try packageStore.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
         } catch {
             return "\(diagnosticPrefix)-collected-at-unreadable"
         }
@@ -856,14 +856,14 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         runID: String,
         projectRoot: URL
     ) throws -> ArtifactReference {
-        let runDirectory = try XcircuitePackage(projectRoot: projectRoot).runDirectoryURL(for: runID)
+        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
         let qualificationDirectory = runDirectory.appending(path: "qualification")
-        try packageStore.ensureDirectory(at: qualificationDirectory)
+        try storage.ensureDirectory(at: qualificationDirectory)
         let envelopeURL = qualificationDirectory.appending(path: "release-envelope.json")
-        try packageStore.writeJSON(envelope, to: envelopeURL, forProjectAt: projectRoot)
+        try storage.writeJSON(envelope, to: envelopeURL, forProjectAt: projectRoot)
 
-        let projectRelativePath = "\(XcircuitePackage.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try packageStore.makeArtifactReference(
+        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
+        let reference = try storage.makeArtifactReference(
             forProjectRelativePath: projectRelativePath,
             artifactID: Self.artifactID,
             role: .output,
@@ -874,7 +874,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             verifiedByRunID: nil
         )
         do {
-            try packageStore.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         } catch {
             guard envelope.diagnostics.contains(where: { $0.code == "release-envelope-run-manifest-unreadable" }) else {
                 throw error

@@ -78,17 +78,17 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
-            throw XcircuitePackageError.invalidProjectManifest(
+            throw XcircuiteWorkspaceError.invalidProjectManifest(
                 "schemaVersion must be \(Self.currentSchemaVersion)."
             )
         }
 
         try XcircuiteIdentifierValidator().validate(identity.projectID, kind: .projectID)
         guard !identity.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw XcircuitePackageError.invalidProjectManifest("identity.displayName must not be empty.")
+            throw XcircuiteWorkspaceError.invalidProjectManifest("identity.displayName must not be empty.")
         }
         guard !identity.topDesignName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw XcircuitePackageError.invalidProjectManifest("identity.topDesignName must not be empty.")
+            throw XcircuiteWorkspaceError.invalidProjectManifest("identity.topDesignName must not be empty.")
         }
 
         var runIDs: Set<String> = []
@@ -97,30 +97,30 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
             try XcircuiteIdentifierValidator().validate(reference.runID, kind: .runID)
             let expectedPath = Self.runManifestPath(for: reference.runID)
             guard reference.manifestPath == expectedPath else {
-                throw XcircuitePackageError.invalidProjectManifest(
+                throw XcircuiteWorkspaceError.invalidProjectManifest(
                     "run '\(reference.runID)' must reference '\(expectedPath)'."
                 )
             }
             guard runIDs.insert(reference.runID).inserted else {
-                throw XcircuitePackageError.invalidProjectManifest(
+                throw XcircuiteWorkspaceError.invalidProjectManifest(
                     "runID '\(reference.runID)' must be unique."
                 )
             }
             guard runManifestPaths.insert(reference.manifestPath).inserted else {
-                throw XcircuitePackageError.invalidProjectManifest(
+                throw XcircuiteWorkspaceError.invalidProjectManifest(
                     "run manifest path '\(reference.manifestPath)' must be unique."
                 )
             }
         }
         guard runs == runs.sorted(by: { $0.runID < $1.runID }) else {
-            throw XcircuitePackageError.invalidProjectManifest("runs must be sorted by runID.")
+            throw XcircuiteWorkspaceError.invalidProjectManifest("runs must be sorted by runID.")
         }
 
         var filePaths: Set<String> = []
         for reference in files {
-            try XcircuitePackage.validateProjectRelativePath(reference.path)
+            try XcircuiteWorkspace.validateProjectRelativePath(reference.path)
             guard filePaths.insert(reference.path).inserted else {
-                throw XcircuitePackageError.invalidProjectManifest(
+                throw XcircuiteWorkspaceError.invalidProjectManifest(
                     "file path '\(reference.path)' must be unique."
                 )
             }
@@ -134,14 +134,14 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
                 try XcircuiteIdentifierValidator().validate(verifiedByRunID, kind: .runID)
             }
             if let byteCount = reference.byteCount, byteCount < 0 {
-                throw XcircuitePackageError.invalidProjectManifest(
+                throw XcircuiteWorkspaceError.invalidProjectManifest(
                     "file '\(reference.path)' byteCount must be non-negative."
                 )
             }
             try validateRunManifestProjection(reference, registeredRunIDs: runIDs)
         }
         guard files == files.sorted(by: { $0.path < $1.path }) else {
-            throw XcircuitePackageError.invalidProjectManifest("files must be sorted by path.")
+            throw XcircuiteWorkspaceError.invalidProjectManifest("files must be sorted by path.")
         }
     }
 
@@ -151,7 +151,7 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
     ) throws {
         let components = reference.path.split(separator: "/", omittingEmptySubsequences: false)
         let pathRunID = components.count == 4
-            && components[0] == Substring(XcircuitePackage.directoryName)
+            && components[0] == Substring(XcircuiteWorkspace.directoryName)
             && components[1] == "runs"
             && components[3] == "manifest.json"
             ? String(components[2])
@@ -159,7 +159,7 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
         let isProjection = reference.artifactID == "run-manifest"
 
         guard isProjection || pathRunID == nil else {
-            throw XcircuitePackageError.invalidProjectManifest(
+            throw XcircuiteWorkspaceError.invalidProjectManifest(
                 "canonical run manifest '\(reference.path)' must use artifactID 'run-manifest'."
             )
         }
@@ -173,13 +173,13 @@ public struct XcircuiteProjectManifest: Sendable, Hashable, Codable {
               reference.format == .json,
               reference.sha256 != nil,
               reference.byteCount != nil else {
-            throw XcircuitePackageError.invalidProjectManifest(
+            throw XcircuiteWorkspaceError.invalidProjectManifest(
                 "run manifest projection '\(reference.path)' must identify a registered canonical manifest with integrity metadata."
             )
         }
     }
 
     private static func runManifestPath(for runID: String) -> String {
-        "\(XcircuitePackage.directoryName)/runs/\(runID)/manifest.json"
+        "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/manifest.json"
     }
 }

@@ -38,7 +38,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    try XcircuitePackageStore().writeDesignDiff(
+    try XcircuiteWorkspaceStore().writeDesignDiff(
         XcircuiteDesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
@@ -57,7 +57,7 @@ extension FlowRunLedgerSummaryTests {
         ),
         inProjectAt: root
     )
-    try XcircuitePackageStore().appendRunAction(
+    try XcircuiteWorkspaceStore().appendRunAction(
         XcircuiteRunActionRecord(
             actionID: "action-1",
             runID: "run-1",

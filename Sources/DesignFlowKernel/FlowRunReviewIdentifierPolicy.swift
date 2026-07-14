@@ -42,14 +42,14 @@ struct FlowRunReviewIdentifierPolicy: Sendable {
         guard let stageID, isValidRunID(runID), isValidStageID(stageID) else {
             return nil
         }
-        return "\(XcircuitePackage.directoryName)/runs/\(runID)/stages/\(stageID)/result.json"
+        return "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/stages/\(stageID)/result.json"
     }
 
     func approvalArtifactPath(runID: String, stageID: String) -> String? {
         guard isValidRunID(runID), isValidStageID(stageID) else {
             return nil
         }
-        return "\(XcircuitePackage.directoryName)/runs/\(runID)/approvals/\(stageID).json"
+        return "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/approvals/\(stageID).json"
     }
 
     func invalidStageIdentifierIntegrity(_ stageID: String) -> FlowRunReviewArtifactIntegrity {

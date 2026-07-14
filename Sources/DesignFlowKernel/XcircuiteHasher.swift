@@ -15,7 +15,7 @@ public struct XcircuiteHasher: Sendable {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
@@ -29,13 +29,13 @@ public struct XcircuiteHasher: Sendable {
                 atPath: url.path(percentEncoded: false)
             )
         } catch {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): \(error.localizedDescription)"
             )
         }
 
         guard let size = attributes[.size] as? NSNumber else {
-            throw XcircuitePackageError.readFailed(
+            throw XcircuiteWorkspaceError.readFailed(
                 "\(url.lastPathComponent): file size is unavailable"
             )
         }

@@ -1,12 +1,12 @@
 import Foundation
 
-extension XcircuitePackageStore {
+extension XcircuiteWorkspaceStore {
     @discardableResult
     public func writeDesignDiff(
         _ diff: XcircuiteDesignDiff,
         inProjectAt projectRoot: URL
     ) throws -> XcircuiteFileReference {
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let runDirectory = try ensureRunDirectoryExists(
             runID: diff.runID,
             package: package,
@@ -16,7 +16,7 @@ extension XcircuitePackageStore {
         try writeJSON(diff, to: diffURL, forProjectAt: projectRoot)
 
         let reference = try fileReference(
-            forProjectRelativePath: "\(XcircuitePackage.directoryName)/runs/\(diff.runID)/design-diff.json",
+            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(diff.runID)/design-diff.json",
             kind: .designDiff,
             format: .json,
             inProjectAt: projectRoot,
@@ -30,7 +30,7 @@ extension XcircuitePackageStore {
         runID: String,
         inProjectAt projectRoot: URL
     ) throws -> XcircuiteDesignDiff {
-        let package = XcircuitePackage(projectRoot: projectRoot)
+        let package = XcircuiteWorkspace(projectRoot: projectRoot)
         let diffURL = try package.runDirectoryURL(for: runID)
             .appending(path: "design-diff.json")
         return try readJSON(XcircuiteDesignDiff.self, from: diffURL)
@@ -51,7 +51,7 @@ extension XcircuitePackageStore {
 
     private func ensureRunDirectoryExists(
         runID: String,
-        package: XcircuitePackage,
+        package: XcircuiteWorkspace,
         projectRoot: URL
     ) throws -> URL {
         let runDirectory = try package.runDirectoryURL(for: runID)

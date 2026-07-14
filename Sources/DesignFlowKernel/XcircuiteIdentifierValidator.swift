@@ -17,7 +17,7 @@ public struct XcircuiteIdentifierValidator: Sendable {
             && value != ".."
             && value.unicodeScalars.allSatisfy { allowedScalars.contains($0) }
         guard isValid else {
-            throw XcircuitePackageError.invalidIdentifier(
+            throw XcircuiteWorkspaceError.invalidIdentifier(
                 kind: kind.rawValue,
                 value: value
             )

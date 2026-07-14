@@ -26,7 +26,7 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: summaryPayload]
     )
-    try XcircuitePackageStore().writeDesignDiff(
+    try XcircuiteWorkspaceStore().writeDesignDiff(
         XcircuiteDesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
@@ -139,7 +139,7 @@ extension FlowRunLedgerSummaryTests {
     let editReportPayload = Data(#"{"schemaVersion":1,"stepID":"step-1","edits":[]}"#.utf8)
 
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuitePackageStore()
+    let store = XcircuiteWorkspaceStore()
     try FileManager.default.createDirectory(
         at: root.appending(path: planningPath).deletingLastPathComponent(),
         withIntermediateDirectories: true
@@ -652,7 +652,7 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: summaryPayload]
     )
-    var result = try XcircuitePackageStore().readJSON(
+    var result = try XcircuiteWorkspaceStore().readJSON(
         FlowStageResult.self,
         from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
     )
@@ -664,7 +664,7 @@ extension FlowRunLedgerSummaryTests {
         byteCount: 1,
         producer: originalArtifact.producer
     )
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         result,
         to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"),
         forProjectAt: root
@@ -696,7 +696,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         FlowRunPlan(
             runID: "run-1",
             intent: "Tampered intent",
@@ -769,14 +769,14 @@ extension FlowRunLedgerSummaryTests {
         )
     )
     var approval = try #require(
-        try XcircuitePackageStore().loadApproval(
+        try XcircuiteWorkspaceStore().loadApproval(
             runID: "run-1",
             stageID: "001-drc",
             inProjectAt: root
         )
     )
     approval.reviewer = "intruder"
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         approval,
         to: root.appending(path: ".xcircuite/runs/run-1/approvals/001-drc.json"),
         forProjectAt: root
@@ -844,12 +844,12 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: payload]
     )
     let resultPath = ".xcircuite/runs/run-1/stages/001-drc/result.json"
-    var result = try XcircuitePackageStore().readJSON(
+    var result = try XcircuiteWorkspaceStore().readJSON(
         FlowStageResult.self,
         from: root.appending(path: resultPath)
     )
     result.stageID = "../escape"
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         result,
         to: root.appending(path: resultPath),
         forProjectAt: root
@@ -882,7 +882,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-review-approved")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuitePackageStore()
+    let store = XcircuiteWorkspaceStore()
     try store.writeApproval(
         XcircuiteApprovalRecord(
             runID: "run-1",

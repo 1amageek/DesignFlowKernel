@@ -1,16 +1,16 @@
 import Foundation
 
 public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
-    private let packageStore: XcircuitePackageStore
+    private let storage: XcircuiteWorkspaceStore
     private let loader: FlowRunLedgerLoading
     private let inspector: FlowRunLedgerInspecting
 
     public init(
-        packageStore: XcircuitePackageStore = XcircuitePackageStore(),
+        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
         loader: FlowRunLedgerLoading = FlowRunLedgerLoader(),
         inspector: FlowRunLedgerInspecting = DefaultFlowRunLedgerInspector()
     ) {
-        self.packageStore = packageStore
+        self.storage = storage
         self.loader = loader
         self.inspector = inspector
     }
@@ -33,7 +33,7 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
             note: request.note,
             createdAt: request.decidedAt
         )
-        try packageStore.recordApprovalAction(
+        try storage.recordApprovalAction(
             approval,
             metadata: [
                 "source": .string("design-flow.approve-gate"),
@@ -41,7 +41,7 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
             ],
             inProjectAt: request.projectRoot
         )
-        guard let persistedApproval = try packageStore.loadApproval(
+        guard let persistedApproval = try storage.loadApproval(
             runID: request.runID,
             stageID: request.stageID,
             inProjectAt: request.projectRoot

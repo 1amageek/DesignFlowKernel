@@ -34,7 +34,7 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(!result.summary.nextActions.contains { $0.kind == "decideApproval" })
 
-    let persistedApproval = try XcircuitePackageStore().loadApproval(
+    let persistedApproval = try XcircuiteWorkspaceStore().loadApproval(
         runID: "run-1",
         stageID: "001-drc",
         inProjectAt: root
@@ -43,7 +43,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(persisted.verdict == .approved)
     #expect(persisted.note == "DRC report reviewed.")
 
-    let actions = try XcircuitePackageStore().loadRunActions(runID: "run-1", inProjectAt: root)
+    let actions = try XcircuiteWorkspaceStore().loadRunActions(runID: "run-1", inProjectAt: root)
     let approvalAction = try #require(actions.first {
         $0.actionKind == XcircuiteRunReviewDecisionActionKind.approval.rawValue
     })
@@ -53,7 +53,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(approvalAction.metadata["decision"] == .string("approved"))
     #expect(approvalAction.outputs.map(\.path) == [".xcircuite/runs/run-1/approvals/001-drc.json"])
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
@@ -126,7 +126,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(result.approval.reviewerKind == .agent)
     #expect(result.approval.reviewer == "design-loop-agent")
 
-    let actions = try XcircuitePackageStore().loadRunActions(runID: "run-1", inProjectAt: root)
+    let actions = try XcircuiteWorkspaceStore().loadRunActions(runID: "run-1", inProjectAt: root)
     let approvalAction = try #require(actions.first {
         $0.actionKind == XcircuiteRunReviewDecisionActionKind.approval.rawValue
     })
@@ -316,7 +316,7 @@ extension FlowRunLedgerSummaryTests {
     // Rewrite the plan to claim an earlier stage that has no result:
     // the recorded results no longer form a prefix of the plan, which
     // means evidence is missing, not that the run stopped early.
-    let store = XcircuitePackageStore()
+    let store = XcircuiteWorkspaceStore()
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
     var plan = try store.readJSON(FlowRunPlan.self, from: planURL)
     plan.stages.insert(
@@ -326,7 +326,7 @@ extension FlowRunLedgerSummaryTests {
     let data = try JSONEncoder().encode(plan)
     try data.write(to: planURL, options: .atomic)
 
-    #expect(throws: XcircuitePackageError.self) {
+    #expect(throws: XcircuiteWorkspaceError.self) {
         _ = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
     }
 }
@@ -347,7 +347,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let approval = try #require(
-        try XcircuitePackageStore().loadApproval(
+        try XcircuiteWorkspaceStore().loadApproval(
             runID: "run-1",
             stageID: "001-drc",
             inProjectAt: root
@@ -374,7 +374,7 @@ extension FlowRunLedgerSummaryTests {
             reviewer: "reviewer-1"
         )
     )
-    try XcircuitePackageStore().writeJSON(
+    try XcircuiteWorkspaceStore().writeJSON(
         FlowRunPlan(
             runID: "run-1",
             intent: "Tampered intent",
@@ -570,7 +570,7 @@ extension FlowRunLedgerSummaryTests {
     // Cancellation is an explicit human stop and must stay final even
     // though a blocked run would otherwise be resumable.
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuitePackageStore()
+    let store = XcircuiteWorkspaceStore()
     _ = try store.transitionRun(
         runID: "run-1",
         transition: XcircuiteRunTransition(status: .cancelled),
@@ -702,7 +702,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-resume-artifacts")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    try XcircuitePackageStore().writeDesignDiff(
+    try XcircuiteWorkspaceStore().writeDesignDiff(
         XcircuiteDesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
@@ -747,7 +747,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let manifest = try XcircuitePackageStore().readJSON(
+    let manifest = try XcircuiteWorkspaceStore().readJSON(
         XcircuiteRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
@@ -762,8 +762,8 @@ extension FlowRunLedgerSummaryTests {
 @Test func resumerRejectsRunsWithoutPersistedPlan() async throws {
     let root = try makeTemporaryRoot("agent-resume-missing-plan")
     defer { removeTemporaryRoot(root) }
-    try XcircuitePackageStore().createPackage(at: root)
-    try XcircuitePackageStore().createRunDirectory(for: "run-1", inProjectAt: root)
+    try XcircuiteWorkspaceStore().createWorkspace(at: root)
+    try XcircuiteWorkspaceStore().createRunDirectory(for: "run-1", inProjectAt: root)
 
     await #expect(throws: FlowRunResumeError.self) {
         try await DefaultFlowRunResumer().resumeRun(
