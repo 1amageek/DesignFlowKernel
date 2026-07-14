@@ -236,6 +236,12 @@ struct FlowRunLoopGuardTests {
         )
 
         #expect(evaluationResult.evaluation.status == .rejected)
+        let evaluationArtifact = try #require(evaluationResult.artifactReferences.first)
+        #expect(evaluationArtifact.id.rawValue == "cross-artifact-evaluation")
+        #expect(evaluationArtifact.locator.role == .output)
+        #expect(evaluationArtifact.locator.kind == .report)
+        #expect(evaluationArtifact.locator.format == .json)
+        #expect(evaluationArtifact.byteCount > 0)
         #expect(fileExists(".xcircuite/runs/\(runID)/reports/cross-artifact-evaluation.json", in: root))
         #expect(bundle.runGuardVerdict != nil)
         #expect(bundle.crossArtifactEvaluation?.status == .rejected)

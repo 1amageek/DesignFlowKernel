@@ -1,24 +1,31 @@
+import CircuiteFoundation
 import Foundation
 
-extension XcircuitePackageStore {
+extension FlowExecutionStorage {
     @discardableResult
     public func writeCrossArtifactEvaluation(
         _ evaluation: XcircuiteCrossArtifactEvaluation,
         inProjectAt projectRoot: URL
-    ) throws -> XcircuiteFileReference {
-        let relativePath = "\(XcircuitePackage.directoryName)/runs/\(evaluation.runID)/reports/cross-artifact-evaluation.json"
-        let url = projectRoot.appending(path: relativePath)
+    ) throws -> ArtifactReference {
+        let relativePath = ".xcircuite/runs/\(evaluation.runID)/reports/cross-artifact-evaluation.json"
+        let url = try url(forProjectRelativePath: relativePath, inProjectAt: projectRoot)
         try ensureDirectory(at: url.deletingLastPathComponent())
         try writeJSON(evaluation, to: url, forProjectAt: projectRoot)
-        let reference = try fileReference(
+        let reference = try makeArtifactReference(
             forProjectRelativePath: relativePath,
             artifactID: "cross-artifact-evaluation",
+            role: .output,
             kind: .report,
             format: .json,
             inProjectAt: projectRoot,
-            producedByRunID: evaluation.runID
+            producedByRunID: evaluation.runID,
+            verifiedByRunID: nil
         )
-        try upsertRunArtifact(reference, runID: evaluation.runID, inProjectAt: projectRoot)
+        try registerArtifact(
+            reference,
+            runID: evaluation.runID,
+            inProjectAt: projectRoot
+        )
         return reference
     }
 }

@@ -3,14 +3,14 @@ import Foundation
 
 public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private let loader: any FlowRunLedgerLoading
-    private let packageStore: XcircuitePackageStore
+    private let storage: any FlowExecutionStorage
 
     public init(
         loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        packageStore: XcircuitePackageStore = XcircuitePackageStore()
+        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
     ) {
         self.loader = loader
-        self.packageStore = packageStore
+        self.storage = storage
     }
 
     public func compareArtifacts(
@@ -41,7 +41,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             profileID: profile?.profileID,
             status: overallStatus(from: channelResults),
             generatedAt: generatedAt,
-            artifactIDs: stableUnique(artifactReferences.compactMap(\.artifactID) + envelopes.map(\.artifactID)),
+            artifactIDs: stableUnique(artifactReferences.map { $0.id.rawValue } + envelopes.map(\.artifactID)),
             channelResults: channelResults,
             diagnostics: diagnostics,
             summary: summary(from: channelResults, diagnostics: diagnostics),
@@ -55,11 +55,11 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
         var producedReferences: [ArtifactReference] = []
         if persist {
-            let legacyReference = try packageStore.writeCrossArtifactEvaluation(
+            let reference = try storage.writeCrossArtifactEvaluation(
                 evaluation,
                 inProjectAt: projectRoot
             )
-            producedReferences.append(try legacyReference.foundationArtifactReference())
+            producedReferences.append(reference)
         }
 
         return FlowRunCrossArtifactEvaluationResult(
@@ -72,7 +72,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private func buildChannelResults(
         ledger: FlowRunLedger,
         envelopes: [XcircuiteArtifactEnvelope],
-        artifactReferences: [XcircuiteFileReference],
+        artifactReferences: [ArtifactReference],
         profile: XcircuiteEvaluationProfile?
     ) -> [XcircuiteEvaluationChannelResult] {
         var results: [XcircuiteEvaluationChannelResult] = []
@@ -216,10 +216,12 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private func profileCoverageChannelResults(
         profile: XcircuiteEvaluationProfile,
         envelopes: [XcircuiteArtifactEnvelope],
-        artifactReferences: [XcircuiteFileReference],
+        artifactReferences: [ArtifactReference],
         existingResults: [XcircuiteEvaluationChannelResult]
     ) -> [XcircuiteEvaluationChannelResult] {
-        let artifactRoles = Set(envelopes.map(\.role) + artifactReferences.compactMap(\.artifactID))
+        let artifactRoles = Set(
+            envelopes.map(\.role) + artifactReferences.map { $0.locator.role.rawValue }
+        )
         let resultChannelIDs = Set(existingResults.map(\.channelID))
         let observedChannelIDs = Set(envelopes.flatMap { envelope in
             (envelope.evaluationResult?.channelResults.map(\.channelID) ?? [])
@@ -355,7 +357,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             guard url.lastPathComponent.hasSuffix("-envelope.json") else {
                 continue
             }
-            envelopes.append(try packageStore.readJSON(XcircuiteArtifactEnvelope.self, from: url))
+            envelopes.append(try storage.readJSON(XcircuiteArtifactEnvelope.self, from: url))
         }
         return envelopes
     }
@@ -363,11 +365,11 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private func availableArtifactReferences(
         from ledger: FlowRunLedger,
         envelopes: [XcircuiteArtifactEnvelope]
-    ) throws -> [XcircuiteFileReference] {
+    ) throws -> [ArtifactReference] {
         stableUniqueReferences(
-            ledger.runManifest.artifacts
-                + (try ledger.stages.flatMap(\.artifacts).map { try $0.legacyXcircuiteReference() })
-                + (try envelopes.map { try $0.reference.legacyXcircuiteReference() })
+            (try ledger.runManifest.artifacts.map { try $0.foundationArtifactReference() })
+                + ledger.stages.flatMap(\.artifacts)
+                + envelopes.map(\.reference)
         )
     }
 
@@ -518,12 +520,12 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func stableUniqueReferences(
-        _ references: [XcircuiteFileReference]
-    ) -> [XcircuiteFileReference] {
+        _ references: [ArtifactReference]
+    ) -> [ArtifactReference] {
         var seen: Set<String> = []
-        var unique: [XcircuiteFileReference] = []
+        var unique: [ArtifactReference] = []
         for reference in references {
-            let key = reference.artifactID ?? reference.path
+            let key = reference.id.rawValue
             guard !seen.contains(key) else {
                 continue
             }
