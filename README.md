@@ -28,7 +28,8 @@ byte count cannot be promoted to Foundation evidence.
 
 Build and evaluation result envelopes expose `CircuiteFoundation.ArtifactReference`
 directly. This includes decision packets, stage-artifact ladders, cross-artifact
-evaluations, release-evidence collections, and retention indexes. Result
+evaluations, loop summaries and evidence coverage, release-evidence collections,
+and retention indexes. Result
 decoders still accept the pre-migration `XcircuiteFileReference` shape once, but
 newly encoded JSON always uses Foundation's locator, role, kind, format, digest,
 byte count, and producer fields.
