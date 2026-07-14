@@ -272,6 +272,9 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 evidenceMatches(requiredEvidence, reference: reference)
             }
         )
+        let foundationMatchingReferences = try matchingReferences.map {
+            try $0.foundationArtifactReference()
+        }
         guard !matchingReferences.isEmpty else {
             return XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item(
                 evidenceID: requiredEvidence.evidenceID,
@@ -292,7 +295,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 artifactID: requiredEvidence.artifactID,
                 stageID: requiredEvidence.stageID,
                 status: .stale,
-                artifactReferences: matchingReferences,
+                artifactReferences: foundationMatchingReferences,
                 reason: "evidence exceeded maximumAgeSeconds"
             )
         }
@@ -302,7 +305,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             artifactID: requiredEvidence.artifactID,
             stageID: requiredEvidence.stageID,
             status: .satisfied,
-            artifactReferences: matchingReferences
+            artifactReferences: foundationMatchingReferences
         )
     }
 

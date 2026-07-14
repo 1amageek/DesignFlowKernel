@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
@@ -55,7 +56,7 @@ public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
             public var artifactID: String?
             public var stageID: String?
             public var status: Status
-            public var artifactReferences: [XcircuiteFileReference]
+            public var artifactReferences: [ArtifactReference]
             public var reason: String?
 
             public init(
@@ -64,7 +65,7 @@ public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
                 artifactID: String? = nil,
                 stageID: String? = nil,
                 status: Status,
-                artifactReferences: [XcircuiteFileReference] = [],
+                artifactReferences: [ArtifactReference] = [],
                 reason: String? = nil
             ) {
                 self.evidenceID = evidenceID
@@ -74,6 +75,38 @@ public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
                 self.status = status
                 self.artifactReferences = artifactReferences
                 self.reason = reason
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case evidenceID
+                case artifactRole
+                case artifactID
+                case stageID
+                case status
+                case artifactReferences
+                case reason
+            }
+
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                evidenceID = try container.decode(String.self, forKey: .evidenceID)
+                artifactRole = try container.decode(String.self, forKey: .artifactRole)
+                artifactID = try container.decodeIfPresent(String.self, forKey: .artifactID)
+                stageID = try container.decodeIfPresent(String.self, forKey: .stageID)
+                status = try container.decode(Status.self, forKey: .status)
+                do {
+                    artifactReferences = try container.decode(
+                        [ArtifactReference].self,
+                        forKey: .artifactReferences
+                    )
+                } catch {
+                    let legacy = try container.decode(
+                        [XcircuiteFileReference].self,
+                        forKey: .artifactReferences
+                    )
+                    artifactReferences = try legacy.map { try $0.foundationArtifactReference() }
+                }
+                reason = try container.decodeIfPresent(String.self, forKey: .reason)
             }
         }
 
@@ -237,4 +270,3 @@ public struct XcircuiteAgentLoopSnapshot: Sendable, Hashable, Codable {
         self.metadata = metadata
     }
 }
-
