@@ -59,6 +59,14 @@ gates, stage results, and artifacts have one meaning. The kernel owns ordering,
 gating, persistence, and resume — it contains no SPICE/DRC/LVS/PEX domain logic
 (that stays in the engine packages, connected via the `Xcircuite` runtime).
 
+## Xcircuite integration
+
+[`Xcircuite`](https://github.com/1amageek/Xcircuite) is the umbrella runtime
+that supplies concrete workspace/run-ledger persistence and domain stage
+executors to this kernel. `DesignFlowKernel` remains independent of the
+`.xcircuite` filesystem and owns lifecycle, gates, approvals, retries, and
+resume.
+
 ## Types
 
 | Type | Responsibility |
