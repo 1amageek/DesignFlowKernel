@@ -11,7 +11,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.reviewItems.contains {
@@ -46,7 +46,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let planningCorrectnessItem = try #require(bundle.reviewItems.first {
@@ -79,7 +79,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let item = try #require(bundle.reviewItems.first {

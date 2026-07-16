@@ -96,7 +96,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.schemaVersion == 2)
@@ -329,7 +329,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let planningArtifact = try #require(bundle.artifacts.first {
@@ -443,8 +443,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(verifyCommand.executable == "xcircuite-flow")
     #expect(verifyCommand.arguments == [
         "verify-candidate-plan",
-        "--project-root",
-        root.path(percentEncoded: false),
+        "--workspace-id",
+        try testWorkspaceID(for: root).rawValue,
         "--run-id",
         "run-1",
         "--mode",
@@ -463,8 +463,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(auditCommand.executable == "xcircuite-flow")
     #expect(auditCommand.arguments == [
         "audit-problem-translation",
-        "--project-root",
-        root.path(percentEncoded: false),
+        "--workspace-id",
+        try testWorkspaceID(for: root).rawValue,
         "--run-id",
         "run-1",
         "--pretty",
@@ -500,8 +500,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(feedbackCommand.executable == "xcircuite-flow")
     #expect(feedbackCommand.arguments == [
         "generate-candidate-plan",
-        "--project-root",
-        root.path(percentEncoded: false),
+        "--workspace-id",
+        try testWorkspaceID(for: root).rawValue,
         "--run-id",
         "run-1",
         "--rejected-plans-artifact-id",
@@ -597,7 +597,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: runID,
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.artifacts.contains {
@@ -663,7 +663,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
@@ -736,7 +736,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
@@ -774,7 +774,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let artifact = try #require(bundle.artifacts.first {
@@ -801,7 +801,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let artifact = try #require(bundle.artifacts.first {
@@ -825,7 +825,7 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -848,7 +848,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let artifact = try #require(bundle.artifacts.first {
@@ -866,7 +866,7 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
     _ = try await makeTestCancellationRecorder(projectRoot: root).requestCancellation(
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         runID: "run-1",
         requestedBy: "reviewer-1",
         reason: "Stop before resume."
@@ -874,7 +874,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let progress = try #require(bundle.artifacts.first {
@@ -921,7 +921,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
@@ -948,7 +948,7 @@ extension FlowRunLedgerSummaryTests {
     let store = await TestFlowInfrastructure.bound(to: root)
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -987,7 +987,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.approvals.count == 1)
@@ -1021,7 +1021,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(summary.status == .failed)
@@ -1045,7 +1045,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.reviewItems.contains {
@@ -1066,7 +1066,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = drcDescriptor()
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC with required corpus evidence",
             stages: [
@@ -1092,7 +1092,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(summary.status == .blocked)

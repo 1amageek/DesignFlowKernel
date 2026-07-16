@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import Testing
 import ToolQualification
@@ -6,7 +7,7 @@ import DesignFlowKernel
 private struct StaticReviewBundler: FlowRunReviewBundling {
     var bundle: FlowRunReviewBundle
 
-    func makeReviewBundle(runID: String, projectRoot: URL) throws -> FlowRunReviewBundle {
+    func makeReviewBundle(runID: String, workspaceID: FlowWorkspaceID) throws -> FlowRunReviewBundle {
         bundle
     }
 }
@@ -44,7 +45,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(result.artifact.artifactID == "review-decision-packet")
@@ -99,7 +100,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(result.artifact.artifactID == "review-decision-packet")
@@ -131,12 +132,12 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .needsReview)
@@ -166,12 +167,12 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -181,7 +182,7 @@ extension FlowRunLedgerSummaryTests {
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .blocked)
@@ -201,7 +202,7 @@ extension FlowRunLedgerSummaryTests {
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .blocked)
@@ -214,7 +215,7 @@ extension FlowRunLedgerSummaryTests {
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .blocked)
@@ -246,7 +247,7 @@ extension FlowRunLedgerSummaryTests {
 	    )
 	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    )
 
 	    let store = await TestFlowInfrastructure.bound(to: root)
@@ -270,7 +271,7 @@ extension FlowRunLedgerSummaryTests {
 
 	    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    )
 
 	    #expect(validation.status == .blocked)
@@ -290,7 +291,7 @@ extension FlowRunLedgerSummaryTests {
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .blocked)
@@ -370,7 +371,7 @@ extension FlowRunLedgerSummaryTests {
         persistence: store
     ).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let stageSummaryRequirement = try #require(result.packet.requiredArtifacts.first {
@@ -451,7 +452,7 @@ extension FlowRunLedgerSummaryTests {
         persistence: store
     ).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
     #expect(build.packet.readiness == .ready)
     #expect(build.packet.completionIssues.isEmpty)
@@ -476,7 +477,7 @@ extension FlowRunLedgerSummaryTests {
 
     let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(validation.status == .blocked)

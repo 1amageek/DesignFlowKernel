@@ -8,12 +8,12 @@ public struct DefaultFlowRunCancellationRecorder: FlowRunCancellationRecording {
     }
 
     public func requestCancellation(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         requestedBy: String,
         reason: String
     ) async throws -> FlowRunCancellationResult {
-        let request = FlowRunCancellationRequest(
+        let request = try FlowRunCancellationRequest(
             runID: runID,
             requestedBy: requestedBy,
             reason: reason

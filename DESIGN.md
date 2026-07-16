@@ -19,15 +19,13 @@ flowchart TD
     Engines --> Kernel
 ```
 
-## Foundation integration
+## Shared contract integration
 
 - `FlowEngine` is the typed `CircuiteFoundation.Engine` boundary.
-- `DefaultFlowEngine` adapts the existing orchestrator without changing its
-  trust, approval, retry, or resume semantics.
-- `DesignFlowFoundationEvidence` projects completed stage artifacts and
-  diagnostics into `EvidenceManifest` and `DesignDiagnostic`.
-- Evidence promotion is fail-closed. Missing or invalid SHA-256 and byte
-  count metadata is a typed boundary error.
+- `DefaultFlowEngine` invokes the orchestrator without a bridge or result
+  projection layer.
+- `FlowRunResult` directly provides `EvidenceManifest`, canonical artifact
+  references, `DesignDiagnostic` values, and mandatory `ExecutionProvenance`.
 - `FlowRunLedgerPersisting` is the asynchronous storage seam for run recovery.
   Implementations own durable writes and integrity checks; the kernel does not
   choose a filesystem layout.
@@ -48,12 +46,10 @@ flowchart TD
 3. The orchestrator validates the plan, selects trusted tools, executes stages,
    records diagnostics and artifacts, and applies approval gates.
 4. A `FlowRunLedgerPersisting` implementation persists the run so a later
-   invocation can resume the same run. Xcircuite supplies the concrete
-   `.xcircuite` implementation.
-5. A caller may project a completed `FlowRunResult` to Foundation evidence by
-   supplying an `ExecutionProvenance` value. The projection preserves artifact
-   IDs when present, derives a deterministic identity when legacy IDs are
-   absent, and rejects missing integrity metadata.
+   invocation can resume the same run. The composing application supplies the
+   concrete storage implementation bound to a validated `FlowWorkspaceID`.
+5. The orchestrator emits a `FlowRunResult` whose evidence and diagnostics are
+   immediately consumable through CircuiteFoundation protocols.
 6. Review artifacts embed `ArtifactReference` as the single source of artifact
    identity, location, role, kind, format, digest, and byte count. DesignFlowKernel
    stores only review-domain metadata such as the validated open-token

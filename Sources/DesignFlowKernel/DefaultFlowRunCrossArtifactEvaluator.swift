@@ -15,7 +15,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
     public func compareArtifacts(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         profile: FlowEvaluationProfile? = nil,
         generatedAt: Date = Date(),
         persist: Bool = true

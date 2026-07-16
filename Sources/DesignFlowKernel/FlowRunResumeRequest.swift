@@ -1,11 +1,11 @@
 import Foundation
 
 public struct FlowRunResumeRequest: Sendable, Hashable, Codable {
-    public var projectRoot: URL
+    public var workspaceID: FlowWorkspaceID
     public var runID: String
 
-    public init(projectRoot: URL, runID: String) {
-        self.projectRoot = projectRoot
+    public init(workspaceID: FlowWorkspaceID, runID: String) {
+        self.workspaceID = workspaceID
         self.runID = runID
     }
 }

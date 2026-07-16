@@ -10,7 +10,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run preflight",
             stages: [
@@ -26,7 +26,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(summary.runID == "run-1")
@@ -41,7 +41,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run preflight",
             stages: [
@@ -78,7 +78,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
     let selection = try #require(summary.suggestedCommandSelections.first)
 
@@ -117,7 +117,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let action = try #require(summary.nextActions.first {
@@ -132,8 +132,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(command.executable == "xcircuite-flow")
     #expect(command.arguments == [
         "validate-planning-problem",
-        "--project-root",
-        root.path(percentEncoded: false),
+        "--workspace-id",
+        try testWorkspaceID(for: root).rawValue,
         "--run-id",
         "run-1",
         "--pretty",
@@ -159,7 +159,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let action = try #require(summary.nextActions.first {
@@ -175,8 +175,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(command.executable == "xcircuite-flow")
     #expect(command.arguments == [
         "audit-problem-translation",
-        "--project-root",
-        root.path(percentEncoded: false),
+        "--workspace-id",
+        try testWorkspaceID(for: root).rawValue,
         "--run-id",
         "run-1",
         "--pretty",
@@ -210,7 +210,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(bundle.runID == "run-1")

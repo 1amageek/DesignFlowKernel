@@ -90,7 +90,7 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
 
         let summary = try await inspector.inspectRun(
             runID: request.runID,
-            projectRoot: request.projectRoot
+            workspaceID: request.workspaceID
         )
         return FlowGateApprovalResult(approval: persistedApproval, summary: summary)
     }

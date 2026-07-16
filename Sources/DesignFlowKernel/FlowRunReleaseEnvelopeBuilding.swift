@@ -3,7 +3,7 @@ import Foundation
 public protocol FlowRunReleaseEnvelopeBuilding: Sendable {
     func buildReleaseEnvelope(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         maxEvidenceAgeDays: Int?
     ) async throws -> FlowRunReleaseEnvelopeBuildResult
 }
@@ -11,11 +11,11 @@ public protocol FlowRunReleaseEnvelopeBuilding: Sendable {
 public extension FlowRunReleaseEnvelopeBuilding {
     func buildReleaseEnvelope(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunReleaseEnvelopeBuildResult {
         try await buildReleaseEnvelope(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             maxEvidenceAgeDays: 30
         )
     }

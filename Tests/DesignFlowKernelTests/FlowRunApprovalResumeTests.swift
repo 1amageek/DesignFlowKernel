@@ -1,4 +1,5 @@
 import DesignFlowKernel
+import CircuiteFoundation
 import Foundation
 import Testing
 import ToolQualification
@@ -12,7 +13,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -55,7 +56,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .rejected,
@@ -81,7 +82,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -118,7 +119,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run preflight",
             stages: [
@@ -135,7 +136,7 @@ extension FlowRunLedgerSummaryTests {
     await #expect(throws: FlowGateApprovalError.self) {
         try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
             FlowGateApprovalRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 stageID: "001-preflight",
                 verdict: .approved,
@@ -156,7 +157,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -166,7 +167,7 @@ extension FlowRunLedgerSummaryTests {
 
     let descriptor = drcDescriptor()
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
-        request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+        request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
             descriptor.toolID: ToolHealthCheckResult(
@@ -210,7 +211,7 @@ extension FlowRunLedgerSummaryTests {
     ]
     let blocked = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC with early human review",
             stages: [
@@ -241,7 +242,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -251,7 +252,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
-        request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+        request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: health,
         executors: executors
@@ -290,7 +291,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -319,7 +320,7 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -341,7 +342,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = drcDescriptor()
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
-            request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+            request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
             healthResults: [
                 descriptor.toolID: ToolHealthCheckResult(
@@ -363,7 +364,7 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -375,7 +376,7 @@ extension FlowRunLedgerSummaryTests {
 
     let descriptor = drcDescriptor()
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
-        request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+        request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
             descriptor.toolID: ToolHealthCheckResult(
@@ -406,7 +407,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = drcDescriptor()
     let result = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC with human review",
             stages: [
@@ -417,7 +418,7 @@ extension FlowRunLedgerSummaryTests {
                     requiresApproval: true
                 ),
             ],
-            allowExistingRunDirectory: true
+            allowExistingRun: true
         ),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
@@ -428,7 +429,11 @@ extension FlowRunLedgerSummaryTests {
             ),
         ],
         executors: [
-            ApprovalDuringExecutionExecutor(stageID: "001-drc", toolID: "native-drc"),
+            ApprovalDuringExecutionExecutor(
+                stageID: "001-drc",
+                toolID: "native-drc",
+                approvalRecorder: await makeTestApprovalRecorder(projectRoot: root)
+            ),
         ]
     )
 
@@ -447,7 +452,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run preflight",
             stages: [
@@ -463,7 +468,7 @@ extension FlowRunLedgerSummaryTests {
 
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
-            request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+            request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
             executors: [
@@ -485,7 +490,7 @@ extension FlowRunLedgerSummaryTests {
     ]
     let failed = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Retry after repair",
             stages: stages
@@ -502,7 +507,7 @@ extension FlowRunLedgerSummaryTests {
     // Retry resumes the SAME persisted plan with a repaired executor;
     // the failed stage result is superseded in place.
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
-        request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+        request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(),
         healthResults: [:],
         executors: [
@@ -527,7 +532,7 @@ extension FlowRunLedgerSummaryTests {
 
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
-            request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+            request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
             executors: [
@@ -550,7 +555,7 @@ extension FlowRunLedgerSummaryTests {
         producerRunID: "run-1"
     )
     let request = FlowOperationRequest(
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         runID: "run-1",
         intent: "Run DRC",
         stages: [
@@ -590,11 +595,11 @@ extension FlowRunLedgerSummaryTests {
     }
 }
 
-@Test func allowExistingRunDirectoryRejectsMismatchedExistingPlan() async throws {
+@Test func allowExistingRunRejectsMismatchedExistingPlan() async throws {
     let root = try makeTemporaryRoot("agent-rerun-existing-plan-mismatch")
     defer { removeTemporaryRoot(root) }
     let request = FlowOperationRequest(
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         runID: "run-1",
         intent: "Run DRC",
         stages: [
@@ -613,13 +618,13 @@ extension FlowRunLedgerSummaryTests {
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
     let originalPlanData = try Data(contentsOf: planURL)
     let mismatchedRequest = FlowOperationRequest(
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         runID: "run-1",
         intent: "Run LVS instead",
         stages: [
             FlowStageDefinition(stageID: "001-lvs", displayName: "LVS"),
         ],
-        allowExistingRunDirectory: true
+        allowExistingRun: true
     )
 
     do {
@@ -671,7 +676,7 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
@@ -681,7 +686,7 @@ extension FlowRunLedgerSummaryTests {
 
     let descriptor = drcDescriptor()
     _ = try await makeTestRunResumer(projectRoot: root).resumeRun(
-        request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+        request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
             descriptor.toolID: ToolHealthCheckResult(
@@ -718,7 +723,7 @@ extension FlowRunLedgerSummaryTests {
 
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
-            request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
+            request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
             executors: []

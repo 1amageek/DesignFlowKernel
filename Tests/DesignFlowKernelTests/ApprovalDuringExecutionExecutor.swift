@@ -3,24 +3,15 @@ import DesignFlowKernel
 struct ApprovalDuringExecutionExecutor: FlowStageExecutor {
     let stageID: String
     let toolID: String
+    let approvalRecorder: any FlowGateApprovalRecording
 
     func execute(
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        let infrastructure = await TestFlowInfrastructure.bound(to: context.projectRoot)
-        _ = try await DefaultFlowGateApprovalRecorder(
-            loader: infrastructure,
-            inspector: DefaultFlowRunLedgerInspector(
-                reviewBundler: DefaultFlowRunReviewBundler(
-                    loader: infrastructure,
-                    persistence: infrastructure
-                )
-            ),
-            ledgerPersistence: infrastructure
-        ).recordApproval(
+        _ = try await approvalRecorder.recordApproval(
             FlowGateApprovalRequest(
-                projectRoot: context.projectRoot,
+                workspaceID: context.workspaceID,
                 runID: context.runID,
                 stageID: stage.stageID,
                 verdict: .approved,

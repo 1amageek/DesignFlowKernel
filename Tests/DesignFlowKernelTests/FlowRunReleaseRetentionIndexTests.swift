@@ -1,4 +1,5 @@
 import DesignFlowKernel
+import CircuiteFoundation
 import Foundation
 import Testing
 import DesignFlowKernel
@@ -38,7 +39,7 @@ struct FlowRunReleaseRetentionIndexTests {
         ).validate(
             index: index,
             runID: "run-1",
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             currentDate: Self.evaluationDate,
             maximumAgeSeconds: nil
         )
@@ -128,7 +129,7 @@ struct FlowRunReleaseRetentionIndexTests {
         ).build(
             runID: "run-1",
             workflowRunID: "workflow-run-1",
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             sourceDashboard: dashboard,
             history: history,
             previousEntryCount: previousEntryCount,

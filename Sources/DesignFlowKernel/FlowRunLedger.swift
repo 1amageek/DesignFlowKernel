@@ -45,14 +45,6 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         self.approvals = approvals
     }
 
-    public var runResult: FlowRunResult {
-        FlowRunResult(
-            runID: runID,
-            status: flowStatus(runManifest.status),
-            stages: stages
-        )
-    }
-
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case runID
@@ -116,22 +108,4 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         try container.encode(approvals, forKey: .approvals)
     }
 
-    private func flowStatus(_ status: FlowRunStatus) -> FlowRunStatus {
-        switch status {
-        case .created:
-            .created
-        case .running:
-            .running
-        case .succeeded:
-            .succeeded
-        case .failed:
-            .failed
-        case .cancelled:
-            .cancelled
-        case .blocked:
-            .blocked
-        case .partial:
-            .partial
-        }
-    }
 }

@@ -1,25 +1,21 @@
-import Foundation
 import ToolQualification
 
 public struct FlowExecutionContext: Sendable {
-    public var projectRoot: URL
+    public var workspaceID: FlowWorkspaceID
     public var runID: String
-    public var runDirectory: URL
     public var infrastructure: any FlowRunInfrastructure
     public var toolRegistry: ToolRegistry
     public var healthResults: [String: ToolHealthCheckResult]
 
     public init(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
-        runDirectory: URL,
         infrastructure: any FlowRunInfrastructure,
         toolRegistry: ToolRegistry,
         healthResults: [String: ToolHealthCheckResult]
     ) {
-        self.projectRoot = projectRoot
+        self.workspaceID = workspaceID
         self.runID = runID
-        self.runDirectory = runDirectory
         self.infrastructure = infrastructure
         self.toolRegistry = toolRegistry
         self.healthResults = healthResults

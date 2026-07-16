@@ -12,7 +12,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = drcDescriptor()
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC with human review",
             stages: [
@@ -70,7 +70,7 @@ extension FlowRunLedgerSummaryTests {
 
     let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(summary.schemaVersion == FlowRunLedgerSummary.currentSchemaVersion)

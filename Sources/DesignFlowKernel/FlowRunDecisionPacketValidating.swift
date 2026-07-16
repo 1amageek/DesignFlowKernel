@@ -3,6 +3,6 @@ import Foundation
 public protocol FlowRunDecisionPacketValidating: Sendable {
     func validateDecisionPacket(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunDecisionPacketValidationResult
 }

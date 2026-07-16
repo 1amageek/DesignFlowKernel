@@ -18,7 +18,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
         await #expect(throws: FlowGateApprovalError.waiverReasonRequired) {
             try await recorder.recordApproval(
                 FlowGateApprovalRequest(
-                    projectRoot: URL(filePath: "/tmp/project"),
+                    workspaceID: try testWorkspaceID(for: URL(filePath: "/tmp/project")),
                     runID: "run-waiver",
                     stageID: "layout",
                     verdict: .waived,
@@ -44,7 +44,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
 
         let result = try await builder.buildReleaseEnvelope(
             runID: "run-release",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
 
         #expect(result.envelope.status == .blocked)
@@ -87,7 +87,7 @@ private actor WaiverLedgerStore: FlowRunLedgerPersisting, FlowRunLedgerInspectin
         self.ledger = ledger
     }
 
-    func inspectRun(runID: String, projectRoot: URL) async throws -> FlowRunLedgerSummary {
+    func inspectRun(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunLedgerSummary {
         FlowRunLedgerSummary(runID: runID, status: ledger.runManifest.status)
     }
 }
@@ -97,11 +97,11 @@ private struct PassingDecisionPacketValidator: FlowRunDecisionPacketValidating {
 
     func validateDecisionPacket(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunDecisionPacketValidationResult {
         FlowRunDecisionPacketValidationResult(
             runID: runID,
-            packetPath: ".xcircuite/runs/\(runID)/review/decision-packet.json",
+            packetPath: "runs/\(runID)/review/decision-packet.json",
             status: .passed
         )
     }

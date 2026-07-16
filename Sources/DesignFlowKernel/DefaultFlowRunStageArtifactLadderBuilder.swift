@@ -30,22 +30,22 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
 
     public func makeStageArtifactLadder(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunStageArtifactLadder {
         let ledger = try await loader.loadRunLedger(runID: runID)
-        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
+        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, workspaceID: workspaceID)
         return makeStageArtifactLadder(
             from: bundle,
             stageResults: ledger.stages,
-            projectRoot: projectRoot
+            workspaceID: workspaceID
         )
     }
 
     public func buildStageArtifactLadder(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunStageArtifactLadderBuildResult {
-        let ladder = try await makeStageArtifactLadder(runID: runID, projectRoot: projectRoot)
+        let ladder = try await makeStageArtifactLadder(runID: runID, workspaceID: workspaceID)
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -67,7 +67,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
     public func makeStageArtifactLadder(
         from bundle: FlowRunReviewBundle,
         stageResults: [FlowStageResult],
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) -> FlowRunStageArtifactLadder {
         let artifacts = bundle.artifacts
             .filter { $0.reference.artifactID != Self.artifactID }
@@ -162,7 +162,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             stages: stages,
             runReviewItems: runReviewItems,
             nextActions: bundle.summary.nextActions.sorted(by: nextActionSort),
-            replayCommands: replayCommands(from: bundle, projectRoot: projectRoot),
+            replayCommands: replayCommands(from: bundle, workspaceID: workspaceID),
             signoffManifestCoverage: signoffManifestCoverage(from: artifacts)
         )
     }
@@ -599,7 +599,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
 
     private func replayCommands(
         from bundle: FlowRunReviewBundle,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) -> [FlowRunSuggestedCommand] {
         let runIDIsValid = identifierPolicy.isValidRunID(bundle.runID)
         let runIDArgument = runIDIsValid ? bundle.runID : "<invalid-run-id>"
@@ -610,8 +610,8 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             executable: "design-flow",
             arguments: [
                 "review-run",
-                "--project-root",
-                projectRoot.path(percentEncoded: false),
+                "--workspace-id",
+                workspaceID.rawValue,
                 "--run-id",
                 runIDArgument,
             ],
@@ -623,8 +623,8 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             executable: "design-flow",
             arguments: [
                 "build-stage-artifact-ladder",
-                "--project-root",
-                projectRoot.path(percentEncoded: false),
+                "--workspace-id",
+                workspaceID.rawValue,
                 "--run-id",
                 runIDArgument,
             ],

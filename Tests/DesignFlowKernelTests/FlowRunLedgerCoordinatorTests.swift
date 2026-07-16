@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import Testing
 @testable import DesignFlowKernel
@@ -127,7 +128,7 @@ struct FlowRunLedgerCoordinatorTests {
         let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-cancel"))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
         _ = try await coordinator.transition(runID: "run-cancel", to: .running)
-        let request = FlowRunCancellationRequest(
+        let request = try FlowRunCancellationRequest(
             runID: "run-cancel",
             requestedBy: "operator",
             reason: "stop requested",

@@ -18,10 +18,10 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
 
     public func buildDecisionPacket(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunDecisionPacketBuildResult {
-        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
-        let packet = makePacket(from: bundle, projectRoot: projectRoot)
+        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, workspaceID: workspaceID)
+        let packet = makePacket(from: bundle, workspaceID: workspaceID)
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -42,7 +42,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
 
     func makePacket(
         from bundle: FlowRunReviewBundle,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) -> FlowRunDecisionPacket {
         let requirements = artifactRequirements(from: bundle)
         let unresolvedItems = bundle.reviewItems.filter { item in
@@ -62,7 +62,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             requiredArtifacts: requirements,
             unresolvedReviewItems: unresolvedItems,
             completionIssues: issues,
-            replayCommands: replayCommands(from: bundle, projectRoot: projectRoot)
+            replayCommands: replayCommands(from: bundle, workspaceID: workspaceID)
         )
     }
 
@@ -218,7 +218,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
 
     private func replayCommands(
         from bundle: FlowRunReviewBundle,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) -> [FlowRunSuggestedCommand] {
         let reviewCommand = FlowRunSuggestedCommand(
             commandID: "review-run",
@@ -226,8 +226,8 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             executable: "design-flow",
             arguments: [
                 "review-run",
-                "--project-root",
-                projectRoot.path(percentEncoded: false),
+                "--workspace-id",
+                workspaceID.rawValue,
                 "--run-id",
                 bundle.runID,
             ],

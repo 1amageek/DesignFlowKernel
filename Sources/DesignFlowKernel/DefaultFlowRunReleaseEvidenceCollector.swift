@@ -19,7 +19,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
 
     public func collectReleaseEvidence(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         signoffDashboard: ArtifactReference,
         contractReport: ArtifactReference
     ) async throws -> FlowRunReleaseEvidenceCollectionResult {
@@ -27,13 +27,13 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
             FlowRunSignoffDashboard.self,
             source: "signoff-dashboard",
             from: signoffDashboard,
-            projectRoot: projectRoot
+            workspaceID: workspaceID
         )
         let contractReportDocument: FlowRunContractReport = try await load(
             FlowRunContractReport.self,
             source: "contract-report",
             from: contractReport,
-            projectRoot: projectRoot
+            workspaceID: workspaceID
         )
         try validate(dashboard)
         try validate(contractReportDocument)
@@ -65,7 +65,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         )
         let artifacts = try await persistArtifacts(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             corpusHistory: corpusHistory,
             performanceEnvelope: performanceEnvelope,
             contractAudit: contractAudit
@@ -87,7 +87,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         _ type: T.Type,
         source: String,
         from reference: ArtifactReference,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> T {
         do {
             let content = try await persistence.loadArtifactContent(
@@ -290,7 +290,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
 
     private func persistArtifacts(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
         contractAudit: FlowRunReleaseContractAudit

@@ -24,7 +24,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         self.persistence = persistence
     }
 
-    public func makeReviewBundle(runID: String, projectRoot: URL) async throws -> FlowRunReviewBundle {
+    public func makeReviewBundle(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunReviewBundle {
         let ledger = try await loader.loadRunLedger(runID: runID)
         var summary = summarizer.summarize(ledger)
         let integrityByPath = await artifactIntegrityByPath(from: ledger)
@@ -62,7 +62,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         )
         summary.nextActions = mergedNextActions(
             summary.nextActions,
-            planningNextActions(from: items, projectRoot: projectRoot, runID: ledger.runID)
+            planningNextActions(from: items, workspaceID: workspaceID, runID: ledger.runID)
         )
         let decisionActions = try reviewDecisionActions(from: ledger.actions)
         return FlowRunReviewBundle(
@@ -97,7 +97,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
     private func planningNextActions(
         from items: [FlowRunReviewItem],
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String
     ) -> [FlowRunNextAction] {
         items.compactMap { item in
@@ -133,7 +133,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 suggestedCommands: suggestedCommands(
                     for: item,
                     actionID: actionID,
-                    projectRoot: projectRoot,
+                    workspaceID: workspaceID,
                     runID: runID
                 )
             )
@@ -143,7 +143,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     private func suggestedCommands(
         for item: FlowRunReviewItem,
         actionID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String
     ) -> [FlowRunSuggestedCommand] {
         if item.itemID == "planning-rejected-feedback" {
@@ -152,7 +152,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     commandID: "xcircuite-flow.generate-candidate-plan.with-rejected-feedback",
                     readiness: .ready,
                     commandName: "generate-candidate-plan",
-                    projectRoot: projectRoot,
+                    workspaceID: workspaceID,
                     runID: runID,
                     extraArguments: ["--rejected-plans-artifact-id", "planning-rejected-plans"],
                     reason: "Regenerate the candidate plan using recorded rejected-plan feedback."
@@ -166,38 +166,38 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     commandID: "xcircuite-flow.audit-problem-translation",
                     readiness: .ready,
                     commandName: "audit-problem-translation",
-                    projectRoot: projectRoot,
+                    workspaceID: workspaceID,
                     runID: runID,
                     reason: "Audit planning problem translation coverage."
                 ),
             ]
         case "validate-planning-problem":
-            return [flowCommand(commandID: "xcircuite-flow.validate-planning-problem", readiness: .ready, commandName: "validate-planning-problem", projectRoot: projectRoot, runID: runID, reason: "Validate the planning problem.")]
+            return [flowCommand(commandID: "xcircuite-flow.validate-planning-problem", readiness: .ready, commandName: "validate-planning-problem", workspaceID: workspaceID, runID: runID, reason: "Validate the planning problem.")]
         case "generate-candidate-plan":
-            return [flowCommand(commandID: "xcircuite-flow.generate-candidate-plan", readiness: .ready, commandName: "generate-candidate-plan", projectRoot: projectRoot, runID: runID, reason: "Generate a candidate plan.")]
+            return [flowCommand(commandID: "xcircuite-flow.generate-candidate-plan", readiness: .ready, commandName: "generate-candidate-plan", workspaceID: workspaceID, runID: runID, reason: "Generate a candidate plan.")]
         case "execute-candidate-plan":
-            return [flowCommand(commandID: "xcircuite-flow.execute-candidate-plan", readiness: .ready, commandName: "execute-candidate-plan", projectRoot: projectRoot, runID: runID, reason: "Execute the candidate plan.")]
+            return [flowCommand(commandID: "xcircuite-flow.execute-candidate-plan", readiness: .ready, commandName: "execute-candidate-plan", workspaceID: workspaceID, runID: runID, reason: "Execute the candidate plan.")]
         case "verify-candidate-plan":
-            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan", readiness: .ready, commandName: "verify-candidate-plan", projectRoot: projectRoot, runID: runID, reason: "Verify the candidate plan.")]
+            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan", readiness: .ready, commandName: "verify-candidate-plan", workspaceID: workspaceID, runID: runID, reason: "Verify the candidate plan.")]
         case "verify-candidate-plan:post-execution":
-            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution", readiness: .ready, commandName: "verify-candidate-plan", projectRoot: projectRoot, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Verify post-execution evidence.")]
+            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution", readiness: .ready, commandName: "verify-candidate-plan", workspaceID: workspaceID, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Verify post-execution evidence.")]
         case "generate-parameter-candidates":
-            return [flowCommand(commandID: "xcircuite-flow.generate-parameter-candidates", readiness: .ready, commandName: "generate-parameter-candidates", projectRoot: projectRoot, runID: runID, reason: "Generate parameter candidates.")]
+            return [flowCommand(commandID: "xcircuite-flow.generate-parameter-candidates", readiness: .ready, commandName: "generate-parameter-candidates", workspaceID: workspaceID, runID: runID, reason: "Generate parameter candidates.")]
         case "synthesize-parameter-candidate-plan":
-            return [flowCommand(commandID: "xcircuite-flow.synthesize-parameter-candidate-plan", readiness: .ready, commandName: "synthesize-parameter-candidate-plan", projectRoot: projectRoot, runID: runID, reason: "Synthesize the selected parameter candidate.")]
+            return [flowCommand(commandID: "xcircuite-flow.synthesize-parameter-candidate-plan", readiness: .ready, commandName: "synthesize-parameter-candidate-plan", workspaceID: workspaceID, runID: runID, reason: "Synthesize the selected parameter candidate.")]
         case "run-numeric-repair-loop":
-            return [flowCommand(commandID: "xcircuite-flow.run-numeric-repair-loop", readiness: .ready, commandName: "run-numeric-repair-loop", projectRoot: projectRoot, runID: runID, reason: "Run the numeric repair loop.")]
+            return [flowCommand(commandID: "xcircuite-flow.run-numeric-repair-loop", readiness: .ready, commandName: "run-numeric-repair-loop", workspaceID: workspaceID, runID: runID, reason: "Run the numeric repair loop.")]
         case "repair-planning-problem-goals", "add-objective-goal-atoms":
-            return [flowCommand(commandID: "xcircuite-flow.validate-planning-problem.after-goal-edit", readiness: .requiresInput, commandName: "validate-planning-problem", projectRoot: projectRoot, runID: runID, reason: "Edit goal atoms before validating the repaired planning problem.")]
+            return [flowCommand(commandID: "xcircuite-flow.validate-planning-problem.after-goal-edit", readiness: .requiresInput, commandName: "validate-planning-problem", workspaceID: workspaceID, runID: runID, reason: "Edit goal atoms before validating the repaired planning problem.")]
         case "repair-problem-translation-audit", "attach-objective-source-ref", "attach-constraint-source-ref", "attach-action-source-objective", "attach-goal-atom-source-objective", "map-source-ref-to-objective-or-constraint", "regenerate-planning-problem":
-            return [flowCommand(commandID: "xcircuite-flow.audit-problem-translation.after-translation-repair", readiness: .requiresInput, commandName: "audit-problem-translation", projectRoot: projectRoot, runID: runID, reason: "Repair translation provenance before rerunning the audit.")]
+            return [flowCommand(commandID: "xcircuite-flow.audit-problem-translation.after-translation-repair", readiness: .requiresInput, commandName: "audit-problem-translation", workspaceID: workspaceID, runID: runID, reason: "Repair translation provenance before rerunning the audit.")]
         case "add-verification-gates":
-            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution.after-gate-edit", readiness: .requiresInput, commandName: "verify-candidate-plan", projectRoot: projectRoot, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Add verification gates before rerunning post-execution verification.")]
+            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution.after-gate-edit", readiness: .requiresInput, commandName: "verify-candidate-plan", workspaceID: workspaceID, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Add verification gates before rerunning post-execution verification.")]
         default:
             guard actionID.hasPrefix("repair-verification-gate:") else {
                 return []
             }
-            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution.after-gate-repair", readiness: .requiresInput, commandName: "verify-candidate-plan", projectRoot: projectRoot, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Repair verification evidence before rerunning post-execution verification.")]
+            return [flowCommand(commandID: "xcircuite-flow.verify-candidate-plan.post-execution.after-gate-repair", readiness: .requiresInput, commandName: "verify-candidate-plan", workspaceID: workspaceID, runID: runID, extraArguments: ["--mode", "post-execution"], reason: "Repair verification evidence before rerunning post-execution verification.")]
         }
     }
 
@@ -205,7 +205,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         commandID: String,
         readiness: FlowRunSuggestedCommandReadiness,
         commandName: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         extraArguments: [String] = [],
         reason: String
@@ -216,8 +216,8 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             executable: "xcircuite-flow",
             arguments: [
                 commandName,
-                "--project-root",
-                projectRoot.path(percentEncoded: false),
+                "--workspace-id",
+                workspaceID.rawValue,
                 "--run-id",
                 runID,
             ] + extraArguments + ["--pretty"],

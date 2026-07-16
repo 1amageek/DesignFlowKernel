@@ -36,7 +36,7 @@ struct FlowRunLoopGuardTests {
         )
         let result = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             profile: profile,
             generatedAt: Date(timeIntervalSince1970: 200)
         )
@@ -79,7 +79,7 @@ struct FlowRunLoopGuardTests {
         )
         let result = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             profile: profile,
             generatedAt: Date(timeIntervalSince1970: 200)
         )
@@ -121,7 +121,7 @@ struct FlowRunLoopGuardTests {
         )
         _ = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             profile: loopProfile,
             generatedAt: Date(timeIntervalSince1970: 200)
         )
@@ -161,7 +161,7 @@ struct FlowRunLoopGuardTests {
             evidencePersistence: store
         ).compareArtifacts(
             runID: runID,
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             profile: evaluationProfile
         )
         let bundle = try await DefaultFlowRunReviewBundler(
@@ -169,7 +169,7 @@ struct FlowRunLoopGuardTests {
             persistence: store
         ).makeReviewBundle(
             runID: runID,
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
 
         #expect(evaluationResult.evaluation.status == .rejected)

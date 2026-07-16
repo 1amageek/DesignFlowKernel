@@ -8,8 +8,14 @@ import Foundation
 /// records through this boundary.
 public protocol FlowRunProgressPersisting: Sendable {
     func appendProgressEvent(
-        _ event: FlowRunProgressEvent
-    ) async throws -> ArtifactReference
+        runID: String,
+        kind: FlowRunProgressEventKind,
+        stageID: String?,
+        stageStatus: FlowStageStatus?,
+        runStatus: FlowRunStatus?,
+        message: String,
+        createdAt: Date
+    ) async throws -> FlowRunProgressEvent
 
     func loadProgressEvents(
         runID: String

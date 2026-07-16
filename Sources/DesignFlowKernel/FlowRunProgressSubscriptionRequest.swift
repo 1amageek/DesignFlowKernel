@@ -1,7 +1,7 @@
 import Foundation
 
 public struct FlowRunProgressSubscriptionRequest: Sendable, Hashable {
-    public var projectRoot: URL
+    public var workspaceID: FlowWorkspaceID
     public var runID: String
     public var afterSequence: Int
     public var waitForNewEvents: Bool
@@ -10,7 +10,7 @@ public struct FlowRunProgressSubscriptionRequest: Sendable, Hashable {
     public var stopWhenRunFinished: Bool
 
     public init(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         afterSequence: Int = 0,
         waitForNewEvents: Bool = false,
@@ -18,7 +18,7 @@ public struct FlowRunProgressSubscriptionRequest: Sendable, Hashable {
         pollIntervalMilliseconds: Int = 250,
         stopWhenRunFinished: Bool = true
     ) {
-        self.projectRoot = projectRoot
+        self.workspaceID = workspaceID
         self.runID = runID
         self.afterSequence = afterSequence
         self.waitForNewEvents = waitForNewEvents

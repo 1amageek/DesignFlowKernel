@@ -2,7 +2,7 @@ import Foundation
 
 public protocol FlowRunCancellationRecording: Sendable {
     func requestCancellation(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         requestedBy: String,
         reason: String

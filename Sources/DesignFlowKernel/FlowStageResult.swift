@@ -50,26 +50,3 @@ public struct FlowStageResult: Sendable, Hashable, Codable {
     }
 
 }
-
-private extension ArtifactKind {
-    var foundationRawValue: String {
-        switch self {
-        case .powerIntent: return "power-intent"
-        case .timingLibrary: return "timing-library"
-        case .testPattern: return "test-pattern"
-        case .ruleDeck: return "rule-deck"
-        case .designDiff: return "design-diff"
-        case .parasitics: return "parasitics"
-        default: return rawValue
-        }
-    }
-}
-
-private extension ArtifactFormat {
-    var foundationRawValue: String {
-        switch self {
-        case .systemVerilog: return "system-verilog"
-        default: return rawValue.lowercased()
-        }
-    }
-}

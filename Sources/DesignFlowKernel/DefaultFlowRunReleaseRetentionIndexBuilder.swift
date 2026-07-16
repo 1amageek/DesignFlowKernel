@@ -16,7 +16,7 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
     public func build(
         runID: String,
         workflowRunID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         sourceDashboard: ArtifactReference,
         history: ArtifactReference,
         previousEntryCount: Int,
@@ -49,7 +49,7 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
         let validation = try await validator.validate(
             index: index,
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             currentDate: recordedAt,
             maximumAgeSeconds: nil
         )

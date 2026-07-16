@@ -21,9 +21,9 @@ public struct FlowRunPlan: Sendable, Hashable, Codable {
         self.stages = stages
     }
 
-    public func makeRequest(projectRoot: URL) -> FlowOperationRequest {
+    public func makeRequest(workspaceID: FlowWorkspaceID) -> FlowOperationRequest {
         FlowOperationRequest(
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             runID: runID,
             intent: intent,
             toolchainProfile: toolchainProfile,

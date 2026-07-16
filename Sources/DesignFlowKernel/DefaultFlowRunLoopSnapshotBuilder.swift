@@ -15,7 +15,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
 
     public func summarizeLoop(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         profile: FlowAgentLoopProfile = .makeDefault(),
         generatedAt: Date = Date(),
         persist: Bool = true

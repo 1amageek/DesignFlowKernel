@@ -22,21 +22,15 @@ public struct FlowRunProgressStore: Sendable {
         runStatus: FlowRunStatus? = nil,
         message: String
     ) async throws -> FlowRunProgressEvent {
-        let events = try await persistence.loadProgressEvents(
-            runID: runID
-        )
-        let sequence = (events.last?.sequence ?? 0) + 1
-        let event = FlowRunProgressEvent(
+        try await persistence.appendProgressEvent(
             runID: runID,
-            sequence: sequence,
             kind: kind,
             stageID: stageID,
             stageStatus: stageStatus,
             runStatus: runStatus,
-            message: message
+            message: message,
+            createdAt: Date()
         )
-        _ = try await persistence.appendProgressEvent(event)
-        return event
     }
 
     public func loadProgressEvents(

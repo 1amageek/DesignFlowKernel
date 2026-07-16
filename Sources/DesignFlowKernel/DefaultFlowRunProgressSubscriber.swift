@@ -56,7 +56,7 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
             let remainingMilliseconds = remainingMilliseconds(until: deadline, request: request)
             let shouldWait = remainingMilliseconds > 0
             let waitRequest = FlowRunProgressSubscriptionRequest(
-                projectRoot: request.projectRoot,
+                workspaceID: request.workspaceID,
                 runID: request.runID,
                 afterSequence: cursor,
                 waitForNewEvents: shouldWait,

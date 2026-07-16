@@ -1,4 +1,5 @@
 import DesignFlowKernel
+import CircuiteFoundation
 import Foundation
 import Testing
 import ToolQualification
@@ -20,7 +21,7 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: runID,
             intent: "Build generated layout signoff ladder",
             stages: [
@@ -146,7 +147,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
         runID: runID,
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(result.artifact.artifactID == "review-stage-artifact-ladder")
@@ -261,7 +262,7 @@ extension FlowRunLedgerSummaryTests {
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: runID,
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
     let runManifestArtifact = try #require(bundle.artifacts.first {
         $0.purpose == .runManifest
@@ -297,7 +298,7 @@ extension FlowRunLedgerSummaryTests {
 
     let result = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
         runID: runID,
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(result.artifact.artifactID == "review-stage-artifact-ladder")
@@ -343,7 +344,7 @@ extension FlowRunLedgerSummaryTests {
 
     let buildResult = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
         runID: runID,
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(buildResult.ladder.readiness == .blocked)
@@ -395,7 +396,7 @@ extension FlowRunLedgerSummaryTests {
     let ladder = await makeTestStageArtifactLadderBuilder(projectRoot: root).makeStageArtifactLadder(
         from: bundle,
         stageResults: [],
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(ladder.readiness == .blocked)
@@ -441,7 +442,7 @@ extension FlowRunLedgerSummaryTests {
             FlowStageResult(stageID: "001-drc", status: .succeeded),
             FlowStageResult(stageID: "001-drc", status: .failed),
         ],
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(ladder.readiness == .blocked)

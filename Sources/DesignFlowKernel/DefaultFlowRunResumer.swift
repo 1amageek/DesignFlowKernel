@@ -48,12 +48,12 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
             throw FlowRunResumeError.missingPlan(request.runID)
         }
         try validateResumableStatus(ledger)
-        try await validatePlanIntegrity(ledger, projectRoot: request.projectRoot)
-        var operationRequest = plan.makeRequest(projectRoot: request.projectRoot)
+        try await validatePlanIntegrity(ledger, workspaceID: request.workspaceID)
+        var operationRequest = plan.makeRequest(workspaceID: request.workspaceID)
         if operationRequest.toolchainProfile == nil {
             operationRequest.toolchainProfile = toolchainProfile
         }
-        operationRequest.allowExistingRunDirectory = true
+        operationRequest.allowExistingRun = true
 
         let result = try await orchestrator.run(
             request: operationRequest,
@@ -63,7 +63,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         )
         let summary = try await inspector.inspectRun(
             runID: request.runID,
-            projectRoot: request.projectRoot
+            workspaceID: request.workspaceID
         )
         return FlowRunResumeResult(result: result, summary: summary)
     }
@@ -74,7 +74,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         // executors/tools, the plan hash binding still rejects any plan
         // edit). Succeeded and cancelled runs stay final: finishing twice
         // would fork evidence, and cancellation is an explicit human stop.
-        let status = ledger.runResult.status
+        let status = ledger.runManifest.status
         switch status {
         case .blocked, .failed:
             return
@@ -85,7 +85,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
 
     private func validatePlanIntegrity(
         _ ledger: FlowRunLedger,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws {
         let planPath = "runs/\(ledger.runID)/plan.json"
         guard let reference = ledger.runManifest.artifacts.first(where: {

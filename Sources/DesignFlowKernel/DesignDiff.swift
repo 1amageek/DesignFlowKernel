@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DesignDiff: Sendable, Hashable, Codable {

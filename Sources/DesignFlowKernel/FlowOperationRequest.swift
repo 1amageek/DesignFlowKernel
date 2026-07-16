@@ -1,16 +1,16 @@
 import Foundation
 
 public struct FlowOperationRequest: Sendable, Hashable, Codable {
-    public var projectRoot: URL
+    public var workspaceID: FlowWorkspaceID
     public var runID: String
     public var intent: String
     public var actor: FlowRunActor
     public var toolchainProfile: FlowToolchainProfileRecord?
     public var stages: [FlowStageDefinition]
-    public var allowExistingRunDirectory: Bool
+    public var allowExistingRun: Bool
 
     public init(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         intent: String,
         actor: FlowRunActor = FlowRunActor(
@@ -19,15 +19,15 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
         ),
         toolchainProfile: FlowToolchainProfileRecord? = nil,
         stages: [FlowStageDefinition],
-        allowExistingRunDirectory: Bool = false
+        allowExistingRun: Bool = false
     ) {
-        self.projectRoot = projectRoot
+        self.workspaceID = workspaceID
         self.runID = runID
         self.intent = intent
         self.actor = actor
         self.toolchainProfile = toolchainProfile
         self.stages = stages
-        self.allowExistingRunDirectory = allowExistingRunDirectory
+        self.allowExistingRun = allowExistingRun
     }
 
 }

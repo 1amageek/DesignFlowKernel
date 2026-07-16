@@ -2,6 +2,12 @@ import CircuiteFoundation
 import Foundation
 @testable import DesignFlowKernel
 
+func testWorkspaceID(for root: URL) throws -> FlowWorkspaceID {
+    try FlowWorkspaceID(
+        rawValue: ArtifactID(stableKey: root.standardizedFileURL.path(percentEncoded: false)).rawValue
+    )
+}
+
 actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
     private static let registry = TestFlowInfrastructureRegistry()
 
@@ -25,21 +31,16 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
         try await loadArtifactContent(for: reference)
     }
 
-    func prepareRunWorkspace(
+    func prepareRun(
         runID: String,
         requireNew: Bool
-    ) async throws -> URL {
+    ) async throws {
         let key = runKey(runID: runID, projectRoot: projectRoot)
         if requireNew, ledgers[key] != nil {
             throw FlowExecutionError.duplicateRunID(runID)
         }
         let directory = projectRoot.appending(path: ".xcircuite/runs/\(runID)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
-
-    func runWorkspaceURL(runID: String) async throws -> URL {
-        projectRoot.appending(path: ".xcircuite/runs/\(runID)", directoryHint: .isDirectory)
     }
 
     func loadRunLedger(runID: String) async throws -> FlowRunLedger {
@@ -494,10 +495,27 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
     }
 
     func appendProgressEvent(
-        _ event: FlowRunProgressEvent
-    ) async throws -> ArtifactReference {
-        _ = try ensureRunDirectory(for: event.runID, inProjectAt: projectRoot)
-        let key = runKey(runID: event.runID, projectRoot: projectRoot)
+        runID: String,
+        kind: FlowRunProgressEventKind,
+        stageID: String?,
+        stageStatus: FlowStageStatus?,
+        runStatus: FlowRunStatus?,
+        message: String,
+        createdAt: Date
+    ) async throws -> FlowRunProgressEvent {
+        _ = try ensureRunDirectory(for: runID, inProjectAt: projectRoot)
+        let key = runKey(runID: runID, projectRoot: projectRoot)
+        let sequence = (progressEvents[key, default: []].map(\.sequence).max() ?? 0) + 1
+        let event = FlowRunProgressEvent(
+            runID: runID,
+            sequence: sequence,
+            kind: kind,
+            stageID: stageID,
+            stageStatus: stageStatus,
+            runStatus: runStatus,
+            message: message,
+            createdAt: createdAt
+        )
         progressEvents[key, default: []].append(event)
         if var ledger = ledgers[key] {
             ledger.progressEvents = progressEvents[key, default: []]
@@ -510,7 +528,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
             content.append(try encoder.encode(progressEvent))
             content.append(Data("\n".utf8))
         }
-        return try await persistArtifact(
+        _ = try await persistArtifact(
             content: content,
             id: ArtifactID(rawValue: "run-progress"),
             locator: ArtifactLocator(
@@ -524,6 +542,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
             runID: event.runID,
             mode: .replaceable
         )
+        return event
     }
 
     func loadProgressEvents(runID: String) async throws -> [FlowRunProgressEvent] {
@@ -880,11 +899,16 @@ private actor TestFlowInfrastructureRegistry {
     }
 }
 
-func makeTestOrchestrator(projectRoot: URL) async -> DefaultFlowOrchestrator {
+func makeTestOrchestrator(projectRoot: URL) async throws -> DefaultFlowOrchestrator {
     let infrastructure = await TestFlowInfrastructure.bound(to: projectRoot)
     return DefaultFlowOrchestrator(
         infrastructure: infrastructure,
         ledgerPersistence: infrastructure,
+        producer: try ProducerIdentity(
+            kind: .library,
+            identifier: "design-flow-kernel-tests",
+            version: "1"
+        ),
         progressStore: FlowRunProgressStore(persistence: infrastructure)
     )
 }
@@ -969,11 +993,11 @@ func makeTestStageArtifactLadderBuilder(projectRoot: URL) async -> DefaultFlowRu
     )
 }
 
-func makeTestRunResumer(projectRoot: URL) async -> DefaultFlowRunResumer {
+func makeTestRunResumer(projectRoot: URL) async throws -> DefaultFlowRunResumer {
     let infrastructure = await TestFlowInfrastructure.bound(to: projectRoot)
     return DefaultFlowRunResumer(
         loader: infrastructure,
-        orchestrator: await makeTestOrchestrator(projectRoot: projectRoot),
+        orchestrator: try await makeTestOrchestrator(projectRoot: projectRoot),
         inspector: DefaultFlowRunLedgerInspector(
             reviewBundler: DefaultFlowRunReviewBundler(
                 loader: infrastructure,
@@ -1064,7 +1088,7 @@ func collectTestReleaseEvidence(
         currentDate: currentDate
     ).collectReleaseEvidence(
         runID: runID,
-        projectRoot: projectRoot,
+        workspaceID: try testWorkspaceID(for: projectRoot),
         signoffDashboard: dashboard,
         contractReport: contract
     )

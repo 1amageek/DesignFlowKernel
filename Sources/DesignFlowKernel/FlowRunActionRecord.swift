@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct FlowRunActionRecord: Sendable, Hashable, Codable {

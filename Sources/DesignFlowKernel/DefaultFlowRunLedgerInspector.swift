@@ -7,7 +7,7 @@ public struct DefaultFlowRunLedgerInspector: FlowRunLedgerInspecting {
         self.reviewBundler = reviewBundler
     }
 
-    public func inspectRun(runID: String, projectRoot: URL) async throws -> FlowRunLedgerSummary {
-        try await reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot).summary
+    public func inspectRun(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunLedgerSummary {
+        try await reviewBundler.makeReviewBundle(runID: runID, workspaceID: workspaceID).summary
     }
 }

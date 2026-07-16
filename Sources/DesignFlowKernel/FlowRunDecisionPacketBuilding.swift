@@ -3,6 +3,6 @@ import Foundation
 public protocol FlowRunDecisionPacketBuilding: Sendable {
     func buildDecisionPacket(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunDecisionPacketBuildResult
 }

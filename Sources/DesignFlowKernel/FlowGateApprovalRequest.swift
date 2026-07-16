@@ -1,7 +1,7 @@
 import Foundation
 
 public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
-    public var projectRoot: URL
+    public var workspaceID: FlowWorkspaceID
     public var runID: String
     public var stageID: String
     public var verdict: FlowGateApprovalVerdict
@@ -11,7 +11,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
     public var decidedAt: Date
 
     public init(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         stageID: String,
         verdict: FlowGateApprovalVerdict,
@@ -20,7 +20,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
         note: String = "",
         decidedAt: Date = Date()
     ) {
-        self.projectRoot = projectRoot
+        self.workspaceID = workspaceID
         self.runID = runID
         self.stageID = stageID
         self.verdict = verdict
@@ -31,7 +31,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case projectRoot
+        case workspaceID
         case runID
         case stageID
         case verdict
@@ -43,7 +43,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        projectRoot = try container.decode(URL.self, forKey: .projectRoot)
+        workspaceID = try container.decode(FlowWorkspaceID.self, forKey: .workspaceID)
         runID = try container.decode(String.self, forKey: .runID)
         stageID = try container.decode(String.self, forKey: .stageID)
         verdict = try container.decode(FlowGateApprovalVerdict.self, forKey: .verdict)

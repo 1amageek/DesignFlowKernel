@@ -4,7 +4,7 @@ public protocol FlowRunReleaseRetentionIndexValidating: Sendable {
     func validate(
         index: FlowRunReleaseRetentionIndex,
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         currentDate: Date,
         maximumAgeSeconds: TimeInterval?
     ) async throws -> FlowRunReleaseRetentionValidationResult

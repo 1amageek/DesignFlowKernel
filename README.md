@@ -1,6 +1,6 @@
 # DesignFlowKernel
 
-## CircuiteFoundation boundary
+## Shared contracts
 
 DesignFlowKernel is an independent flow coordinator. It owns stage ordering,
 tool trust gates, retry policy, approval decisions, run persistence, and resume.
@@ -14,15 +14,14 @@ flowchart LR
     Engine --> Orchestrator["Flow orchestrator"]
     Orchestrator --> Domain["Independent domain engines"]
     Orchestrator --> Ledger["Run ledger / gates / resume"]
-    Ledger --> Evidence["DesignFlowFoundationEvidence"]
-    Evidence --> Foundation["EvidenceManifest + DesignDiagnostic"]
+    Ledger --> Result["FlowRunResult"]
+    Result --> Foundation["ArtifactReference + EvidenceManifest + DesignDiagnostic"]
 ```
 
-Use `DefaultFlowEngine` when a caller needs the Foundation `Engine` protocol;
-use `DefaultFlowOrchestrator` directly when constructing a flow with explicit
-runtime dependencies. `DesignFlowFoundationEvidence` is the cross-engine view
-and is deliberately strict: an artifact without a valid SHA-256 digest and
-byte count cannot be promoted to Foundation evidence.
+`FlowRunResult` directly conforms to `ArtifactProducing`,
+`EvidenceProviding`, and `DiagnosticReporting`. Every result therefore carries
+valid execution provenance, canonical artifacts, and structured diagnostics;
+there is no projection wrapper or generic result envelope.
 
 ### Canonical artifact results
 
@@ -35,23 +34,19 @@ and producer fields; malformed or obsolete shapes are rejected.
 
 ```mermaid
 flowchart LR
-    Store[".xcircuite storage"] --> Projection["Storage projection"]
-    Projection --> Canonical["ArtifactReference"]
+    Store["Injected storage"] --> Canonical["ArtifactReference"]
     Canonical --> Result["Flow result / CLI JSON"]
     Result --> Review["Human + Agent review"]
 ```
 
-The filesystem manifest is an external storage boundary. Flow code persists and
-loads canonical `ArtifactReference` values through `FlowArtifactPersisting`;
-the injected implementation owns path resolution, atomic writes, and storage
-integrity. Unsupported record shapes are rejected at the decode boundary.
+Storage is an injected boundary. Flow code persists and loads canonical
+`ArtifactReference` values through `FlowArtifactPersisting`; the implementation
+owns namespace resolution, atomic writes, and storage integrity. Unsupported
+record shapes are rejected at the decode boundary.
 
 Persistence is injected through `FlowRunLedgerPersisting`; the kernel does not
-select a filesystem format or create a `.xcircuite` directory. `Xcircuite`
-provides the concrete `XcircuiteWorkspaceStore` and
-`XcircuiteRunLedgerStore` implementations. The Foundation boundary is an
-explicit projection from a flow result, while lifecycle and approval remain
-kernel-owned.
+select a filesystem format or accept path roots. A composing application binds
+an opaque `FlowWorkspaceID` to concrete storage before invoking the kernel.
 
 Shared flow kernel for the semiconductor design platform. Humans (circuit-studio),
 agents, and CI run the same flow through this kernel so that tool selection, trust
@@ -63,22 +58,22 @@ gating, persistence, and resume — it contains no SPICE/DRC/LVS/PEX domain logi
 
 [`Xcircuite`](https://github.com/1amageek/Xcircuite) is the umbrella runtime
 that supplies concrete workspace/run-ledger persistence and domain stage
-executors to this kernel. `DesignFlowKernel` remains independent of the
-`.xcircuite` filesystem and owns lifecycle, gates, approvals, retries, and
-resume.
+executors to this kernel. `DesignFlowKernel` remains storage-layout independent
+and owns lifecycle, gates, approvals, retries, and resume.
 
 ## Types
 
 | Type | Responsibility |
 |---|---|
-| `FlowOperationRequest` | Project root, run ID, intent, stage sequence |
+| `FlowWorkspaceID` | Validated opaque identity resolved by the composing storage layer |
+| `FlowOperationRequest` | Workspace identity, run ID, intent, stage sequence |
 | `FlowStageDefinition` | Stage ID, display name, tool trust requirement, `requiresApproval`, retry policy |
-| `FlowStageExecutor` | Protocol: delegates domain-specific stage execution to engine adapters |
+| `FlowStageExecutor` | Protocol: delegates domain-specific stage execution to engines |
 | `DefaultFlowOrchestrator` | Applies tool trust gates, executes stages, applies the approval gate, and persists results through an injected ledger boundary |
 | `FlowStageResult` / `FlowStageStatus` | Typed stage outcome: status, diagnostics, gate results, artifact references, attempt records |
 | `FlowStageRetryPolicy` / `FlowStageAttemptRecord` | Bounded stage retry contract and persisted per-attempt audit trail |
 | `FlowGateResult` / `FlowGateStatus` | Pass/fail/waived/incomplete per gate |
-| `FlowRunResult` / `FlowRunStatus` | Run status, run directory, stage results |
+| `FlowRunResult` / `FlowRunStatus` | Run status, stage results, canonical evidence, provenance, and diagnostics |
 | `FlowDiagnostic` / `FlowDiagnosticSeverity` | Structured diagnostics (never opaque strings) |
 | `FlowExecutionContext` / `FlowExecutionError` | Execution environment and typed failures |
 | `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected suggested-command state |
@@ -129,7 +124,7 @@ Stages with `requiresApproval` evaluate an `approval` gate after execution, read
 Approval and waiver decisions bind the exact plan and stage-result artifact
 references reviewed by the human. A waiver without a reason is rejected.
 
-Resume is re-running the same runID: `approvals/` survives run directory re-creation,
+Resume is re-running the same runID: persisted approvals survive run-state re-creation,
 so recording a decision and re-running moves past the gate. The review cockpit and
 the agent both operate on this one ledger — block → decide → resume.
 
@@ -145,7 +140,7 @@ index records the minimum retention window and append-only advancement.
 Developer and Agent callers use `FlowRunReleaseRetentionIndexBuilding`,
 `FlowRunReleaseRetentionIndexValidating`, and `FlowRunReleaseEnvelopeBuilding`
 with injected artifact persistence. The kernel validates the retained evidence;
-it does not choose a `.xcircuite` path or expose a package-owned executable.
+it does not choose a storage path or expose a package-owned executable.
 Tool qualification and release policy decisions remain inputs from
 ToolQualification and the composing flow, rather than claims made by a domain
 engine.
@@ -214,7 +209,7 @@ the concrete storage implementation.
 ## Dependencies
 
 `CircuiteFoundation` (shared engine/evidence/artifact contracts),
-`Xcircuite workspace` (local `.xcircuite/` run ledger and persistence), and
+an application-owned workspace store (run ledger and persistence), and
 `ToolQualification` (tool trust gates). Foundation is the cross-package
 contract; DesignFlowKernel remains the owner of flow lifecycle and resume.
 

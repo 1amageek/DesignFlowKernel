@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import Testing
 import ToolQualification
@@ -28,7 +29,7 @@ extension FlowRunLedgerSummaryTests {
         persistence: store
     ).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let validator = DefaultFlowRunDecisionPacketValidator(
@@ -42,7 +43,7 @@ extension FlowRunLedgerSummaryTests {
         persistence: store
     ).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(result.artifact.id.rawValue == "qualification-release-envelope")
@@ -71,12 +72,12 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let build = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     #expect(build.envelope.status == .blocked)
@@ -127,7 +128,7 @@ extension FlowRunLedgerSummaryTests {
     let retentionIndex = try await makeTestRetentionIndexBuilder(projectRoot: root).build(
         runID: "run-1",
         workflowRunID: "workflow-run-1",
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         sourceDashboard: sourceDashboard,
         history: history,
         previousEntryCount: 0,
@@ -310,12 +311,12 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let result = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
     #expect(result.envelope.runID == "run-1")
     #expect(result.envelope.status == .needsReview)
@@ -484,12 +485,12 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     ).envelope
 
     #expect(envelope.status == .blocked)
@@ -618,11 +619,11 @@ extension FlowRunLedgerSummaryTests {
 
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
     let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     ).envelope
 
     #expect(envelope.requirements.contains {
@@ -784,12 +785,12 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     ).envelope
 
     #expect(envelope.status == .blocked)
@@ -860,7 +861,7 @@ extension FlowRunLedgerSummaryTests {
     )
     _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
-        projectRoot: root
+        workspaceID: try testWorkspaceID(for: root)
     )
 
     let currentDate = oldDate.addingTimeInterval(31 * 24 * 60 * 60)
@@ -869,7 +870,7 @@ extension FlowRunLedgerSummaryTests {
         currentDate: currentDate
     ).buildReleaseEnvelope(
         runID: "run-1",
-        projectRoot: root,
+        workspaceID: try testWorkspaceID(for: root),
         maxEvidenceAgeDays: 30
     ).envelope
 
@@ -942,7 +943,7 @@ extension FlowRunLedgerSummaryTests {
 	    )
 	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    )
 
 	    let envelope = try await makeTestReleaseEnvelopeBuilder(
@@ -950,7 +951,7 @@ extension FlowRunLedgerSummaryTests {
 	        currentDate: Date(timeIntervalSince1970: 0)
 	    ).buildReleaseEnvelope(
 	        runID: "run-1",
-	        projectRoot: root,
+	        workspaceID: try testWorkspaceID(for: root),
 	        maxEvidenceAgeDays: 30
 	    ).envelope
 
@@ -1015,12 +1016,12 @@ extension FlowRunLedgerSummaryTests {
 	    )
 	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    )
 
 	    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    ).envelope
 
 	    let corpusRequirement = try #require(envelope.requirements.first {
@@ -1141,12 +1142,12 @@ extension FlowRunLedgerSummaryTests {
 	    )
 	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    )
 
 	    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
 	        runID: "run-1",
-	        projectRoot: root
+	        workspaceID: try testWorkspaceID(for: root)
 	    ).envelope
 
 	    #expect(envelope.status == .blocked)

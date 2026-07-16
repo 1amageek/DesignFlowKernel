@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import Testing
 @testable import DesignFlowKernel

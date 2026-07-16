@@ -5,7 +5,7 @@ public protocol FlowRunReleaseRetentionIndexBuilding: Sendable {
     func build(
         runID: String,
         workflowRunID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         sourceDashboard: ArtifactReference,
         history: ArtifactReference,
         previousEntryCount: Int,

@@ -15,14 +15,14 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
 
     public func evaluateRunGuard(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         profile: FlowAgentLoopProfile = .makeDefault(),
         generatedAt: Date = Date(),
         persist: Bool = true
     ) async throws -> FlowRunGuardEvaluationResult {
         let summary = try await snapshotBuilder.summarizeLoop(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             profile: profile,
             generatedAt: generatedAt,
             persist: persist
@@ -30,7 +30,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         let foundationArtifactReferences = summary.artifactReferences
         let verdict = buildVerdict(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             profile: profile,
             snapshot: summary.snapshot,
             iterations: summary.iterations,
@@ -69,7 +69,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
 
     private func buildVerdict(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         profile: FlowAgentLoopProfile,
         snapshot: FlowAgentLoopSnapshot,
         iterations: [FlowLoopIterationSummary],
@@ -260,7 +260,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
 
         let status = verdictStatus(snapshot: snapshot, detectors: detectors)
         let suggestedCommands = suggestedCommands(
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             runID: runID,
             profile: profile,
             status: status
@@ -296,19 +296,19 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
     }
 
     private func suggestedCommands(
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         profile: FlowAgentLoopProfile,
         status: FlowRunGuardVerdict.Status
     ) -> [FlowRunGuardVerdict.SuggestedCommand] {
-        let projectPath = projectRoot.path(percentEncoded: false)
+        let projectPath = workspaceID.rawValue
         var commands = [
             FlowRunGuardVerdict.SuggestedCommand(
                 commandID: "design-flow.summarize-loop",
                 executable: "design-flow",
                 arguments: [
                     "summarize-loop",
-                    "--project-root",
+                    "--workspace-id",
                     projectPath,
                     "--run-id",
                     runID,
@@ -320,7 +320,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                 executable: "design-flow",
                 arguments: [
                     "inspect-run",
-                    "--project-root",
+                    "--workspace-id",
                     projectPath,
                     "--run-id",
                     runID,
@@ -335,7 +335,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                     executable: "design-flow",
                     arguments: [
                         "review-run",
-                        "--project-root",
+                        "--workspace-id",
                         projectPath,
                         "--run-id",
                         runID,
@@ -351,7 +351,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                     executable: "design-flow",
                     arguments: [
                         "evaluate-run-guard",
-                        "--project-root",
+                        "--workspace-id",
                         projectPath,
                         "--run-id",
                         runID,

@@ -9,7 +9,7 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
     public func summarize(_ ledger: FlowRunLedger) -> FlowRunLedgerSummary {
         FlowRunLedgerSummary(
             runID: ledger.runID,
-            status: ledger.runResult.status,
+            status: ledger.runManifest.status,
             stages: ledger.stages.map(stageSummary),
             toolchain: toolchainSummary(from: ledger.toolchain),
             designDiff: designDiffSummary(from: ledger.designDiff),
@@ -97,7 +97,7 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
                 FlowRunNextAction(
                     actionID: "review-cancellation-request",
                     kind: "reviewCancellation",
-                    severity: ledger.runResult.status == .cancelled ? .info : .warning,
+                    severity: ledger.runManifest.status == .cancelled ? .info : .warning,
                     reason: "A run cancellation request is recorded by \(cancellation.requestedBy): \(cancellation.reason)",
                     diagnosticCodes: []
                 )
@@ -106,7 +106,7 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
         for stage in ledger.stages {
             actions.append(contentsOf: nextActions(for: stage, decidedStageIDs: decidedStageIDs))
         }
-        if actions.isEmpty, ledger.runResult.status == .succeeded {
+        if actions.isEmpty, ledger.runManifest.status == .succeeded {
             actions.append(
                 FlowRunNextAction(
                     actionID: "archive-or-continue",

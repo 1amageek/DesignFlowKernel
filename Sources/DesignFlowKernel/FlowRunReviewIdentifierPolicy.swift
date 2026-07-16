@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 struct FlowRunReviewIdentifierPolicy: Sendable {

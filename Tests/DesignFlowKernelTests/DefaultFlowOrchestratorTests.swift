@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 import DesignFlowKernel
 import Testing
@@ -11,7 +12,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run basic flow",
             stages: [
@@ -61,7 +62,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress",
                 intent: "Run with progress ledger",
                 stages: [
@@ -104,7 +105,7 @@ struct DefaultFlowOrchestratorTests {
 
         let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-progress",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(bundle.artifacts.contains {
             $0.purpose == .runProgress
@@ -129,7 +130,7 @@ struct DefaultFlowOrchestratorTests {
         )
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-profile",
                 intent: "Run with toolchain profile",
                 toolchainProfile: profile,
@@ -156,7 +157,7 @@ struct DefaultFlowOrchestratorTests {
 
         let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
             runID: "run-profile",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(summary.toolchain?.profileID == "local-signoff")
         #expect(summary.toolchain?.pdkID == "test-pdk")
@@ -171,7 +172,7 @@ struct DefaultFlowOrchestratorTests {
 
         _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-snapshot",
                 intent: "Run with progress snapshot",
                 stages: [
@@ -189,7 +190,7 @@ struct DefaultFlowOrchestratorTests {
 
         let snapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-snapshot",
                 afterSequence: 1
             )
@@ -237,7 +238,7 @@ struct DefaultFlowOrchestratorTests {
 
         let fullSnapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: runID
             )
         )
@@ -250,7 +251,7 @@ struct DefaultFlowOrchestratorTests {
 
         let tailSnapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: runID,
                 afterSequence: stressEventCount
             )
@@ -270,13 +271,53 @@ struct DefaultFlowOrchestratorTests {
         try copyProgressStressArtifactIfRequested(root: root, runID: runID)
     }
 
+    @Test func concurrentProgressAppendsReceiveUniqueOrderedSequences() async throws {
+        let root = try makeTemporaryRoot("progress-concurrent")
+        defer { removeTemporaryRoot(root) }
+
+        let runID = "run-progress-concurrent"
+        let store = FlowRunProgressStore(
+            persistence: await TestFlowInfrastructure.bound(to: root)
+        )
+        let eventCount = 64
+        let appended = try await withThrowingTaskGroup(
+            of: FlowRunProgressEvent.self,
+            returning: [FlowRunProgressEvent].self
+        ) { group in
+            for index in 0..<eventCount {
+                group.addTask {
+                    try await store.appendEvent(
+                        runID: runID,
+                        kind: .stageStarted,
+                        stageID: "stage-\(index)",
+                        stageStatus: .running,
+                        runStatus: .running,
+                        message: "Concurrent progress event \(index)."
+                    )
+                }
+            }
+            var events: [FlowRunProgressEvent] = []
+            for try await event in group {
+                events.append(event)
+            }
+            return events
+        }
+
+        let retained = try await store.loadProgressEvents(runID: runID)
+        #expect(appended.count == eventCount)
+        #expect(Set(appended.map(\.sequence)).count == eventCount)
+        #expect(retained.count == eventCount)
+        #expect(retained.map(\.sequence) == Array(1...eventCount))
+        #expect(Set(retained.compactMap(\.stageID)).count == eventCount)
+    }
+
     @Test func progressSubscriberEmitsSnapshot() async throws {
         let root = try makeTemporaryRoot("progress-cli-snapshot")
         defer { removeTemporaryRoot(root) }
 
         _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-cli",
                 intent: "Run with CLI progress snapshot",
                 stages: [
@@ -292,7 +333,7 @@ struct DefaultFlowOrchestratorTests {
 
         let snapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-cli",
                 afterSequence: 2
             )
@@ -310,7 +351,7 @@ struct DefaultFlowOrchestratorTests {
 
         async let followResult = makeTestProgressSubscriber(projectRoot: root).followProgress(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-follow",
                 waitForNewEvents: true,
                 timeoutMilliseconds: 1_000,
@@ -350,7 +391,7 @@ struct DefaultFlowOrchestratorTests {
         let sink = ProgressLineSink()
         async let followResult = makeTestProgressSubscriber(projectRoot: root).followProgress(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-retry",
                 waitForNewEvents: true,
                 timeoutMilliseconds: 2_000,
@@ -377,7 +418,7 @@ struct DefaultFlowOrchestratorTests {
 
         let runResult = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-retry",
                 intent: "Run progress follow over retry",
                 stages: [
@@ -425,7 +466,7 @@ struct DefaultFlowOrchestratorTests {
 
         let recovered = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-progress-retry",
                 afterSequence: 2
             )
@@ -446,7 +487,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let cancellation = try await makeTestCancellationRecorder(projectRoot: root).requestCancellation(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-cancel",
             requestedBy: "reviewer-1",
             reason: "stop before signoff"
@@ -455,13 +496,13 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-cancel",
                 intent: "Run cancelled by reviewer",
                 stages: [
                     FlowStageDefinition(stageID: "001-drc", displayName: "DRC"),
                 ],
-                allowExistingRunDirectory: true
+                allowExistingRun: true
             ),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -478,7 +519,7 @@ struct DefaultFlowOrchestratorTests {
 
         let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
             runID: "run-cancel",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(summary.status == .cancelled)
         #expect(summary.cancellationRequest?.requestedBy == "reviewer-1")
@@ -486,7 +527,7 @@ struct DefaultFlowOrchestratorTests {
 
         let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-cancel",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(bundle.reviewItems.contains {
             $0.kind == .cancellation && $0.status == .informational
@@ -503,7 +544,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-cooperative-cancel",
                 intent: "Run cancelled during long stage",
                 stages: [
@@ -515,7 +556,8 @@ struct DefaultFlowOrchestratorTests {
             executors: [
                 CooperativeCancellationStageExecutor(
                     stageID: "001-long-drc",
-                    toolID: "long-drc-tool"
+                    toolID: "long-drc-tool",
+                    cancellationRecorder: await makeTestCancellationRecorder(projectRoot: root)
                 ),
             ]
         )
@@ -545,7 +587,7 @@ struct DefaultFlowOrchestratorTests {
 
         let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-cooperative-cancel",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(bundle.artifacts.contains { $0.purpose == .runCancellationRequest })
         #expect(bundle.reviewItems.contains { $0.kind == .cancellation })
@@ -556,7 +598,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC",
             stages: [
@@ -589,7 +631,7 @@ struct DefaultFlowOrchestratorTests {
 
         let descriptor = drcDescriptor()
         let request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC",
             stages: [
@@ -627,7 +669,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC with evidence gate",
                 stages: [
@@ -690,7 +732,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC with missing evidence",
                 stages: [
@@ -744,7 +786,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC with qualified corpus evidence",
                 stages: [
@@ -800,7 +842,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC with stale corpus evidence",
                 stages: [
@@ -857,7 +899,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC with human review",
                 stages: [
@@ -885,7 +927,7 @@ struct DefaultFlowOrchestratorTests {
 
         _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
             FlowGateApprovalRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 stageID: "001-drc",
                 verdict: .approved,
@@ -934,7 +976,7 @@ struct DefaultFlowOrchestratorTests {
         let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
         #expect(ledger.runID == "run-1")
         #expect(ledger.runManifest.status == .blocked)
-        #expect(ledger.runResult.status == .blocked)
+        #expect(ledger.runManifest.status == .blocked)
         #expect(ledger.stages.count == 1)
         #expect(ledger.stages[0].stageID == "001-drc")
         #expect(ledger.stages[0].gates.contains {
@@ -975,7 +1017,7 @@ struct DefaultFlowOrchestratorTests {
 
         _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC",
                 stages: [
@@ -1018,7 +1060,7 @@ struct DefaultFlowOrchestratorTests {
         let descriptor = drcDescriptor()
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC",
                 stages: [
@@ -1062,7 +1104,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC",
                 stages: [
@@ -1104,7 +1146,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-1",
                 intent: "Run DRC",
                 stages: [
@@ -1155,7 +1197,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-retry-success",
                 intent: "Retry transient DRC failure",
                 stages: [
@@ -1209,7 +1251,7 @@ struct DefaultFlowOrchestratorTests {
 
         let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-retry-success",
-            projectRoot: root
+            workspaceID: try testWorkspaceID(for: root)
         )
         #expect(bundle.artifacts.contains { $0.purpose == .stageAttempts })
     }
@@ -1234,7 +1276,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-retry-nonretryable",
                 intent: "Do not retry permanent DRC failure",
                 stages: [
@@ -1272,7 +1314,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-retry-cancellation",
                 intent: "Do not retry cancelled DRC",
                 stages: [
@@ -1292,7 +1334,11 @@ struct DefaultFlowOrchestratorTests {
             toolRegistry: ToolRegistry(),
             healthResults: [:],
             executors: [
-                CooperativeCancellationStageExecutor(stageID: "001-drc", toolID: "drc-tool"),
+                CooperativeCancellationStageExecutor(
+                    stageID: "001-drc",
+                    toolID: "drc-tool",
+                    cancellationRecorder: await makeTestCancellationRecorder(projectRoot: root)
+                ),
             ]
         )
 
@@ -1313,7 +1359,7 @@ struct DefaultFlowOrchestratorTests {
         await #expect(throws: FlowExecutionError.self) {
             try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
-                    projectRoot: root,
+                    workspaceID: try testWorkspaceID(for: root),
                     runID: "run-invalid-retry-policy",
                     intent: "Reject invalid retry policy",
                     stages: [
@@ -1344,7 +1390,7 @@ struct DefaultFlowOrchestratorTests {
         await #expect(throws: FlowExecutionError.self) {
             try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
-                    projectRoot: root,
+                    workspaceID: try testWorkspaceID(for: root),
                     runID: "run-1",
                     intent: "Run DRC and LVS",
                     stages: [
@@ -1367,7 +1413,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
             intent: "Run DRC",
             stages: [
@@ -1396,7 +1442,7 @@ struct DefaultFlowOrchestratorTests {
         await #expect(throws: FlowIdentifierValidationError.self) {
             try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
-                    projectRoot: root,
+                    workspaceID: try testWorkspaceID(for: root),
                     runID: "../escape",
                     intent: "Run DRC",
                     stages: [
@@ -1615,13 +1661,14 @@ private struct DelayedScriptedStageExecutor: FlowStageExecutor {
 private struct CooperativeCancellationStageExecutor: FlowStageExecutor {
     let stageID: String
     let toolID: String
+    let cancellationRecorder: any FlowRunCancellationRecording
 
     func execute(
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        _ = try await makeTestCancellationRecorder(projectRoot: context.projectRoot).requestCancellation(
-            projectRoot: context.projectRoot,
+        _ = try await cancellationRecorder.requestCancellation(
+            workspaceID: context.workspaceID,
             runID: context.runID,
             requestedBy: toolID,
             reason: "cooperative cancellation checkpoint"
@@ -1646,7 +1693,7 @@ struct ApprovalGateTests {
         defer { removeTemporaryItem(root) }
 
         var request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-approve",
             intent: "Approval flow",
             stages: [
@@ -1677,7 +1724,7 @@ struct ApprovalGateTests {
         //    resumes past the gate.
         _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
             FlowGateApprovalRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-approve",
                 stageID: "001-drc",
                 verdict: .approved,
@@ -1685,7 +1732,7 @@ struct ApprovalGateTests {
                 note: "looks clean"
             )
         )
-        request.allowExistingRunDirectory = true
+        request.allowExistingRun = true
         let resumed = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
@@ -1706,7 +1753,7 @@ struct ApprovalGateTests {
         defer { removeTemporaryItem(root) }
 
         var request = FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: "run-reject",
             intent: "Approval flow",
             stages: [
@@ -1724,7 +1771,7 @@ struct ApprovalGateTests {
         #expect(initial.status == .blocked)
         _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
             FlowGateApprovalRequest(
-                projectRoot: root,
+                workspaceID: try testWorkspaceID(for: root),
                 runID: "run-reject",
                 stageID: "001-drc",
                 verdict: .rejected,
@@ -1733,7 +1780,7 @@ struct ApprovalGateTests {
             )
         )
 
-        request.allowExistingRunDirectory = true
+        request.allowExistingRun = true
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,

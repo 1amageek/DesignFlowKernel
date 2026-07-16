@@ -47,7 +47,7 @@ func createArtifactCoverageFailureRun(root: URL, runID: String) async throws {
     let payload = Data(#"{"artifactID":"drc-summary"}"#.utf8)
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: runID,
             intent: "Run DRC artifact coverage",
             stages: [
@@ -118,7 +118,7 @@ func createBlockedApprovalRun(
     let descriptor = drcDescriptor()
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
-            projectRoot: root,
+            workspaceID: try testWorkspaceID(for: root),
             runID: runID,
             intent: "Run DRC with human review",
             stages: [
@@ -186,27 +186,29 @@ struct SummaryStageExecutor: FlowStageExecutor {
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        var resolvedArtifacts = artifacts
-        for index in resolvedArtifacts.indices {
-            let path = resolvedArtifacts[index].path
-            guard let payload = artifactPayloads[path] else {
+        var resolvedArtifacts: [ArtifactReference] = []
+        for artifact in artifacts {
+            let reference = try foundationReference(from: artifact)
+            guard let payload = artifactPayloads[artifact.path] else {
+                resolvedArtifacts.append(reference)
                 continue
             }
-            let url = context.projectRoot.appending(path: path)
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            resolvedArtifacts.append(
+                try await context.infrastructure.persistArtifact(
+                    content: payload,
+                    id: reference.id,
+                    locator: reference.locator,
+                    runID: context.runID,
+                    mode: .replaceable
+                )
             )
-            try payload.write(to: url, options: .atomic)
-            resolvedArtifacts[index].sha256 = try TestContentDigester().sha256(data: payload)
-            resolvedArtifacts[index].byteCount = Int64(payload.count)
         }
 
         return FlowStageResult(
             stageID: stage.stageID,
             status: status,
             gates: gates,
-            artifacts: try resolvedArtifacts.map { try foundationReference(from: $0) }
+            artifacts: resolvedArtifacts
         )
     }
 

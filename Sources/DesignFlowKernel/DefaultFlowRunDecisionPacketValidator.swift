@@ -21,22 +21,22 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
 
     public func validateDecisionPacket(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> FlowRunDecisionPacketValidationResult {
         let packetPath = "runs/\(runID)/\(DefaultFlowRunDecisionPacketBuilder.artifactRelativePath)"
         var result = await makeValidationResult(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             packetPath: packetPath
         )
         result.validationArtifactPath = "runs/\(runID)/\(Self.artifactRelativePath)"
-        try await persist(result, runID: runID, projectRoot: projectRoot)
+        try await persist(result, runID: runID, workspaceID: workspaceID)
         return result
     }
 
     private func makeValidationResult(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         packetPath: String
     ) async -> FlowRunDecisionPacketValidationResult {
         let manifest: FlowRunManifest
@@ -151,7 +151,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         let currentState = await currentStateDiagnostics(
             packet: packet,
             runID: runID,
-            projectRoot: projectRoot
+            workspaceID: workspaceID
         )
         diagnostics.append(contentsOf: currentState)
         return validationResult(
@@ -235,19 +235,19 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     private func currentStateDiagnostics(
         packet: FlowRunDecisionPacket,
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async -> [FlowDiagnostic] {
         let currentPacket: FlowRunDecisionPacket
         do {
             let currentBundle = try await reviewBundler.makeReviewBundle(
                 runID: runID,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
             currentPacket = DefaultFlowRunDecisionPacketBuilder(
                 reviewBundler: reviewBundler,
                 persistence: persistence
             )
-                .makePacket(from: currentBundle, projectRoot: projectRoot)
+                .makePacket(from: currentBundle, workspaceID: workspaceID)
         } catch {
             return [
                 FlowDiagnostic(
@@ -439,7 +439,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     private func persist(
         _ result: FlowRunDecisionPacketValidationResult,
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws {
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()

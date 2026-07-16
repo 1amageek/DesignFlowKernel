@@ -24,17 +24,17 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     public func buildReleaseEnvelope(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         maxEvidenceAgeDays: Int? = 30
     ) async throws -> FlowRunReleaseEnvelopeBuildResult {
         let validation = try await decisionPacketValidator.validateDecisionPacket(
             runID: runID,
-            projectRoot: projectRoot
+            workspaceID: workspaceID
         )
-        let manifestResult = await loadRunManifest(runID: runID, projectRoot: projectRoot)
+        let manifestResult = await loadRunManifest(runID: runID, workspaceID: workspaceID)
         let requirements = await releaseRequirements(
             runID: runID,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             decisionPacketValidation: validation,
             manifest: manifestResult.manifest,
             maxEvidenceAgeDays: maxEvidenceAgeDays
@@ -51,15 +51,15 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             decisionPacketValidation: validation,
             requirements: requirements,
             diagnostics: diagnostics,
-            replayCommands: replayCommands(runID: runID, projectRoot: projectRoot)
+            replayCommands: replayCommands(runID: runID, workspaceID: workspaceID)
         )
-        let artifact = try await persist(envelope, runID: runID, projectRoot: projectRoot)
+        let artifact = try await persist(envelope, runID: runID, workspaceID: workspaceID)
         return FlowRunReleaseEnvelopeBuildResult(envelope: envelope, artifact: artifact)
     }
 
     private func loadRunManifest(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async -> (manifest: FlowRunManifest?, diagnostic: FlowDiagnostic?) {
         do {
             let manifest = try await loader.loadRunLedger(
@@ -80,7 +80,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func releaseRequirements(
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         decisionPacketValidation: FlowRunDecisionPacketValidationResult,
         manifest: FlowRunManifest?,
         maxEvidenceAgeDays: Int?
@@ -94,7 +94,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 missingDiagnosticCode: "release-envelope-corpus-history-missing",
                 ageDiagnosticPrefix: "release-envelope-corpus-history",
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
@@ -107,7 +107,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 missingDiagnosticCode: "release-envelope-performance-envelope-missing",
                 ageDiagnosticPrefix: "release-envelope-performance-envelope",
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
@@ -120,7 +120,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 missingDiagnosticCode: "release-envelope-contract-audit-missing",
                 ageDiagnosticPrefix: "release-envelope-contract-audit",
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
@@ -133,7 +133,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 missingDiagnosticCode: "release-envelope-release-qualification-missing",
                 ageDiagnosticPrefix: "release-envelope-release-qualification",
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
@@ -146,7 +146,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 missingDiagnosticCode: "release-envelope-retention-index-missing",
                 ageDiagnosticPrefix: "release-envelope-retention-index",
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
@@ -185,7 +185,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         missingDiagnosticCode: String,
         ageDiagnosticPrefix: String,
         runID: String,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         manifest: FlowRunManifest?,
         maxEvidenceAgeDays: Int?
     ) async -> FlowRunReleaseEnvelope.Requirement {
@@ -260,7 +260,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         if let ageDiagnosticCode = await evidenceAgeDiagnosticCode(
             artifactID: artifactID,
             reference: reference,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             maxEvidenceAgeDays: maxEvidenceAgeDays,
             diagnosticPrefix: ageDiagnosticPrefix
         ) {
@@ -279,7 +279,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         let contentDiagnosticCodes = await releaseArtifactContentDiagnosticCodes(
             artifactID: artifactID,
             reference: reference,
-            projectRoot: projectRoot,
+            workspaceID: workspaceID,
             runID: runID
         )
         if !contentDiagnosticCodes.isEmpty {
@@ -314,20 +314,20 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func releaseArtifactContentDiagnosticCodes(
         artifactID: String,
         reference: ArtifactReference,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String
     ) async -> [String] {
         switch artifactID {
         case "qualification-corpus-history":
-            await corpusHistoryDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await corpusHistoryDiagnosticCodes(reference: reference, workspaceID: workspaceID)
         case "qualification-performance-envelope":
-            await performanceEnvelopeDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await performanceEnvelopeDiagnosticCodes(reference: reference, workspaceID: workspaceID)
         case "qualification-contract-audit":
-            await contractAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await contractAuditDiagnosticCodes(reference: reference, workspaceID: workspaceID)
         case "release-qualification-result":
-            await releaseQualificationDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID)
+            await releaseQualificationDiagnosticCodes(reference: reference, workspaceID: workspaceID, runID: runID)
         case "qualification-retention-index":
-            await retentionIndexDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID, maxEvidenceAgeDays: nil)
+            await retentionIndexDiagnosticCodes(reference: reference, workspaceID: workspaceID, runID: runID, maxEvidenceAgeDays: nil)
         default:
             []
         }
@@ -335,7 +335,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func corpusHistoryDiagnosticCodes(
         reference: ArtifactReference,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await corpusCountDiagnosticCodes(reference: reference)
         if !countCodes.isEmpty {
@@ -346,7 +346,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             artifact = try await decodeArtifact(
                 FlowRunReleaseCorpusHistory.self,
                 reference: reference,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
         } catch {
             return ["release-envelope-corpus-history-unreadable"]
@@ -427,7 +427,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func performanceEnvelopeDiagnosticCodes(
         reference: ArtifactReference,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await performanceCountDiagnosticCodes(reference: reference)
         if !countCodes.isEmpty {
@@ -438,7 +438,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             artifact = try await decodeArtifact(
                 FlowRunReleasePerformanceEnvelope.self,
                 reference: reference,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
         } catch {
             return ["release-envelope-performance-envelope-unreadable"]
@@ -500,7 +500,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func contractAuditDiagnosticCodes(
         reference: ArtifactReference,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await contractCountDiagnosticCodes(reference: reference)
         if !countCodes.isEmpty {
@@ -511,7 +511,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             artifact = try await decodeArtifact(
                 FlowRunReleaseContractAudit.self,
                 reference: reference,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
         } catch {
             return ["release-envelope-contract-audit-unreadable"]
@@ -624,7 +624,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func releaseQualificationDiagnosticCodes(
         reference: ArtifactReference,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String
     ) async -> [String] {
         let artifact: FlowRunReleaseQualificationArtifact
@@ -632,7 +632,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             artifact = try await decodeArtifact(
                 FlowRunReleaseQualificationArtifact.self,
                 reference: reference,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
         } catch {
             return ["release-envelope-release-qualification-unreadable"]
@@ -711,7 +711,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func retentionIndexDiagnosticCodes(
         reference: ArtifactReference,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         runID: String,
         maxEvidenceAgeDays: Int?
     ) async -> [String] {
@@ -719,7 +719,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             let index = try await decodeArtifact(
                 FlowRunReleaseRetentionIndex.self,
                 reference: reference,
-                projectRoot: projectRoot
+                workspaceID: workspaceID
             )
             let maximumAgeSeconds = maxEvidenceAgeDays.map { Double($0) * 24 * 60 * 60 }
             let validation = try await DefaultFlowRunReleaseRetentionIndexValidator(
@@ -727,7 +727,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             ).validate(
                 index: index,
                 runID: runID,
-                projectRoot: projectRoot,
+                workspaceID: workspaceID,
                 currentDate: currentDate,
                 maximumAgeSeconds: maximumAgeSeconds
             )
@@ -740,7 +740,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func evidenceAgeDiagnosticCode(
         artifactID: String,
         reference: ArtifactReference,
-        projectRoot: URL,
+        workspaceID: FlowWorkspaceID,
         maxEvidenceAgeDays: Int?,
         diagnosticPrefix: String
     ) async -> String? {
@@ -754,19 +754,19 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         do {
             switch artifactID {
             case "qualification-corpus-history":
-                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, workspaceID: workspaceID).collectedAt
             case "qualification-performance-envelope":
-                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, workspaceID: workspaceID).collectedAt
             case "qualification-contract-audit":
-                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, workspaceID: workspaceID).collectedAt
             case "release-qualification-result":
                 collectedAt = try await decodeArtifact(
                     FlowRunReleaseQualificationArtifact.self,
                     reference: reference,
-                    projectRoot: projectRoot
+                    workspaceID: workspaceID
                 ).metadata?.completedAt
             case "qualification-retention-index":
-                collectedAt = try await decodeArtifact(FlowRunReleaseRetentionIndex.self, reference: reference, projectRoot: projectRoot).recordedAt
+                collectedAt = try await decodeArtifact(FlowRunReleaseRetentionIndex.self, reference: reference, workspaceID: workspaceID).recordedAt
             default:
                 collectedAt = nil
             }
@@ -860,7 +860,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func replayCommands(
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) -> [FlowRunSuggestedCommand] {
         [
             FlowRunSuggestedCommand(
@@ -869,8 +869,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 executable: "design-flow",
                 arguments: [
                     "validate-decision-packet",
-                    "--project-root",
-                    projectRoot.path(percentEncoded: false),
+                    "--workspace-id",
+                    workspaceID.rawValue,
                     "--run-id",
                     runID,
                 ],
@@ -882,8 +882,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 executable: "design-flow",
                 arguments: [
                     "build-release-envelope",
-                    "--project-root",
-                    projectRoot.path(percentEncoded: false),
+                    "--workspace-id",
+                    workspaceID.rawValue,
                     "--run-id",
                     runID,
                 ],
@@ -895,7 +895,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func persist(
         _ envelope: FlowRunReleaseEnvelope,
         runID: String,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> ArtifactReference {
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()
@@ -917,7 +917,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func decodeArtifact<Value: Decodable>(
         _ type: Value.Type,
         reference: ArtifactReference,
-        projectRoot: URL
+        workspaceID: FlowWorkspaceID
     ) async throws -> Value {
         let content = try await persistence.loadArtifactContent(
             for: reference
