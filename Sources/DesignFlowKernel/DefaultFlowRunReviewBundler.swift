@@ -28,7 +28,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         let ledger = try await loader.loadRunLedger(runID: runID)
         var summary = summarizer.summarize(ledger)
         let integrityByPath = await artifactIntegrityByPath(from: ledger)
-        let contentsByPath = try await loadArtifactContents(from: ledger, projectRoot: projectRoot)
+        let contentsByPath = try await loadArtifactContents(from: ledger)
         let agentLoopSnapshot = try decodeOptionalRunJSON(
             FlowAgentLoopSnapshot.self,
             runID: ledger.runID,
@@ -47,9 +47,8 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             relativePath: "reports/cross-artifact-evaluation.json",
             contentsByPath: contentsByPath
         )
-        let artifacts = try reviewArtifacts(
+        let artifacts = reviewArtifacts(
             from: ledger,
-            projectRoot: projectRoot,
             integrityByPath: integrityByPath
         )
         let items = reviewItems(
@@ -228,141 +227,130 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
     private func reviewArtifacts(
         from ledger: FlowRunLedger,
-        projectRoot: URL,
         integrityByPath: [String: ArtifactIntegrity]
-    ) throws -> [FlowRunReviewArtifact] {
+    ) -> [FlowRunReviewArtifact] {
         let recordedReferencesByPath = recordedReferencesByPath(from: ledger)
-        var artifacts: [FlowRunReviewArtifact] = [
-            runArtifact(
-                role: "run-manifest",
-                runID: ledger.runID,
-                relativePath: "manifest.json",
-                projectRoot: projectRoot,
-                recordedReferencesByPath: recordedReferencesByPath,
-                integrityByPath: integrityByPath
-            ),
-        ]
+        var artifacts: [FlowRunReviewArtifact] = []
+        appendRunArtifact(
+            purpose: .runManifest,
+            runID: ledger.runID,
+            relativePath: "manifest.json",
+            recordedReferencesByPath: recordedReferencesByPath,
+            integrityByPath: integrityByPath,
+            into: &artifacts
+        )
         if ledger.plan != nil {
-            artifacts.append(runArtifact(role: "plan", runID: ledger.runID, relativePath: "plan.json", projectRoot: projectRoot, recordedReferencesByPath: recordedReferencesByPath, integrityByPath: integrityByPath))
+            appendRunArtifact(
+                purpose: .plan,
+                runID: ledger.runID,
+                relativePath: "plan.json",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
+            )
         }
         if ledger.toolchain != nil {
-            artifacts.append(runArtifact(role: "toolchain", runID: ledger.runID, relativePath: "toolchain.json", projectRoot: projectRoot, recordedReferencesByPath: recordedReferencesByPath, integrityByPath: integrityByPath))
+            appendRunArtifact(
+                purpose: .toolchain,
+                runID: ledger.runID,
+                relativePath: "toolchain.json",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
+            )
         }
         if !ledger.progressEvents.isEmpty {
-            artifacts.append(
-                runArtifact(
-                    role: "run-progress",
-                    runID: ledger.runID,
-                    relativePath: FlowRunProgressStore.progressRelativePath,
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath,
-                    format: .text
-                )
+            appendRunArtifact(
+                purpose: .runProgress,
+                runID: ledger.runID,
+                relativePath: FlowRunProgressStore.progressRelativePath,
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
             )
         }
         if ledger.cancellationRequest != nil {
-            artifacts.append(
-                runArtifact(
-                    role: "run-cancellation-request",
-                    runID: ledger.runID,
-                    relativePath: FlowRunProgressStore.cancellationRelativePath,
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath
-                )
+            appendRunArtifact(
+                purpose: .runCancellationRequest,
+                runID: ledger.runID,
+                relativePath: FlowRunProgressStore.cancellationRelativePath,
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
             )
         }
         if ledger.designDiff != nil {
-            artifacts.append(
-                runArtifact(
-                    role: "design-diff",
-                    runID: ledger.runID,
-                    relativePath: "design-diff.json",
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath,
-                    kind: .designDiff
-                )
+            appendRunArtifact(
+                purpose: .designDiff,
+                runID: ledger.runID,
+                relativePath: "design-diff.json",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
             )
         }
         if !ledger.actions.isEmpty {
-            artifacts.append(
-                runArtifact(
-                    role: "action-ledger",
-                    runID: ledger.runID,
-                    relativePath: "actions.jsonl",
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath,
-                    format: .text
-                )
+            appendRunArtifact(
+                purpose: .actionLedger,
+                runID: ledger.runID,
+                relativePath: "actions.jsonl",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                into: &artifacts
             )
         }
-        appendOptionalRunArtifact(
-            role: "agent-loop-snapshot",
+        appendRunArtifact(
+            purpose: .agentLoopSnapshot,
             runID: ledger.runID,
             relativePath: "loop/snapshot.json",
-            projectRoot: projectRoot,
             recordedReferencesByPath: recordedReferencesByPath,
             integrityByPath: integrityByPath,
             into: &artifacts
         )
-        appendOptionalRunArtifact(
-            role: "run-guard-verdict",
+        appendRunArtifact(
+            purpose: .runGuardVerdict,
             runID: ledger.runID,
             relativePath: "loop/guard-verdict.json",
-            projectRoot: projectRoot,
             recordedReferencesByPath: recordedReferencesByPath,
             integrityByPath: integrityByPath,
             into: &artifacts
         )
-        appendOptionalRunArtifact(
-            role: "cross-artifact-evaluation",
+        appendRunArtifact(
+            purpose: .crossArtifactEvaluation,
             runID: ledger.runID,
             relativePath: "reports/cross-artifact-evaluation.json",
-            projectRoot: projectRoot,
             recordedReferencesByPath: recordedReferencesByPath,
             integrityByPath: integrityByPath,
             into: &artifacts
         )
         for approval in ledger.approvals {
-            artifacts.append(
-                runArtifact(
-                    role: "approval",
-                    runID: ledger.runID,
-                    relativePath: "approvals/\(approval.stageID).json",
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath,
-                    stageID: approval.stageID
-                )
+            appendRunArtifact(
+                purpose: .approval,
+                runID: ledger.runID,
+                relativePath: "approvals/\(approval.stageID).json",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                stageID: approval.stageID,
+                into: &artifacts
             )
         }
         for stage in ledger.stages {
-            artifacts.append(
-                runArtifact(
-                    role: "stage-result",
-                    runID: ledger.runID,
-                    relativePath: "stages/\(stage.stageID)/result.json",
-                    projectRoot: projectRoot,
-                    recordedReferencesByPath: recordedReferencesByPath,
-                    integrityByPath: integrityByPath,
-                    stageID: stage.stageID
-                )
+            appendRunArtifact(
+                purpose: .stageResult,
+                runID: ledger.runID,
+                relativePath: "stages/\(stage.stageID)/result.json",
+                recordedReferencesByPath: recordedReferencesByPath,
+                integrityByPath: integrityByPath,
+                stageID: stage.stageID,
+                into: &artifacts
             )
             artifacts.append(
                 contentsOf: stage.artifacts.map { reference in
                     let reference = reference
                     return FlowRunReviewArtifact(
-                        role: reviewRole(for: reference),
-                        artifactID: reference.artifactID,
+                        reference: reference,
+                        purpose: reviewRole(for: reference),
                         stageID: stage.stageID,
-                        path: reference.path,
-                        kind: reference.kind,
-                        format: reference.format,
-                        sha256: reference.sha256,
-                        byteCount: reference.byteCount,
                         integrity: artifactIntegrity(
                             for: reference,
                             stageID: stage.stageID,
@@ -374,37 +362,36 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         }
         appendRunManifestArtifacts(
             from: ledger,
-            projectRoot: projectRoot,
             integrityByPath: integrityByPath,
             into: &artifacts
         )
         return artifacts
     }
 
-    private func reviewRole(for reference: ArtifactReference) -> String {
+    private func reviewRole(for reference: ArtifactReference) -> FlowRunReviewArtifactPurpose {
         let artifactID = reference.artifactID
         if artifactID == "agent-loop-snapshot" {
-            return "agent-loop-snapshot"
+            return .agentLoopSnapshot
         }
         if artifactID == "run-guard-verdict" {
-            return "run-guard-verdict"
+            return .runGuardVerdict
         }
         if artifactID == "cross-artifact-evaluation" {
-            return "cross-artifact-evaluation"
+            return .crossArtifactEvaluation
         }
         if let role = retainedHistoryReviewRole(for: reference) {
             return role
         }
         if artifactID.hasSuffix("-summary") {
-            return "stage-summary"
+            return .stageSummary
         }
         if artifactID.hasSuffix("-attempts") {
-            return "stage-attempts"
+            return .stageAttempts
         }
         if artifactID == "post-layout-comparison" {
-            return "post-layout-comparison"
+            return .postLayoutComparison
         }
-        return "stage-artifact"
+        return .stageArtifact
     }
 
     private func recordedReferencesByPath(
@@ -461,12 +448,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         var refs: [FlowRunReviewBundle.CoverageRef] = artifacts.map { artifact in
             FlowRunReviewBundle.CoverageRef(
                 domain: coverageDomain(for: artifact),
-                role: artifact.role,
+                role: artifact.purpose.rawValue,
                 stageID: artifact.stageID,
-                artifactID: artifact.artifactID,
-                path: artifact.path,
+                artifactID: artifact.reference.artifactID,
+                path: artifact.reference.path,
                 integrityStatus: artifact.integrity?.status,
-                reviewItemIDs: reviewItemsByArtifactPath[artifact.path, default: []]
+                reviewItemIDs: reviewItemsByArtifactPath[artifact.reference.path, default: []]
             )
         }
         refs.append(contentsOf: artifacts.compactMap { artifact in
@@ -475,12 +462,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             }
             return FlowRunReviewBundle.CoverageRef(
                 domain: "integrity",
-                role: artifact.role,
+                role: artifact.purpose.rawValue,
                 stageID: artifact.stageID,
-                artifactID: artifact.artifactID,
-                path: artifact.path,
+                artifactID: artifact.reference.artifactID,
+                path: artifact.reference.path,
                 integrityStatus: artifact.integrity?.status,
-                reviewItemIDs: reviewItemsByArtifactPath[artifact.path, default: []]
+                reviewItemIDs: reviewItemsByArtifactPath[artifact.reference.path, default: []]
             )
         })
         refs.append(contentsOf: approvals.map { approval in
@@ -524,25 +511,25 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     private func coverageDomain(for artifact: FlowRunReviewArtifact) -> String {
-        if artifact.role == "design-diff" || artifact.kind == .designDiff {
+        if artifact.purpose == .designDiff || artifact.reference.kind == .designDiff {
             return "diff"
         }
-        if artifact.kind == .waveform || artifact.path.contains("/waveform") {
+        if artifact.reference.kind == .waveform || artifact.reference.path.contains("/waveform") {
             return "waveform"
         }
-        if artifact.role.hasPrefix("planning-") || artifact.path.contains("/planning/") {
+        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.reference.path.contains("/planning/") {
             return "planning"
         }
-        if artifact.role == "approval" || artifact.path.contains("/approvals/") {
+        if artifact.purpose == .approval || artifact.reference.path.contains("/approvals/") {
             return "approval"
         }
         let searchable = [
-            artifact.role,
-            artifact.artifactID ?? "",
+            artifact.purpose.rawValue,
+            artifact.reference.artifactID,
             artifact.stageID ?? "",
-            artifact.path,
-            artifact.kind.rawValue,
-            artifact.format.rawValue,
+            artifact.reference.path,
+            artifact.reference.kind.rawValue,
+            artifact.reference.format.rawValue,
         ]
         .joined(separator: " ")
         .lowercased()
@@ -593,21 +580,15 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
     private func appendRunManifestArtifacts(
         from ledger: FlowRunLedger,
-        projectRoot: URL,
         integrityByPath: [String: ArtifactIntegrity],
         into artifacts: inout [FlowRunReviewArtifact]
     ) {
-        var seenPaths = Set(artifacts.map(\.path))
+        var seenPaths = Set(artifacts.map { $0.reference.path })
         for reference in ledger.runManifest.artifacts where seenPaths.insert(reference.path).inserted {
             artifacts.append(
                 FlowRunReviewArtifact(
-                    role: runReviewRole(for: reference),
-                    artifactID: reference.artifactID,
-                    path: reference.path,
-                    kind: reference.kind,
-                    format: reference.format,
-                    sha256: reference.sha256,
-                    byteCount: reference.byteCount,
+                    reference: reference,
+                    purpose: runReviewRole(for: reference),
                     integrity: artifactIntegrity(
                         for: reference,
                         integrity: integrityByPath[reference.path]
@@ -617,50 +598,50 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         }
     }
 
-    private func runReviewRole(for reference: ArtifactReference) -> String {
+    private func runReviewRole(for reference: ArtifactReference) -> FlowRunReviewArtifactPurpose {
         if let role = retainedHistoryReviewRole(for: reference) {
             return role
         }
         if reference.artifactID.hasSuffix("-edited-netlist") {
-            return "planning-edited-netlist"
+            return .planningEditedNetlist
         }
         if reference.artifactID.hasSuffix("-netlist-parameter-edit-report") {
-            return "planning-netlist-parameter-edit-report"
+            return .planningNetlistParameterEditReport
         }
         if reference.artifactID.hasSuffix("-attempts") {
-            return "stage-attempts"
+            return .stageAttempts
         }
         switch reference.artifactID {
         case "post-layout-comparison":
-            return "post-layout-comparison"
+            return .postLayoutComparison
         case "planning-action-domain-snapshot":
-            return "planning-action-domain"
+            return .planningActionDomain
         case "planning-problem":
-            return "planning-problem"
+            return .planningProblem
         case "planning-problem-translation-audit":
-            return "planning-problem-translation-audit"
+            return .planningProblemTranslationAudit
         case "planning-candidate-plan":
-            return "planning-candidate-plan"
+            return .planningCandidatePlan
         case "planning-symbolic-planner-trace":
-            return "planning-symbolic-planner-trace"
+            return .planningSymbolicPlannerTrace
         case "planning-parameter-candidates":
-            return "planning-parameter-candidates"
+            return .planningParameterCandidates
         case "planning-parameter-candidate-search-trace":
-            return "planning-parameter-candidate-search-trace"
+            return .planningParameterCandidateSearchTrace
         case "planning-parameter-candidate-selection-trace":
-            return "planning-parameter-candidate-selection-trace"
+            return .planningParameterCandidateSelectionTrace
         case "planning-plan-verification":
-            return "planning-plan-verification"
+            return .planningPlanVerification
         case "planning-rejected-plans":
-            return "planning-rejected-plans"
+            return .planningRejectedPlans
         case "planning-plan-execution":
-            return "planning-plan-execution"
+            return .planningPlanExecution
         case "flow-toolchain-profile":
-            return "toolchain-profile"
+            return .toolchainProfile
         case "review-stage-artifact-ladder":
-            return "stage-artifact-ladder"
+            return .stageArtifactLadder
         default:
-            return "run-artifact"
+            return .runArtifact
         }
     }
 
@@ -675,7 +656,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     ) -> [FlowRunReviewItem] {
         var items: [FlowRunReviewItem] = []
         let artifactPathsByStage = Dictionary(grouping: artifacts.filter { $0.stageID != nil }) { $0.stageID ?? "" }
-            .mapValues { $0.map(\.path).sorted() }
+            .mapValues { $0.map { $0.reference.path }.sorted() }
         let artifactIntegrityIssuesByStage = Dictionary(
             grouping: artifacts.filter {
                 $0.stageID != nil && isArtifactIntegrityIssue($0.integrity?.status)
@@ -683,7 +664,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         ) { $0.stageID ?? "" }
         let runArtifactPaths = artifacts
             .filter { $0.stageID == nil }
-            .map(\.path)
+            .map { $0.reference.path }
             .sorted()
         let approvalsByStage = ledger.approvals.reduce(into: [String: FlowApprovalRecord]()) {
             approvals, approval in
@@ -739,7 +720,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                         severity: hasError ? .error : .warning,
                         title: "Repair artifact integrity",
                         reason: "One or more stage artifacts could not be verified against the recorded run ledger.",
-                        artifactPaths: artifactIntegrityIssues.map(\.path).sorted(),
+                        artifactPaths: artifactIntegrityIssues.map { $0.reference.path }.sorted(),
                         nextActionID: stageScopedID(stage.stageID, "repair-artifact-integrity")
                     )
                 )
@@ -889,7 +870,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     severity: .info,
                     title: "Archive or continue",
                     reason: "The run succeeded; archive the artifacts or start the next design iteration.",
-                    artifactPaths: artifacts.map(\.path).sorted(),
+                    artifactPaths: artifacts.map { $0.reference.path }.sorted(),
                     nextActionID: "archive-or-continue"
                 )
             )
@@ -903,7 +884,9 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         }
     }
 
-    private func retainedHistoryReviewRole(for reference: ArtifactReference) -> String? {
+    private func retainedHistoryReviewRole(
+        for reference: ArtifactReference
+    ) -> FlowRunReviewArtifactPurpose? {
         let searchable = [
             reference.artifactID,
             reference.path,
@@ -913,29 +896,29 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         .joined(separator: " ")
         .lowercased()
         if searchable.contains("release-retention-index") {
-            return "release-retention-index"
+            return .releaseRetentionIndex
         }
         if searchable.contains("qualification-release-envelope")
             || searchable.contains("release-envelope") {
-            return "release-envelope"
+            return .releaseEnvelope
         }
         if searchable.contains("retained-ci-regression-budget") {
-            return "retained-ci-regression-budget"
+            return .retainedCIRegressionBudget
         }
         if searchable.contains("retention-index-review") {
-            return "retention-index-review"
+            return .retentionIndexReview
         }
         if searchable.contains("retention-index") {
-            return "retention-index"
+            return .retentionIndex
         }
         if searchable.contains("history-dashboard") {
-            return "retained-history-dashboard"
+            return .retainedHistoryDashboard
         }
         if searchable.contains("history.jsonl") {
-            return "retained-history"
+            return .retainedHistory
         }
         if searchable.contains("workflow-run") || searchable.contains("workflow-report") {
-            return "retained-workflow-report"
+            return .retainedWorkflowReport
         }
         return nil
     }
@@ -949,14 +932,14 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         var items: [FlowRunReviewItem] = []
         let loopArtifactPaths = artifacts
             .filter { artifact in
-                artifact.role == "agent-loop-snapshot"
-                    || artifact.role == "run-guard-verdict"
+                artifact.purpose == .agentLoopSnapshot
+                    || artifact.purpose == .runGuardVerdict
             }
-            .map(\.path)
+            .map { $0.reference.path }
             .sorted()
         let crossArtifactPaths = artifacts
-            .filter { $0.role == "cross-artifact-evaluation" }
-            .map(\.path)
+            .filter { $0.purpose == .crossArtifactEvaluation }
+            .map { $0.reference.path }
             .sorted()
 
         if let runGuardVerdict {
@@ -1087,19 +1070,19 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     ) -> [FlowRunReviewItem] {
         let retainedArtifacts = artifacts
             .filter(isRetainedHistoryReviewArtifact)
-            .sorted { left, right in left.path < right.path }
+            .sorted { left, right in left.reference.path < right.reference.path }
         guard !retainedArtifacts.isEmpty else {
             return []
         }
         var signal = RetainedHistoryReviewSignal()
         for artifact in retainedArtifacts {
-            signal.artifactPaths.insert(artifact.path)
-            guard artifact.format == .json else {
+            signal.artifactPaths.insert(artifact.reference.path)
+            guard artifact.reference.format == .json else {
                 continue
             }
             do {
-                guard let data = contentsByPath[artifact.path] else {
-                    throw FlowExecutionError.missingArtifact(artifact.path)
+                guard let data = contentsByPath[artifact.reference.path] else {
+                    throw FlowExecutionError.missingArtifact(artifact.reference.path)
                 }
                 let document = try JSONSerialization.jsonObject(with: data)
                 collectRetainedHistoryReviewSignal(from: document, into: &signal)
@@ -1133,14 +1116,14 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Review retained CI history",
                 reason: "Retained CI dashboard, history, retention index, workflow report, and release-gate artifacts are available for human and Agent review.",
                 diagnosticCodes: signal.diagnosticCodes.sorted(),
-                artifactPaths: retainedArtifacts.map(\.path),
+                artifactPaths: retainedArtifacts.map { $0.reference.path },
                 nextActionID: nextActionID
             ),
         ]
     }
 
     private func isRetainedHistoryReviewArtifact(_ artifact: FlowRunReviewArtifact) -> Bool {
-        switch artifact.role {
+        switch artifact.purpose.rawValue {
         case "retained-history",
              "retained-history-dashboard",
              "retention-index",
@@ -1271,7 +1254,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         contentsByPath: [String: Data]
     ) -> [FlowRunReviewItem] {
         artifacts
-            .filter { $0.role == "planning-plan-verification" }
+            .filter { $0.purpose == .planningPlanVerification }
             .flatMap { artifact in
                 planVerificationCorrectnessItems(from: artifact, contentsByPath: contentsByPath)
             }
@@ -1280,8 +1263,8 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     private func planningFeedbackReviewItems(
         from artifacts: [FlowRunReviewArtifact]
     ) -> [FlowRunReviewItem] {
-        guard artifacts.contains(where: { $0.role == "planning-problem" }),
-              let rejectedPlans = artifacts.first(where: { $0.role == "planning-rejected-plans" }) else {
+        guard artifacts.contains(where: { $0.purpose == .planningProblem }),
+              let rejectedPlans = artifacts.first(where: { $0.purpose == .planningRejectedPlans }) else {
             return []
         }
         return [
@@ -1293,7 +1276,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Regenerate candidate plan with feedback",
                 reason: "Rejected planning feedback is available and should be folded into the next candidate-plan ranking.",
                 diagnosticCodes: ["planning-rejected-feedback-available"],
-                artifactPaths: [rejectedPlans.path],
+                artifactPaths: [rejectedPlans.reference.path],
                 nextActionID: "regenerate-candidate-plan-with-feedback"
             ),
         ]
@@ -1304,7 +1287,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         contentsByPath: [String: Data]
     ) -> [FlowRunReviewItem] {
         artifacts
-            .filter { $0.role == "planning-problem-translation-audit" }
+            .filter { $0.purpose == .planningProblemTranslationAudit }
             .compactMap { artifact in
                 problemTranslationAuditReviewItem(from: artifact, contentsByPath: contentsByPath)
             }
@@ -1315,8 +1298,8 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         contentsByPath: [String: Data]
     ) -> FlowRunReviewItem? {
         do {
-            guard let data = contentsByPath[artifact.path] else {
-                throw FlowExecutionError.missingArtifact(artifact.path)
+            guard let data = contentsByPath[artifact.reference.path] else {
+                throw FlowExecutionError.missingArtifact(artifact.reference.path)
             }
             let document = try JSONDecoder().decode(FlowRunProblemTranslationAuditDocument.self, from: data)
             guard document.blocking else {
@@ -1330,7 +1313,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Repair problem translation audit",
                 reason: document.summary,
                 diagnosticCodes: document.diagnosticCodes,
-                artifactPaths: [artifact.path],
+                artifactPaths: [artifact.reference.path],
                 nextActionID: document.primaryNextAction
             )
         } catch {
@@ -1342,7 +1325,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Review problem translation audit",
                 reason: "The problem translation audit artifact could not be decoded for review.",
                 diagnosticCodes: ["problem-translation-audit-unreadable"],
-                artifactPaths: [artifact.path],
+                artifactPaths: [artifact.reference.path],
                 nextActionID: "regenerate-problem-translation-audit"
             )
         }
@@ -1359,8 +1342,8 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         contentsByPath: [String: Data]
     ) -> [FlowRunReviewItem] {
         do {
-            guard let data = contentsByPath[artifact.path] else {
-                throw FlowExecutionError.missingArtifact(artifact.path)
+            guard let data = contentsByPath[artifact.reference.path] else {
+                throw FlowExecutionError.missingArtifact(artifact.reference.path)
             }
             let document = try JSONDecoder().decode(PlanVerificationReviewDocument.self, from: data)
             return document.correctnessGateResults.compactMap { gate in
@@ -1376,7 +1359,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     title: "Review planning correctness evidence",
                     reason: "The planning verification artifact could not be decoded for correctness gate review.",
                     diagnosticCodes: ["planning-correctness-unreadable"],
-                    artifactPaths: [artifact.path],
+                    artifactPaths: [artifact.reference.path],
                     nextActionID: "regenerate-plan-verification"
                 ),
             ]
@@ -1398,7 +1381,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             title: planningCorrectnessTitle(for: gate),
             reason: gate.summary,
             diagnosticCodes: gate.diagnostics.map(\.code),
-            artifactPaths: [artifact.path],
+            artifactPaths: [artifact.reference.path],
             nextActionID: gate.nextActions.first
         )
     }
@@ -1451,35 +1434,6 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         return [path]
     }
 
-    private func appendOptionalRunArtifact(
-        role: String,
-        runID: String,
-        relativePath: String,
-        projectRoot: URL,
-        recordedReferencesByPath: [String: ArtifactReference],
-        integrityByPath: [String: ArtifactIntegrity],
-        into artifacts: inout [FlowRunReviewArtifact]
-    ) {
-        let projectRelativePath = "runs/\(runID)/\(relativePath)"
-        let existsInLedger = recordedReferencesByPath[projectRelativePath] != nil
-        guard existsInLedger else {
-            return
-        }
-        guard !artifacts.contains(where: { $0.path == projectRelativePath }) else {
-            return
-        }
-        artifacts.append(
-            runArtifact(
-                role: role,
-                runID: runID,
-                relativePath: relativePath,
-                projectRoot: projectRoot,
-                recordedReferencesByPath: recordedReferencesByPath,
-                integrityByPath: integrityByPath
-            )
-        )
-    }
-
     private func decodeOptionalRunJSON<T: Decodable>(
         _ type: T.Type,
         runID: String,
@@ -1494,8 +1448,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     private func loadArtifactContents(
-        from ledger: FlowRunLedger,
-        projectRoot: URL
+        from ledger: FlowRunLedger
     ) async throws -> [String: Data] {
         var contents: [String: Data] = [:]
         let references = recordedReferencesByPath(from: ledger).values
@@ -1516,62 +1469,34 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         return contents
     }
 
-    private func runArtifact(
-        role: String,
+    private func appendRunArtifact(
+        purpose: FlowRunReviewArtifactPurpose,
         runID: String,
         relativePath: String,
-        projectRoot: URL,
         recordedReferencesByPath: [String: ArtifactReference],
         integrityByPath: [String: ArtifactIntegrity],
         stageID: String? = nil,
-        kind: ArtifactKind = .report,
-        format: ArtifactFormat = .json
-    ) -> FlowRunReviewArtifact {
+        into artifacts: inout [FlowRunReviewArtifact]
+    ) {
         let projectRelativePath = "runs/\(runID)/\(relativePath)"
-        let artifactID = role
         if let stageID, !identifierPolicy.isValidStageID(stageID) {
-            return FlowRunReviewArtifact(
-                role: role,
-                artifactID: artifactID,
-                stageID: stageID,
-                path: projectRelativePath,
-                kind: kind,
-                format: format,
-                integrity: FlowRunReviewArtifactIntegrity(
-                    status: .invalidPath,
-                    message: "Stage result path cannot be synthesized from an unsafe stage identifier: \(stageID)"
-                )
-            )
+            return
         }
         if let reference = recordedReferencesByPath[projectRelativePath] {
-            return FlowRunReviewArtifact(
-                role: role,
-                artifactID: reference.artifactID,
+            guard !artifacts.contains(where: { $0.reference.path == reference.path }) else {
+                return
+            }
+            artifacts.append(FlowRunReviewArtifact(
+                reference: reference,
+                purpose: purpose,
                 stageID: stageID,
-                path: reference.path,
-                kind: reference.kind,
-                format: reference.format,
-                sha256: reference.sha256,
-                byteCount: reference.byteCount,
                 integrity: artifactIntegrity(
                     for: reference,
                     stageID: stageID,
                     integrity: integrityByPath[reference.path]
                 )
-            )
+            ))
         }
-        return FlowRunReviewArtifact(
-            role: role,
-            artifactID: artifactID,
-            stageID: stageID,
-            path: projectRelativePath,
-            kind: kind,
-            format: format,
-            integrity: FlowRunReviewArtifactIntegrity(
-                status: .missingArtifact,
-                message: "Artifact is not registered in the canonical run ledger."
-            )
-        )
     }
 
     private func artifactIntegrity(

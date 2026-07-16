@@ -172,12 +172,12 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         expectedRunID: String
     ) -> [FlowDiagnostic] {
         var diagnostics: [FlowDiagnostic] = []
-        if packet.schemaVersion != 1 {
+        if packet.schemaVersion != 2 {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-schema-version-unsupported",
-                    message: "Decision packet schemaVersion must be 1."
+                    message: "Decision packet schemaVersion must be 2."
                 )
             )
         }
@@ -196,6 +196,15 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                     severity: .error,
                     code: "decision-packet-review-bundle-run-id-mismatch",
                     message: "Decision packet review bundle runID does not match the validated run."
+                )
+            )
+        }
+        if packet.reviewBundle.schemaVersion != 2 {
+            diagnostics.append(
+                FlowDiagnostic(
+                    severity: .error,
+                    code: "decision-packet-review-bundle-schema-version-unsupported",
+                    message: "Decision packet review bundle schemaVersion must be 2."
                 )
             )
         }

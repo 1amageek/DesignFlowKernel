@@ -1106,6 +1106,35 @@ struct TestArtifactReference: Sendable, Hashable {
     }
 }
 
+func makeTestReviewArtifact(
+    purpose: FlowRunReviewArtifactPurpose,
+    artifactID: String,
+    stageID: String? = nil,
+    path: String,
+    kind: ArtifactKind,
+    format: ArtifactFormat,
+    sha256: String = String(repeating: "0", count: 64),
+    byteCount: UInt64 = 0,
+    integrity: FlowRunReviewArtifactIntegrity? = nil
+) throws -> FlowRunReviewArtifact {
+    FlowRunReviewArtifact(
+        reference: ArtifactReference(
+            id: try ArtifactID(rawValue: artifactID),
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: path),
+                role: .output,
+                kind: kind,
+                format: format
+            ),
+            digest: try ContentDigest(algorithm: .sha256, hexadecimalValue: sha256),
+            byteCount: byteCount
+        ),
+        purpose: purpose,
+        stageID: stageID,
+        integrity: integrity
+    )
+}
+
 struct TestContentDigester {
     func sha256(data: Data) throws -> String {
         try SHA256ContentDigester().digest(data: data).hexadecimalValue

@@ -49,6 +49,8 @@ extension FlowRunLedgerSummaryTests {
 
     #expect(result.artifact.artifactID == "review-decision-packet")
     #expect(result.artifact.path == ".xcircuite/runs/run-1/review/decision-packet.json")
+    #expect(result.packet.schemaVersion == 2)
+    #expect(result.packet.reviewBundle.schemaVersion == 2)
     #expect(result.packet.readiness == .needsReview)
     #expect(result.packet.requiredArtifacts.contains {
         $0.role == "stage-summary" && $0.status == .satisfied
@@ -327,24 +329,24 @@ extension FlowRunLedgerSummaryTests {
             ]
         ),
         artifacts: [
-            FlowRunReviewArtifact(
-                role: "run-manifest",
+            try makeTestReviewArtifact(
+                purpose: .runManifest,
                 artifactID: "run-manifest",
                 path: ".xcircuite/runs/run-1/manifest.json",
                 kind: .report,
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "toolchain",
+            try makeTestReviewArtifact(
+                purpose: .toolchain,
                 artifactID: "toolchain",
                 path: ".xcircuite/runs/run-1/toolchain.json",
                 kind: .report,
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "stage-result",
+            try makeTestReviewArtifact(
+                purpose: .stageResult,
                 artifactID: "001-drc-result",
                 stageID: "001-drc",
                 path: ".xcircuite/runs/run-1/stages/001-drc/result.json",
@@ -352,8 +354,8 @@ extension FlowRunLedgerSummaryTests {
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "stage-summary",
+            try makeTestReviewArtifact(
+                purpose: .stageSummary,
                 artifactID: "drc-summary",
                 stageID: "001-drc",
                 path: summaryPath,
@@ -407,24 +409,24 @@ extension FlowRunLedgerSummaryTests {
             ]
         ),
         artifacts: [
-            FlowRunReviewArtifact(
-                role: "run-manifest",
+            try makeTestReviewArtifact(
+                purpose: .runManifest,
                 artifactID: "run-manifest",
                 path: ".xcircuite/runs/run-1/manifest.json",
                 kind: .report,
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "toolchain",
+            try makeTestReviewArtifact(
+                purpose: .toolchain,
                 artifactID: "toolchain",
                 path: ".xcircuite/runs/run-1/toolchain.json",
                 kind: .report,
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "stage-result",
+            try makeTestReviewArtifact(
+                purpose: .stageResult,
                 artifactID: "001-drc-result",
                 stageID: "001-drc",
                 path: ".xcircuite/runs/run-1/stages/001-drc/result.json",
@@ -432,8 +434,8 @@ extension FlowRunLedgerSummaryTests {
                 format: .json,
                 integrity: verifiedTestIntegrity()
             ),
-            FlowRunReviewArtifact(
-                role: "stage-summary",
+            try makeTestReviewArtifact(
+                purpose: .stageSummary,
                 artifactID: "drc-summary",
                 stageID: "001-drc",
                 path: ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json",

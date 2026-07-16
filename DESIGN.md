@@ -54,6 +54,11 @@ flowchart TD
    supplying an `ExecutionProvenance` value. The projection preserves artifact
    IDs when present, derives a deterministic identity when legacy IDs are
    absent, and rejects missing integrity metadata.
+6. Review artifacts embed `ArtifactReference` as the single source of artifact
+   identity, location, role, kind, format, digest, and byte count. DesignFlowKernel
+   stores only review-domain metadata such as the validated open-token
+   `FlowRunReviewArtifactPurpose`, `stageID`, and the verification result beside
+   that reference.
 
 ## Deliberate non-goals
 

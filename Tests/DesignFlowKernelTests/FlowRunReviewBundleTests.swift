@@ -1,11 +1,59 @@
-import DesignFlowKernel
 import CircuiteFoundation
+import DesignFlowKernel
 import Foundation
 import Testing
 import ToolQualification
-import DesignFlowKernel
 
 extension FlowRunLedgerSummaryTests {
+@Test func reviewArtifactPurposeRejectsInvalidTokens() {
+    #expect(FlowRunReviewArtifactPurpose(rawValue: "") == nil)
+    #expect(FlowRunReviewArtifactPurpose(rawValue: " stage-summary") == nil)
+    #expect(FlowRunReviewArtifactPurpose(rawValue: "stage/summary") == nil)
+    #expect(throws: FlowIdentifierValidationError.self) {
+        try FlowRunReviewArtifactPurpose(validatingRawValue: "stage\nsummary")
+    }
+}
+
+@Test func reviewArtifactUsesCanonicalFoundationReferenceSchema() throws {
+    let artifact = try makeTestReviewArtifact(
+        purpose: .stageSummary,
+        artifactID: "drc-summary",
+        stageID: "001-drc",
+        path: "runs/run-1/stages/001-drc/drc-summary.json",
+        kind: .report,
+        format: .json,
+        sha256: String(repeating: "a", count: 64),
+        byteCount: 42,
+        integrity: FlowRunReviewArtifactIntegrity(
+            status: .verified,
+            expectedSHA256: String(repeating: "a", count: 64),
+            actualSHA256: String(repeating: "a", count: 64),
+            expectedByteCount: 42,
+            actualByteCount: 42
+        )
+    )
+
+    let encoded = try JSONEncoder().encode(artifact)
+    let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    #expect(object["reference"] != nil)
+    #expect(object["purpose"] as? String == "stage-summary")
+    #expect(object["stageID"] as? String == "001-drc")
+    #expect(object["integrity"] != nil)
+    for removedKey in ["role", "artifactID", "path", "kind", "format", "sha256", "byteCount"] {
+        #expect(object[removedKey] == nil)
+    }
+
+    let decoded = try JSONDecoder().decode(FlowRunReviewArtifact.self, from: encoded)
+    #expect(decoded == artifact)
+
+    let scalarProjection = Data(
+        #"{"role":"stage-summary","artifactID":"drc-summary","stageID":"001-drc","path":"runs/run-1/drc-summary.json","kind":"report","format":"json","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","byteCount":42}"#.utf8
+    )
+    #expect(throws: DecodingError.self) {
+        try JSONDecoder().decode(FlowRunReviewArtifact.self, from: scalarProjection)
+    }
+}
+
 @Test func reviewBundlerCreatesHumanAndAgentReviewContract() async throws {
     let root = try makeTemporaryRoot("agent-review-bundle")
     defer { removeTemporaryRoot(root) }
@@ -50,7 +98,7 @@ extension FlowRunLedgerSummaryTests {
         projectRoot: root
     )
 
-    #expect(bundle.schemaVersion == 1)
+    #expect(bundle.schemaVersion == 2)
     #expect(bundle.runID == "run-1")
     #expect(bundle.status == .blocked)
     #expect(bundle.summary.nextActions.map(\.kind).contains("reviewDesignDiff"))
@@ -67,22 +115,22 @@ extension FlowRunLedgerSummaryTests {
             && $0.artifactPaths.contains(".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json")
     })
     #expect(bundle.artifacts.contains {
-        $0.role == "toolchain" && $0.path == ".xcircuite/runs/run-1/toolchain.json"
+        $0.purpose == .toolchain && $0.reference.path == ".xcircuite/runs/run-1/toolchain.json"
     })
     #expect(bundle.artifacts.contains {
-        $0.role == "stage-result"
+        $0.purpose == .stageResult
             && $0.stageID == "001-drc"
-            && $0.path == ".xcircuite/runs/run-1/stages/001-drc/result.json"
+            && $0.reference.path == ".xcircuite/runs/run-1/stages/001-drc/result.json"
     })
     let summaryArtifact = try #require(bundle.artifacts.first {
-        $0.role == "stage-summary"
-            && $0.artifactID == "drc-summary"
+        $0.purpose == .stageSummary
+            && $0.reference.artifactID == "drc-summary"
             && $0.stageID == "001-drc"
-            && $0.path == summaryPath
+            && $0.reference.path == summaryPath
     })
     let expectedSummaryDigest = try TestContentDigester().sha256(data: summaryPayload)
-    #expect(summaryArtifact.sha256 == expectedSummaryDigest)
-    #expect(summaryArtifact.byteCount == UInt64(summaryPayload.count))
+    #expect(summaryArtifact.reference.digest.hexadecimalValue == expectedSummaryDigest)
+    #expect(summaryArtifact.reference.byteCount == UInt64(summaryPayload.count))
     #expect(summaryArtifact.integrity?.status == .verified)
     #expect(summaryArtifact.integrity?.expectedSHA256 == expectedSummaryDigest)
     #expect(summaryArtifact.integrity?.actualSHA256 == expectedSummaryDigest)
@@ -284,94 +332,94 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let planningArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-action-domain"
-            && $0.artifactID == "planning-action-domain-snapshot"
-            && $0.path == planningPath
+        $0.purpose == .planningActionDomain
+            && $0.reference.artifactID == "planning-action-domain-snapshot"
+            && $0.reference.path == planningPath
     })
-    #expect(planningArtifact.kind == .other)
-    #expect(planningArtifact.format == .json)
-    #expect(planningArtifact.sha256 == (try TestContentDigester().sha256(data: planningPayload)))
-    #expect(planningArtifact.byteCount == UInt64(planningPayload.count))
+    #expect(planningArtifact.reference.kind == .other)
+    #expect(planningArtifact.reference.format == .json)
+    #expect(planningArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: planningPayload)))
+    #expect(planningArtifact.reference.byteCount == UInt64(planningPayload.count))
     #expect(planningArtifact.integrity?.status == .verified)
     let problemArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-problem"
-            && $0.artifactID == "planning-problem"
-            && $0.path == problemPath
+        $0.purpose == .planningProblem
+            && $0.reference.artifactID == "planning-problem"
+            && $0.reference.path == problemPath
     })
-    #expect(problemArtifact.kind == .other)
-    #expect(problemArtifact.format == .json)
-    #expect(problemArtifact.sha256 == (try TestContentDigester().sha256(data: problemPayload)))
-    #expect(problemArtifact.byteCount == UInt64(problemPayload.count))
+    #expect(problemArtifact.reference.kind == .other)
+    #expect(problemArtifact.reference.format == .json)
+    #expect(problemArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: problemPayload)))
+    #expect(problemArtifact.reference.byteCount == UInt64(problemPayload.count))
     #expect(problemArtifact.integrity?.status == .verified)
     let problemTranslationAuditArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-problem-translation-audit"
-            && $0.artifactID == "planning-problem-translation-audit"
-            && $0.path == problemTranslationAuditPath
+        $0.purpose == .planningProblemTranslationAudit
+            && $0.reference.artifactID == "planning-problem-translation-audit"
+            && $0.reference.path == problemTranslationAuditPath
     })
-    #expect(problemTranslationAuditArtifact.kind == .other)
-    #expect(problemTranslationAuditArtifact.format == .json)
-    #expect(problemTranslationAuditArtifact.sha256 == (try TestContentDigester().sha256(data: problemTranslationAuditPayload)))
-    #expect(problemTranslationAuditArtifact.byteCount == UInt64(problemTranslationAuditPayload.count))
+    #expect(problemTranslationAuditArtifact.reference.kind == .other)
+    #expect(problemTranslationAuditArtifact.reference.format == .json)
+    #expect(problemTranslationAuditArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: problemTranslationAuditPayload)))
+    #expect(problemTranslationAuditArtifact.reference.byteCount == UInt64(problemTranslationAuditPayload.count))
     #expect(problemTranslationAuditArtifact.integrity?.status == .verified)
     let candidatePlanArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-candidate-plan"
-            && $0.artifactID == "planning-candidate-plan"
-            && $0.path == candidatePlanPath
+        $0.purpose == .planningCandidatePlan
+            && $0.reference.artifactID == "planning-candidate-plan"
+            && $0.reference.path == candidatePlanPath
     })
-    #expect(candidatePlanArtifact.kind == .other)
-    #expect(candidatePlanArtifact.format == .json)
-    #expect(candidatePlanArtifact.sha256 == (try TestContentDigester().sha256(data: candidatePlanPayload)))
-    #expect(candidatePlanArtifact.byteCount == UInt64(candidatePlanPayload.count))
+    #expect(candidatePlanArtifact.reference.kind == .other)
+    #expect(candidatePlanArtifact.reference.format == .json)
+    #expect(candidatePlanArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: candidatePlanPayload)))
+    #expect(candidatePlanArtifact.reference.byteCount == UInt64(candidatePlanPayload.count))
     #expect(candidatePlanArtifact.integrity?.status == .verified)
     let symbolicPlannerTraceArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-symbolic-planner-trace"
-            && $0.artifactID == "planning-symbolic-planner-trace"
-            && $0.path == symbolicPlannerTracePath
+        $0.purpose == .planningSymbolicPlannerTrace
+            && $0.reference.artifactID == "planning-symbolic-planner-trace"
+            && $0.reference.path == symbolicPlannerTracePath
     })
-    #expect(symbolicPlannerTraceArtifact.kind == .other)
-    #expect(symbolicPlannerTraceArtifact.format == .json)
-    #expect(symbolicPlannerTraceArtifact.sha256 == (try TestContentDigester().sha256(data: symbolicPlannerTracePayload)))
-    #expect(symbolicPlannerTraceArtifact.byteCount == UInt64(symbolicPlannerTracePayload.count))
+    #expect(symbolicPlannerTraceArtifact.reference.kind == .other)
+    #expect(symbolicPlannerTraceArtifact.reference.format == .json)
+    #expect(symbolicPlannerTraceArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: symbolicPlannerTracePayload)))
+    #expect(symbolicPlannerTraceArtifact.reference.byteCount == UInt64(symbolicPlannerTracePayload.count))
     #expect(symbolicPlannerTraceArtifact.integrity?.status == .verified)
     let parameterCandidatesArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-parameter-candidates"
-            && $0.artifactID == "planning-parameter-candidates"
-            && $0.path == parameterCandidatesPath
+        $0.purpose == .planningParameterCandidates
+            && $0.reference.artifactID == "planning-parameter-candidates"
+            && $0.reference.path == parameterCandidatesPath
     })
-    #expect(parameterCandidatesArtifact.kind == .other)
-    #expect(parameterCandidatesArtifact.format == .text)
-    #expect(parameterCandidatesArtifact.sha256 == (try TestContentDigester().sha256(data: parameterCandidatesPayload)))
-    #expect(parameterCandidatesArtifact.byteCount == UInt64(parameterCandidatesPayload.count))
+    #expect(parameterCandidatesArtifact.reference.kind == .other)
+    #expect(parameterCandidatesArtifact.reference.format == .text)
+    #expect(parameterCandidatesArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: parameterCandidatesPayload)))
+    #expect(parameterCandidatesArtifact.reference.byteCount == UInt64(parameterCandidatesPayload.count))
     #expect(parameterCandidatesArtifact.integrity?.status == .verified)
     let searchTraceArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-parameter-candidate-search-trace"
-            && $0.artifactID == "planning-parameter-candidate-search-trace"
-            && $0.path == searchTracePath
+        $0.purpose == .planningParameterCandidateSearchTrace
+            && $0.reference.artifactID == "planning-parameter-candidate-search-trace"
+            && $0.reference.path == searchTracePath
     })
-    #expect(searchTraceArtifact.kind == .other)
-    #expect(searchTraceArtifact.format == .json)
-    #expect(searchTraceArtifact.sha256 == (try TestContentDigester().sha256(data: searchTracePayload)))
-    #expect(searchTraceArtifact.byteCount == UInt64(searchTracePayload.count))
+    #expect(searchTraceArtifact.reference.kind == .other)
+    #expect(searchTraceArtifact.reference.format == .json)
+    #expect(searchTraceArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: searchTracePayload)))
+    #expect(searchTraceArtifact.reference.byteCount == UInt64(searchTracePayload.count))
     #expect(searchTraceArtifact.integrity?.status == .verified)
     let selectionTraceArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-parameter-candidate-selection-trace"
-            && $0.artifactID == "planning-parameter-candidate-selection-trace"
-            && $0.path == selectionTracePath
+        $0.purpose == .planningParameterCandidateSelectionTrace
+            && $0.reference.artifactID == "planning-parameter-candidate-selection-trace"
+            && $0.reference.path == selectionTracePath
     })
-    #expect(selectionTraceArtifact.kind == .other)
-    #expect(selectionTraceArtifact.format == .json)
-    #expect(selectionTraceArtifact.sha256 == (try TestContentDigester().sha256(data: selectionTracePayload)))
-    #expect(selectionTraceArtifact.byteCount == UInt64(selectionTracePayload.count))
+    #expect(selectionTraceArtifact.reference.kind == .other)
+    #expect(selectionTraceArtifact.reference.format == .json)
+    #expect(selectionTraceArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: selectionTracePayload)))
+    #expect(selectionTraceArtifact.reference.byteCount == UInt64(selectionTracePayload.count))
     #expect(selectionTraceArtifact.integrity?.status == .verified)
     let planVerificationArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-plan-verification"
-            && $0.artifactID == "planning-plan-verification"
-            && $0.path == planVerificationPath
+        $0.purpose == .planningPlanVerification
+            && $0.reference.artifactID == "planning-plan-verification"
+            && $0.reference.path == planVerificationPath
     })
-    #expect(planVerificationArtifact.kind == .other)
-    #expect(planVerificationArtifact.format == .json)
-    #expect(planVerificationArtifact.sha256 == (try TestContentDigester().sha256(data: planVerificationPayload)))
-    #expect(planVerificationArtifact.byteCount == UInt64(planVerificationPayload.count))
+    #expect(planVerificationArtifact.reference.kind == .other)
+    #expect(planVerificationArtifact.reference.format == .json)
+    #expect(planVerificationArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: planVerificationPayload)))
+    #expect(planVerificationArtifact.reference.byteCount == UInt64(planVerificationPayload.count))
     #expect(planVerificationArtifact.integrity?.status == .verified)
     let planningCorrectnessItem = try #require(bundle.reviewItems.first {
         $0.kind == .planningCorrectness
@@ -421,14 +469,14 @@ extension FlowRunLedgerSummaryTests {
         "--pretty",
     ])
     let rejectedPlansArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-rejected-plans"
-            && $0.artifactID == "planning-rejected-plans"
-            && $0.path == rejectedPlansPath
+        $0.purpose == .planningRejectedPlans
+            && $0.reference.artifactID == "planning-rejected-plans"
+            && $0.reference.path == rejectedPlansPath
     })
-    #expect(rejectedPlansArtifact.kind == .other)
-    #expect(rejectedPlansArtifact.format == .text)
-    #expect(rejectedPlansArtifact.sha256 == (try TestContentDigester().sha256(data: rejectedPlansPayload)))
-    #expect(rejectedPlansArtifact.byteCount == UInt64(rejectedPlansPayload.count))
+    #expect(rejectedPlansArtifact.reference.kind == .other)
+    #expect(rejectedPlansArtifact.reference.format == .text)
+    #expect(rejectedPlansArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: rejectedPlansPayload)))
+    #expect(rejectedPlansArtifact.reference.byteCount == UInt64(rejectedPlansPayload.count))
     #expect(rejectedPlansArtifact.integrity?.status == .verified)
     let planningFeedbackItem = try #require(bundle.reviewItems.first {
         $0.itemID == "planning-rejected-feedback"
@@ -460,34 +508,34 @@ extension FlowRunLedgerSummaryTests {
         "--pretty",
     ])
     let planExecutionArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-plan-execution"
-            && $0.artifactID == "planning-plan-execution"
-            && $0.path == planExecutionPath
+        $0.purpose == .planningPlanExecution
+            && $0.reference.artifactID == "planning-plan-execution"
+            && $0.reference.path == planExecutionPath
     })
-    #expect(planExecutionArtifact.kind == .other)
-    #expect(planExecutionArtifact.format == .json)
-    #expect(planExecutionArtifact.sha256 == (try TestContentDigester().sha256(data: planExecutionPayload)))
-    #expect(planExecutionArtifact.byteCount == UInt64(planExecutionPayload.count))
+    #expect(planExecutionArtifact.reference.kind == .other)
+    #expect(planExecutionArtifact.reference.format == .json)
+    #expect(planExecutionArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: planExecutionPayload)))
+    #expect(planExecutionArtifact.reference.byteCount == UInt64(planExecutionPayload.count))
     #expect(planExecutionArtifact.integrity?.status == .verified)
     let editedNetlistArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-edited-netlist"
-            && $0.artifactID == "candidate-step-1-edited-netlist"
-            && $0.path == editedNetlistPath
+        $0.purpose == .planningEditedNetlist
+            && $0.reference.artifactID == "candidate-step-1-edited-netlist"
+            && $0.reference.path == editedNetlistPath
     })
-    #expect(editedNetlistArtifact.kind == .netlist)
-    #expect(editedNetlistArtifact.format == .spice)
-    #expect(editedNetlistArtifact.sha256 == (try TestContentDigester().sha256(data: editedNetlistPayload)))
-    #expect(editedNetlistArtifact.byteCount == UInt64(editedNetlistPayload.count))
+    #expect(editedNetlistArtifact.reference.kind == .netlist)
+    #expect(editedNetlistArtifact.reference.format == .spice)
+    #expect(editedNetlistArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: editedNetlistPayload)))
+    #expect(editedNetlistArtifact.reference.byteCount == UInt64(editedNetlistPayload.count))
     #expect(editedNetlistArtifact.integrity?.status == .verified)
     let editReportArtifact = try #require(bundle.artifacts.first {
-        $0.role == "planning-netlist-parameter-edit-report"
-            && $0.artifactID == "candidate-step-1-netlist-parameter-edit-report"
-            && $0.path == editReportPath
+        $0.purpose == .planningNetlistParameterEditReport
+            && $0.reference.artifactID == "candidate-step-1-netlist-parameter-edit-report"
+            && $0.reference.path == editReportPath
     })
-    #expect(editReportArtifact.kind == .report)
-    #expect(editReportArtifact.format == .json)
-    #expect(editReportArtifact.sha256 == (try TestContentDigester().sha256(data: editReportPayload)))
-    #expect(editReportArtifact.byteCount == UInt64(editReportPayload.count))
+    #expect(editReportArtifact.reference.kind == .report)
+    #expect(editReportArtifact.reference.format == .json)
+    #expect(editReportArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: editReportPayload)))
+    #expect(editReportArtifact.reference.byteCount == UInt64(editReportPayload.count))
     #expect(editReportArtifact.integrity?.status == .verified)
 }
 
@@ -552,15 +600,15 @@ extension FlowRunLedgerSummaryTests {
     )
 
     #expect(bundle.artifacts.contains {
-        $0.role == "retained-history-dashboard"
-            && $0.artifactID == "signoff-qualification-ci-history-dashboard"
+        $0.purpose == .retainedHistoryDashboard
+            && $0.reference.artifactID == "signoff-qualification-ci-history-dashboard"
             && $0.integrity?.status == .verified
     })
-    #expect(bundle.artifacts.contains { $0.role == "retained-history" && $0.path == historyPath })
-    #expect(bundle.artifacts.contains { $0.role == "retention-index" && $0.path == retentionIndexPath })
-    #expect(bundle.artifacts.contains { $0.role == "retention-index-review" && $0.path == indexReviewPath })
-    #expect(bundle.artifacts.contains { $0.role == "retained-ci-regression-budget" && $0.path == budgetPath })
-    #expect(bundle.artifacts.contains { $0.role == "release-envelope" && $0.path == releaseEnvelopePath })
+    #expect(bundle.artifacts.contains { $0.purpose == .retainedHistory && $0.reference.path == historyPath })
+    #expect(bundle.artifacts.contains { $0.purpose == .retentionIndex && $0.reference.path == retentionIndexPath })
+    #expect(bundle.artifacts.contains { $0.purpose == .retentionIndexReview && $0.reference.path == indexReviewPath })
+    #expect(bundle.artifacts.contains { $0.purpose == .retainedCIRegressionBudget && $0.reference.path == budgetPath })
+    #expect(bundle.artifacts.contains { $0.purpose == .releaseEnvelope && $0.reference.path == releaseEnvelopePath })
     let item = try #require(bundle.reviewItems.first {
         $0.kind == .retainedHistory && $0.itemID == "review-retained-history"
     })
@@ -618,9 +666,9 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
-        $0.role == "stage-summary"
-            && $0.artifactID == "drc-summary"
-            && $0.path == summaryPath
+        $0.purpose == .stageSummary
+            && $0.reference.artifactID == "drc-summary"
+            && $0.reference.path == summaryPath
     })
     #expect(summaryArtifact.integrity?.status == .missingArtifact)
     #expect(bundle.reviewItems.contains {
@@ -691,9 +739,9 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
-        $0.role == "stage-summary"
-            && $0.artifactID == "drc-summary"
-            && $0.path == summaryPath
+        $0.purpose == .stageSummary
+            && $0.reference.artifactID == "drc-summary"
+            && $0.reference.path == summaryPath
     })
     #expect(summaryArtifact.integrity?.status == .byteCountMismatch)
     #expect(summaryArtifact.integrity?.expectedByteCount == 1)
@@ -729,7 +777,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let artifact = try #require(bundle.artifacts.first {
-        $0.role == "plan" && $0.path == ".xcircuite/runs/run-1/plan.json"
+        $0.purpose == .plan && $0.reference.path == ".xcircuite/runs/run-1/plan.json"
     })
     #expect([
         FlowRunReviewArtifactIntegrityStatus.byteCountMismatch,
@@ -756,7 +804,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let artifact = try #require(bundle.artifacts.first {
-        $0.role == "stage-result" && $0.path == ".xcircuite/runs/run-1/stages/001-drc/result.json"
+        $0.purpose == .stageResult && $0.reference.path == ".xcircuite/runs/run-1/stages/001-drc/result.json"
     })
     #expect([
         FlowRunReviewArtifactIntegrityStatus.byteCountMismatch,
@@ -803,7 +851,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let artifact = try #require(bundle.artifacts.first {
-        $0.role == "approval" && $0.path == ".xcircuite/runs/run-1/approvals/001-drc.json"
+        $0.purpose == .approval && $0.reference.path == ".xcircuite/runs/run-1/approvals/001-drc.json"
     })
     #expect([
         FlowRunReviewArtifactIntegrityStatus.byteCountMismatch,
@@ -829,12 +877,12 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let progress = try #require(bundle.artifacts.first {
-        $0.role == "run-progress" && $0.path == ".xcircuite/runs/run-1/progress.jsonl"
+        $0.purpose == .runProgress && $0.reference.path == ".xcircuite/runs/run-1/progress.jsonl"
     })
     #expect(progress.integrity?.status == .verified)
 
     let cancellation = try #require(bundle.artifacts.first {
-        $0.role == "run-cancellation-request" && $0.path == ".xcircuite/runs/run-1/cancellation.json"
+        $0.purpose == .runCancellationRequest && $0.reference.path == ".xcircuite/runs/run-1/cancellation.json"
     })
     #expect(cancellation.integrity?.status == .verified)
 }
@@ -876,13 +924,12 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let summaryArtifact = try #require(bundle.artifacts.first {
-        $0.artifactID == "drc-summary" && $0.stageID == "../escape"
+        $0.reference.artifactID == "drc-summary" && $0.stageID == "../escape"
     })
     #expect(summaryArtifact.integrity?.status == .invalidIdentifier)
-    let stageResultArtifact = try #require(bundle.artifacts.first {
-        $0.role == "stage-result" && $0.stageID == "../escape"
+    #expect(!bundle.artifacts.contains {
+        $0.purpose == .stageResult && $0.stageID == "../escape"
     })
-    #expect(stageResultArtifact.integrity?.status == .invalidPath)
     let item = try #require(bundle.reviewItems.first {
         $0.kind == .artifactIntegrity && $0.stageID == "../escape"
     })

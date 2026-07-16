@@ -264,15 +264,15 @@ extension FlowRunLedgerSummaryTests {
         projectRoot: root
     )
     let runManifestArtifact = try #require(bundle.artifacts.first {
-        $0.role == "run-manifest"
+        $0.purpose == .runManifest
     })
-    #expect(runManifestArtifact.artifactID == "run-manifest")
-    #expect(runManifestArtifact.sha256?.isEmpty == false)
-    #expect((runManifestArtifact.byteCount ?? 0) > 0)
+    #expect(runManifestArtifact.reference.artifactID == "run-manifest")
+    #expect(!runManifestArtifact.reference.digest.hexadecimalValue.isEmpty)
+    #expect(runManifestArtifact.reference.byteCount > 0)
     #expect(runManifestArtifact.integrity?.status == .verified)
     #expect(bundle.artifacts.contains {
-        $0.role == "stage-artifact-ladder"
-            && $0.artifactID == "review-stage-artifact-ladder"
+        $0.purpose == .stageArtifactLadder
+            && $0.reference.artifactID == "review-stage-artifact-ladder"
     })
 }
 
@@ -379,8 +379,8 @@ extension FlowRunLedgerSummaryTests {
             ]
         ),
         artifacts: [
-            FlowRunReviewArtifact(
-                role: "stage-summary",
+            try makeTestReviewArtifact(
+                purpose: .stageSummary,
                 artifactID: "drc-summary",
                 stageID: "001-drc",
                 path: summaryPath,

@@ -79,7 +79,7 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
     public var replayCommands: [FlowRunSuggestedCommand]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         packetID: String,
         runID: String,
         status: FlowRunStatus,

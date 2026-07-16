@@ -70,7 +70,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         projectRoot: URL
     ) -> FlowRunStageArtifactLadder {
         let artifacts = bundle.artifacts
-            .filter { $0.artifactID != Self.artifactID }
+            .filter { $0.reference.artifactID != Self.artifactID }
             .map {
                 artifact(
                     from: $0,
@@ -173,15 +173,15 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
     ) -> FlowRunStageArtifactLadder.Artifact {
         let domain = artifactDomain(for: reviewArtifact)
         return FlowRunStageArtifactLadder.Artifact(
-            role: reviewArtifact.role,
+            role: reviewArtifact.purpose.rawValue,
             domain: domain,
-            artifactID: reviewArtifact.artifactID,
+            artifactID: reviewArtifact.reference.artifactID,
             stageID: reviewArtifact.stageID,
-            path: reviewArtifact.path,
-            kind: reviewArtifact.kind,
-            format: reviewArtifact.format,
-            sha256: reviewArtifact.sha256,
-            byteCount: reviewArtifact.byteCount,
+            path: reviewArtifact.reference.path,
+            kind: reviewArtifact.reference.kind,
+            format: reviewArtifact.reference.format,
+            sha256: reviewArtifact.reference.digest.hexadecimalValue,
+            byteCount: reviewArtifact.reference.byteCount,
             integrity: reviewArtifact.integrity,
             statusRef: statusRef,
             handoffRole: handoffRole(for: reviewArtifact, domain: domain)
@@ -189,25 +189,25 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
     }
 
     private func artifactDomain(for artifact: FlowRunReviewArtifact) -> String {
-        if artifact.role == "stage-attempts" {
+        if artifact.purpose == .stageAttempts {
             return "retry"
         }
-        if artifact.role == "design-diff" || artifact.kind == .designDiff {
+        if artifact.purpose == .designDiff || artifact.reference.kind == .designDiff {
             return "edit"
         }
-        if artifact.role.hasPrefix("planning-") || artifact.path.contains("/planning/") {
+        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.reference.path.contains("/planning/") {
             return "planning"
         }
-        if artifact.role == "approval" || artifact.role == "stage-artifact-ladder" || artifact.path.contains("/review/") {
+        if artifact.purpose == .approval || artifact.purpose == .stageArtifactLadder || artifact.reference.path.contains("/review/") {
             return "review"
         }
         let searchable = [
-            artifact.role,
-            artifact.artifactID ?? "",
+            artifact.purpose.rawValue,
+            artifact.reference.artifactID,
             artifact.stageID ?? "",
-            artifact.path,
-            artifact.kind.rawValue,
-            artifact.format.rawValue,
+            artifact.reference.path,
+            artifact.reference.kind.rawValue,
+            artifact.reference.format.rawValue,
         ]
         .joined(separator: " ")
         .lowercased()
@@ -227,20 +227,20 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         if searchable.contains("lvs") {
             return "lvs"
         }
-        if searchable.contains("pex") || searchable.contains("spef") || artifact.kind == .parasitics || artifact.format == .spef {
+        if searchable.contains("pex") || searchable.contains("spef") || artifact.reference.kind == .parasitics || artifact.reference.format == .spef {
             return "pex"
         }
-        if searchable.contains("export") || artifact.format == .oasis || artifact.format == .gdsii
-            || artifact.format == .lef || artifact.format == .def {
+        if searchable.contains("export") || artifact.reference.format == .oasis || artifact.reference.format == .gdsii
+            || artifact.reference.format == .lef || artifact.reference.format == .def {
             return "export"
         }
-        if artifact.kind == .waveform || artifact.kind == .measurement || searchable.contains("simulation") {
+        if artifact.reference.kind == .waveform || artifact.reference.kind == .measurement || searchable.contains("simulation") {
             return "simulation"
         }
-        if artifact.kind == .layout {
+        if artifact.reference.kind == .layout {
             return "layout"
         }
-        if artifact.kind == .netlist {
+        if artifact.reference.kind == .netlist {
             return "netlist"
         }
         return "other"
@@ -339,10 +339,10 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         if artifact.stageID == nil {
             return "run-artifact"
         }
-        if artifact.role == "stage-attempts" || domain == "retry" {
+        if artifact.purpose == .stageAttempts || domain == "retry" {
             return "retry-record"
         }
-        if artifact.role == "stage-summary" {
+        if artifact.purpose == .stageSummary {
             return "stage-status"
         }
         return "stage-output"

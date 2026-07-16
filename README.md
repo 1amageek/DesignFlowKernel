@@ -82,7 +82,7 @@ resume.
 | `FlowDiagnostic` / `FlowDiagnosticSeverity` | Structured diagnostics (never opaque strings) |
 | `FlowExecutionContext` / `FlowExecutionError` | Execution environment and typed failures |
 | `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected suggested-command state |
-| `FlowRunReviewBundle` | Human / Agent review contract with checklist items, approval records, artifact IDs, artifact paths, and artifact integrity status for cockpit consumption |
+| `FlowRunReviewBundle` | Human / Agent review contract with checklist items, approval records, canonical Foundation artifact references, flow-review purposes, and artifact integrity status for cockpit consumption |
 | `FlowRunProgressSnapshot` | Cursor-based progress event view over `progress.jsonl` |
 | `FlowRunProgressSubscriptionRequest` / `DefaultFlowRunProgressSubscriber` | Bounded polling subscription for live progress snapshots and JSONL follow mode |
 
@@ -154,10 +154,13 @@ engine.
 
 `DefaultFlowRunReviewBundler` loads a `FlowRunLedger` through the injected ledger
 boundary and emits a `FlowRunReviewBundle`. The bundle does not invent UI
-state. It points review items back to ledger artifacts such as `manifest.json`,
+state. Schema version 2 points review items back to ledger artifacts such as `manifest.json`,
 `plan.json`, `toolchain.json`, `design-diff.json`, stage `result.json`, stage
-artifacts, and approval records. Stage artifacts preserve their stable
-`artifactID`; artifacts whose ID ends in `-summary` are exposed with role
+artifacts, and approval records. Each `FlowRunReviewArtifact` owns one canonical
+`ArtifactReference`; identity, locator, role, kind, format, digest, and byte count
+are read from that reference rather than copied into a second record. The
+flow-domain `FlowRunReviewArtifactPurpose` is a validated open token; its
+`purpose` value classifies references whose ID ends in `-summary` as
 `stage-summary` so DRC/LVS/PEX compact review reports can be found without path
 guessing. Stage artifacts also carry `integrity.status`, `expectedSHA256`,
 `actualSHA256`, `expectedByteCount`, and `actualByteCount` when verification is
@@ -167,6 +170,11 @@ unreadable artifacts become typed review state instead of silent UI warnings. Th
 underlying path, symlink, digest, and byte-count checks come from the
 Foundation `LocalArtifactVerifier`; the concrete Xcircuite workspace store
 applies the filesystem boundary before the kernel receives a ledger.
+An expected artifact without a canonical ledger reference is reported as a
+missing requirement or review item; the kernel does not manufacture a synthetic
+artifact reference with placeholder digest or byte-count claims.
+Because a decision packet embeds the review bundle, its schema version is also
+2 and validation rejects packets carrying any other review-bundle schema.
 Failed or incomplete `*-artifacts` gates are surfaced separately as artifact
 coverage repair work, which lets agents distinguish "the engine found a design
 problem" from "the engine produced evidence that the flow ledger did not index."

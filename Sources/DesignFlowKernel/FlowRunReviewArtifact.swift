@@ -2,35 +2,24 @@ import Foundation
 import CircuiteFoundation
 
 public struct FlowRunReviewArtifact: Sendable, Hashable, Codable {
-    public var role: String
-    public var artifactID: String?
+    /// The canonical artifact identity, location, format, and integrity claims.
+    public var reference: ArtifactReference
+
+    /// The artifact's purpose within a flow review. This is flow metadata and
+    /// is intentionally distinct from the producer-defined locator role.
+    public var purpose: FlowRunReviewArtifactPurpose
     public var stageID: String?
-    public var path: String
-    public var kind: ArtifactKind
-    public var format: ArtifactFormat
-    public var sha256: String?
-    public var byteCount: UInt64?
     public var integrity: FlowRunReviewArtifactIntegrity?
 
     public init(
-        role: String,
-        artifactID: String? = nil,
+        reference: ArtifactReference,
+        purpose: FlowRunReviewArtifactPurpose,
         stageID: String? = nil,
-        path: String,
-        kind: ArtifactKind,
-        format: ArtifactFormat,
-        sha256: String? = nil,
-        byteCount: UInt64? = nil,
         integrity: FlowRunReviewArtifactIntegrity? = nil
     ) {
-        self.role = role
-        self.artifactID = artifactID
+        self.reference = reference
+        self.purpose = purpose
         self.stageID = stageID
-        self.path = path
-        self.kind = kind
-        self.format = format
-        self.sha256 = sha256
-        self.byteCount = byteCount
         self.integrity = integrity
     }
 }

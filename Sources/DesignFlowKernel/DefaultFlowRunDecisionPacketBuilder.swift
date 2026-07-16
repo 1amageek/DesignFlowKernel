@@ -69,7 +69,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
     private func artifactRequirements(
         from bundle: FlowRunReviewBundle
     ) -> [FlowRunDecisionPacket.ArtifactRequirement] {
-        let roles = Set(bundle.artifacts.map(\.role))
+        let roles = Set(bundle.artifacts.map { $0.purpose.rawValue })
         let hasPlanning = roles.contains { role in
             role.hasPrefix("planning-")
         }
@@ -105,14 +105,14 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
         purpose: String,
         artifacts: [FlowRunReviewArtifact]
     ) -> FlowRunDecisionPacket.ArtifactRequirement {
-        let matchingArtifacts = artifacts.filter { $0.role == role }
+        let matchingArtifacts = artifacts.filter { $0.purpose.rawValue == role }
         guard required else {
             return FlowRunDecisionPacket.ArtifactRequirement(
                 role: role,
                 required: false,
                 status: matchingArtifacts.isEmpty ? .notRequired : .satisfied,
                 purpose: purpose,
-                artifactPaths: matchingArtifacts.map(\.path).sorted()
+                artifactPaths: matchingArtifacts.map { $0.reference.path }.sorted()
             )
         }
         guard !matchingArtifacts.isEmpty else {
@@ -133,7 +133,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
                 required: true,
                 status: .satisfied,
                 purpose: purpose,
-                artifactPaths: matchingArtifacts.map(\.path).sorted()
+                artifactPaths: matchingArtifacts.map { $0.reference.path }.sorted()
             )
         }
         return FlowRunDecisionPacket.ArtifactRequirement(
@@ -141,7 +141,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             required: true,
             status: .invalid,
             purpose: purpose,
-            artifactPaths: invalidArtifacts.map(\.path).sorted(),
+            artifactPaths: invalidArtifacts.map { $0.reference.path }.sorted(),
             diagnosticCodes: artifactRequirementDiagnosticCodes(for: invalidArtifacts)
         )
     }

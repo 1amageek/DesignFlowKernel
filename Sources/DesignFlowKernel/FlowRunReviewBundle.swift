@@ -46,7 +46,7 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
     public var crossArtifactEvaluation: FlowCrossArtifactEvaluation?
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         runID: String,
         status: FlowRunStatus,
         summary: FlowRunLedgerSummary,
