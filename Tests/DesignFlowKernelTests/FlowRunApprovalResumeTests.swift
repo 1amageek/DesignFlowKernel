@@ -308,9 +308,9 @@ extension FlowRunLedgerSummaryTests {
     )
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
     let resultURL = root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
-    #expect(approval.evidence.plan.sha256 == (try TestContentDigester().sha256(fileAt: planURL)))
+    #expect(approval.evidence.plan.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: planURL)))
     #expect(approval.evidence.plan.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: planURL)))
-    #expect(approval.evidence.stageResult.sha256 == (try TestContentDigester().sha256(fileAt: resultURL)))
+    #expect(approval.evidence.stageResult.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: resultURL)))
     #expect(approval.evidence.stageResult.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: resultURL)))
 }
 

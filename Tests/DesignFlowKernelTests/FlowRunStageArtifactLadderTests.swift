@@ -256,7 +256,7 @@ extension FlowRunLedgerSummaryTests {
         ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json",
     ] {
         let reference = try #require(manifest.artifacts.first { $0.path == path })
-        #expect(!reference.sha256.isEmpty)
+        #expect(!reference.digest.hexadecimalValue.isEmpty)
         #expect(reference.byteCount > 0)
     }
 

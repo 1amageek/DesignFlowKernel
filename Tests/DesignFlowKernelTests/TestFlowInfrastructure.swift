@@ -546,7 +546,11 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
     }
 
     func loadProgressEvents(runID: String) async throws -> [FlowRunProgressEvent] {
-        progressEvents[runKey(runID: runID, projectRoot: projectRoot), default: []]
+        let key = runKey(runID: runID, projectRoot: projectRoot)
+        guard progressEvents[key] != nil || ledgers[key] != nil else {
+            throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: runID)
+        }
+        return progressEvents[key, default: []]
     }
 
     func persistCancellationRequest(

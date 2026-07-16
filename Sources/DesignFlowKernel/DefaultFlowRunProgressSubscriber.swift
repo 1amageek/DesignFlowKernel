@@ -18,7 +18,11 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
         request: FlowRunProgressSubscriptionRequest
     ) async throws -> FlowRunProgressSnapshot {
         try validate(request)
-        var current = try await makeSnapshot(request: request)
+        let deadline = Date().addingTimeInterval(Double(request.timeoutMilliseconds) / 1_000.0)
+        var current = try await makeInitialSnapshot(
+            request: request,
+            deadline: deadline
+        )
         guard request.waitForNewEvents, current.events.isEmpty, !current.isTerminal else {
             return current
         }
@@ -26,7 +30,6 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
             return current
         }
 
-        let deadline = Date().addingTimeInterval(Double(request.timeoutMilliseconds) / 1_000.0)
         while Date() < deadline {
             let remainingMilliseconds = max(0, Int(deadline.timeIntervalSinceNow * 1_000.0))
             let sleepMilliseconds = min(request.pollIntervalMilliseconds, remainingMilliseconds)
@@ -50,7 +53,6 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
         try validate(request)
         let deadline = Date().addingTimeInterval(Double(request.timeoutMilliseconds) / 1_000.0)
         var cursor = request.afterSequence
-        var latest = try await makeSnapshot(request: request)
 
         while true {
             let remainingMilliseconds = remainingMilliseconds(until: deadline, request: request)
@@ -64,7 +66,7 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
                 pollIntervalMilliseconds: request.pollIntervalMilliseconds,
                 stopWhenRunFinished: request.stopWhenRunFinished
             )
-            latest = try await waitForProgress(request: waitRequest)
+            let latest = try await waitForProgress(request: waitRequest)
             for event in latest.events {
                 try await onEvent(event)
             }
@@ -75,6 +77,25 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
             }
             if latest.events.isEmpty {
                 return latest
+            }
+        }
+    }
+
+    private func makeInitialSnapshot(
+        request: FlowRunProgressSubscriptionRequest,
+        deadline: Date
+    ) async throws -> FlowRunProgressSnapshot {
+        while true {
+            do {
+                return try await makeSnapshot(request: request)
+            } catch FlowRunLedgerPersistenceError.resumeTargetNotFound
+                where request.waitForNewEvents && Date() < deadline {
+                let remainingMilliseconds = max(0, Int(deadline.timeIntervalSinceNow * 1_000.0))
+                let sleepMilliseconds = min(request.pollIntervalMilliseconds, remainingMilliseconds)
+                guard sleepMilliseconds > 0 else {
+                    continue
+                }
+                try await Task.sleep(nanoseconds: UInt64(sleepMilliseconds) * 1_000_000)
             }
         }
     }

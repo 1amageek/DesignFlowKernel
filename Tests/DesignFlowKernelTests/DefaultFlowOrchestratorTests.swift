@@ -1565,7 +1565,7 @@ struct DefaultFlowOrchestratorTests {
         let reference = try #require(runManifest.artifacts.first { $0.path == path })
         #expect(reference.kind == .other)
         #expect(reference.format == .json)
-        let sha256 = reference.sha256
+        let sha256 = reference.digest.hexadecimalValue
         #expect(!sha256.isEmpty)
         #expect(reference.producer?.identifier == runID)
         return reference
