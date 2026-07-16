@@ -1643,15 +1643,26 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     private func artifactIntegrityByPath(
         from ledger: FlowRunLedger
     ) async -> [String: ArtifactIntegrity] {
-        var references = recordedReferencesByPath(from: ledger)
+        let recordedReferences = recordedReferencesByPath(from: ledger)
+        var result: [String: ArtifactIntegrity] = [:]
+        for path in recordedReferences.keys.sorted() {
+            guard let reference = recordedReferences[path] else {
+                continue
+            }
+            result[path] = await persistence.verifyArtifact(reference)
+        }
+
+        // Stage results are the canonical source for stage artifact references.
+        // Apply them after run-level aliases so integrity never depends on
+        // Dictionary iteration order when both keys resolve to the same path.
         for stage in ledger.stages {
             for reference in stage.artifacts {
-                references[reference.path] = reference
+                let integrity = await persistence.verifyArtifact(reference)
+                result[reference.path] = integrity
+                if let relativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
+                    result[relativePath] = integrity
+                }
             }
-        }
-        var result: [String: ArtifactIntegrity] = [:]
-        for reference in references.values {
-            result[reference.path] = await persistence.verifyArtifact(reference)
         }
         return result
     }

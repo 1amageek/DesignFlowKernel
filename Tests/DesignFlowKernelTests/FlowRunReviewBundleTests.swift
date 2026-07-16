@@ -655,8 +655,11 @@ extension FlowRunLedgerSummaryTests {
         FlowStageResult.self,
         from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
     )
-    let originalArtifact = result.artifacts[0]
-    result.artifacts[0] = ArtifactReference(
+    let artifactIndex = try #require(result.artifacts.firstIndex {
+        $0.artifactID == "drc-summary" && $0.path == summaryPath
+    })
+    let originalArtifact = result.artifacts[artifactIndex]
+    result.artifacts[artifactIndex] = ArtifactReference(
         id: originalArtifact.id,
         locator: originalArtifact.locator,
         digest: originalArtifact.digest,
@@ -668,6 +671,19 @@ extension FlowRunLedgerSummaryTests {
         to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"),
         forProjectAt: root
     )
+
+    let summaryData = try Data(contentsOf: root.appending(path: summaryPath))
+    #expect(summaryData == summaryPayload)
+    let reloadedLedger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
+    let reloadedMatches = reloadedLedger.stages.first?.artifacts.filter {
+        $0.artifactID == "drc-summary" && $0.path == summaryPath
+    } ?? []
+    #expect(reloadedMatches.count == 1)
+    let reloadedReference = try #require(reloadedMatches.first)
+    #expect(reloadedReference.byteCount == 1)
+    let directIntegrity = LocalArtifactVerifier().verify(reloadedReference, relativeTo: root)
+    #expect(directIntegrity.issues.first?.code == .byteCountMismatch)
+    #expect(directIntegrity.issues.first?.actualByteCount == UInt64(summaryPayload.count))
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
