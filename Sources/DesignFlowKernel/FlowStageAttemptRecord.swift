@@ -1,7 +1,7 @@
 import Foundation
 
 public struct FlowStageAttemptRecord: Sendable, Hashable, Codable {
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var stageID: String
     public var attemptIndex: Int
     public var maxAttempts: Int

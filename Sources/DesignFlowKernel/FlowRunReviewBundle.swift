@@ -32,7 +32,7 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
     public var summary: FlowRunLedgerSummary

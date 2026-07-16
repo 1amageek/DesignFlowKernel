@@ -7,7 +7,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
         case blocked
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var packetPath: String
     public var validationArtifactPath: String?

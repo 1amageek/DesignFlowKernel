@@ -67,7 +67,7 @@ public struct FlowLoopIterationSummary: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var iterationID: String
     public var runID: String
     public var ordinal: Int

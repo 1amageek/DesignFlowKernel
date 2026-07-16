@@ -81,7 +81,7 @@ public struct FlowRunGuardVerdict: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var verdictID: String
     public var runID: String
     public var profileID: String

@@ -41,7 +41,7 @@ public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var envelopeID: String
     public var runID: String
     public var status: Status

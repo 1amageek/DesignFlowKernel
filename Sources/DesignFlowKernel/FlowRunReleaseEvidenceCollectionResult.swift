@@ -32,6 +32,13 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == 1 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Expected release evidence collection schema version 1."
+            )
+        }
         runID = try container.decode(String.self, forKey: .runID)
         corpusHistory = try container.decode(FlowRunReleaseCorpusHistory.self, forKey: .corpusHistory)
         performanceEnvelope = try container.decode(FlowRunReleasePerformanceEnvelope.self, forKey: .performanceEnvelope)

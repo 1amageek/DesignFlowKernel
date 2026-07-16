@@ -13,7 +13,7 @@ public struct FlowRunContractReport: Sendable, Hashable, Decodable {
         public var failures: [Failure]
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var status: String
     public var contractCount: Int
     public var failedContractCount: Int

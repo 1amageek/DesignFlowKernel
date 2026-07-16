@@ -52,7 +52,7 @@ public struct FlowRunSignoffDashboard: Sendable, Hashable, Decodable {
         public var status: String
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String?
     public var status: String
     public var history: History

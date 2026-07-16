@@ -1,7 +1,7 @@
 import Foundation
 
 public struct FlowEvaluationSpec: Sendable, Hashable, Codable {
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var specID: String
     public var intentID: String?
     public var objective: String

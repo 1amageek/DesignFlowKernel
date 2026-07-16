@@ -38,7 +38,7 @@ public struct FlowRunReleaseCorpusHistory: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var collectedAt: String
     public var sourceDashboardPath: String
@@ -118,7 +118,7 @@ public struct FlowRunReleasePerformanceEnvelope: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var collectedAt: String
     public var sourceDashboardPath: String
@@ -189,7 +189,7 @@ public struct FlowRunReleaseContractAudit: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var collectedAt: String
     public var sourceReportPath: String

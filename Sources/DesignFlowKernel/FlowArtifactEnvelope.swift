@@ -2,7 +2,7 @@ import CircuiteFoundation
 import Foundation
 
 public struct FlowArtifactEnvelope: Sendable, Hashable, Codable {
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var artifactID: String
     public var role: String
     public var stageID: String?

@@ -8,7 +8,7 @@ public struct FlowRunReleaseRetentionIndex: Sendable, Hashable, Codable {
         case blocked
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var workflowRunID: String
     public var recordedAt: String

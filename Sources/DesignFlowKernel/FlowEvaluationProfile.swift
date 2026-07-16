@@ -78,7 +78,7 @@ public struct FlowEvaluationProfile: Sendable, Hashable, Codable {
         case target
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var profileID: String
     public var domain: String
     public var metricChannels: [MetricChannel]

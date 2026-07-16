@@ -1,7 +1,7 @@
 import Foundation
 
 public struct DesignDiff: Sendable, Hashable, Codable {
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var runID: String
     public var title: String
     public var actor: String

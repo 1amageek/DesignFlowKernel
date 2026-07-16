@@ -113,7 +113,7 @@ public struct FlowAgentLoopProfile: Sendable, Hashable, Codable {
         }
     }
 
-    public var schemaVersion: Int
+    @FlowSchemaVersion1 public var schemaVersion: Int
     public var profileID: String
     public var scope: Scope
     public var budgets: Budgets
