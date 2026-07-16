@@ -6,39 +6,37 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
     public static let artifactRelativePath = "review/decision-packet.json"
 
     private let reviewBundler: any FlowRunReviewBundling
-    private let storage: XcircuiteWorkspaceStore
+    private let persistence: any FlowArtifactPersisting
 
     public init(
-        reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler(),
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
+        reviewBundler: any FlowRunReviewBundling,
+        persistence: any FlowArtifactPersisting
     ) {
         self.reviewBundler = reviewBundler
-        self.storage = storage
+        self.persistence = persistence
     }
 
     public func buildDecisionPacket(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunDecisionPacketBuildResult {
-        let bundle = try reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
+    ) async throws -> FlowRunDecisionPacketBuildResult {
+        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
         let packet = makePacket(from: bundle, projectRoot: projectRoot)
-        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
-        let reviewDirectory = runDirectory.appending(path: "review")
-        try storage.ensureDirectory(at: reviewDirectory)
-        let packetURL = reviewDirectory.appending(path: "decision-packet.json")
-        try storage.writeJSON(packet, to: packetURL, forProjectAt: projectRoot)
-
-        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try storage.makeArtifactReference(
-            forProjectRelativePath: projectRelativePath,
-            artifactID: Self.artifactID,
-            role: .output,
-            kind: .report,
-            format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID
+        let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reference = try await persistence.persistArtifact(
+            content: encoder.encode(packet),
+            id: ArtifactID(rawValue: Self.artifactID),
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            runID: runID,
+            mode: .replaceable
         )
-        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return FlowRunDecisionPacketBuildResult(packet: packet, artifact: reference)
     }
 

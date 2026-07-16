@@ -1,14 +1,15 @@
 import Foundation
+import CircuiteFoundation
 
 public struct FlowRunReviewArtifact: Sendable, Hashable, Codable {
     public var role: String
     public var artifactID: String?
     public var stageID: String?
     public var path: String
-    public var kind: XcircuiteFileKind
-    public var format: XcircuiteFileFormat
+    public var kind: ArtifactKind
+    public var format: ArtifactFormat
     public var sha256: String?
-    public var byteCount: Int64?
+    public var byteCount: UInt64?
     public var integrity: FlowRunReviewArtifactIntegrity?
 
     public init(
@@ -16,10 +17,10 @@ public struct FlowRunReviewArtifact: Sendable, Hashable, Codable {
         artifactID: String? = nil,
         stageID: String? = nil,
         path: String,
-        kind: XcircuiteFileKind,
-        format: XcircuiteFileFormat,
+        kind: ArtifactKind,
+        format: ArtifactFormat,
         sha256: String? = nil,
-        byteCount: Int64? = nil,
+        byteCount: UInt64? = nil,
         integrity: FlowRunReviewArtifactIntegrity? = nil
     ) {
         self.role = role

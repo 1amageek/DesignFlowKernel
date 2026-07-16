@@ -6,19 +6,19 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     public static let artifactRelativePath = "qualification/release-envelope.json"
 
     private let decisionPacketValidator: any FlowRunDecisionPacketValidating
-    private let storage: XcircuiteWorkspaceStore
-    private let fileReferenceVerifier: XcircuiteFileReferenceVerifier
+    private let loader: any FlowRunLedgerLoading
+    private let persistence: any FlowArtifactPersisting
     private let currentDate: Date
 
     public init(
-        decisionPacketValidator: any FlowRunDecisionPacketValidating = DefaultFlowRunDecisionPacketValidator(),
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
-        fileReferenceVerifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
+        decisionPacketValidator: any FlowRunDecisionPacketValidating,
+        loader: any FlowRunLedgerLoading,
+        persistence: any FlowArtifactPersisting,
         currentDate: Date = Date()
     ) {
         self.decisionPacketValidator = decisionPacketValidator
-        self.storage = storage
-        self.fileReferenceVerifier = fileReferenceVerifier
+        self.loader = loader
+        self.persistence = persistence
         self.currentDate = currentDate
     }
 
@@ -26,13 +26,13 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         runID: String,
         projectRoot: URL,
         maxEvidenceAgeDays: Int? = 30
-    ) throws -> FlowRunReleaseEnvelopeBuildResult {
-        let validation = try decisionPacketValidator.validateDecisionPacket(
+    ) async throws -> FlowRunReleaseEnvelopeBuildResult {
+        let validation = try await decisionPacketValidator.validateDecisionPacket(
             runID: runID,
             projectRoot: projectRoot
         )
-        let manifestResult = loadRunManifest(runID: runID, projectRoot: projectRoot)
-        let requirements = releaseRequirements(
+        let manifestResult = await loadRunManifest(runID: runID, projectRoot: projectRoot)
+        let requirements = await releaseRequirements(
             runID: runID,
             projectRoot: projectRoot,
             decisionPacketValidation: validation,
@@ -53,19 +53,18 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             diagnostics: diagnostics,
             replayCommands: replayCommands(runID: runID, projectRoot: projectRoot)
         )
-        let artifact = try persist(envelope, runID: runID, projectRoot: projectRoot)
+        let artifact = try await persist(envelope, runID: runID, projectRoot: projectRoot)
         return FlowRunReleaseEnvelopeBuildResult(envelope: envelope, artifact: artifact)
     }
 
     private func loadRunManifest(
         runID: String,
         projectRoot: URL
-    ) -> (manifest: XcircuiteRunManifest?, diagnostic: FlowDiagnostic?) {
+    ) async -> (manifest: FlowRunManifest?, diagnostic: FlowDiagnostic?) {
         do {
-            let manifest = try storage.loadRunManifest(
-                runID: runID,
-                inProjectAt: projectRoot
-            )
+            let manifest = try await loader.loadRunLedger(
+                runID: runID
+            ).runManifest
             return (manifest, nil)
         } catch {
             return (
@@ -83,12 +82,10 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         runID: String,
         projectRoot: URL,
         decisionPacketValidation: FlowRunDecisionPacketValidationResult,
-        manifest: XcircuiteRunManifest?,
+        manifest: FlowRunManifest?,
         maxEvidenceAgeDays: Int?
-    ) -> [FlowRunReleaseEnvelope.Requirement] {
-        [
-            decisionPacketValidationRequirement(decisionPacketValidation),
-            retainedArtifactRequirement(
+    ) async -> [FlowRunReleaseEnvelope.Requirement] {
+        let corpus = await retainedArtifactRequirement(
                 requirementID: "retained-corpus-history",
                 title: "Retained corpus history",
                 artifactID: "qualification-corpus-history",
@@ -100,8 +97,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 projectRoot: projectRoot,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
-            ),
-            retainedArtifactRequirement(
+            )
+        let performance = await retainedArtifactRequirement(
                 requirementID: "performance-envelope",
                 title: "Performance envelope",
                 artifactID: "qualification-performance-envelope",
@@ -113,8 +110,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 projectRoot: projectRoot,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
-            ),
-            retainedArtifactRequirement(
+            )
+        let contract = await retainedArtifactRequirement(
                 requirementID: "contract-audit",
                 title: "Contract audit",
                 artifactID: "qualification-contract-audit",
@@ -126,8 +123,8 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 projectRoot: projectRoot,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
-            ),
-            retainedArtifactRequirement(
+            )
+        let qualification = await retainedArtifactRequirement(
                 requirementID: "release-qualification",
                 title: "Release qualification result",
                 artifactID: "release-qualification-result",
@@ -135,13 +132,12 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 purpose: "Prove that retained corpus, oracle correlation, process scope, and promotion gates passed for this run.",
                 missingDiagnosticCode: "release-envelope-release-qualification-missing",
                 ageDiagnosticPrefix: "release-envelope-release-qualification",
-                timestampPath: ["metadata", "completedAt"],
                 runID: runID,
                 projectRoot: projectRoot,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
-            ),
-            retainedArtifactRequirement(
+            )
+        let retention = await retainedArtifactRequirement(
                 requirementID: "retention-index",
                 title: "Retention index",
                 artifactID: "qualification-retention-index",
@@ -149,12 +145,18 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 purpose: "Prove immutable, append-only CI history and the minimum retention window.",
                 missingDiagnosticCode: "release-envelope-retention-index-missing",
                 ageDiagnosticPrefix: "release-envelope-retention-index",
-                timestampPath: ["recordedAt"],
                 runID: runID,
                 projectRoot: projectRoot,
                 manifest: manifest,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
-            ),
+            )
+        return [
+            decisionPacketValidationRequirement(decisionPacketValidation),
+            corpus,
+            performance,
+            contract,
+            qualification,
+            retention,
         ]
     }
 
@@ -182,19 +184,20 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         purpose: String,
         missingDiagnosticCode: String,
         ageDiagnosticPrefix: String,
-        timestampPath: [String] = ["collectedAt"],
         runID: String,
         projectRoot: URL,
-        manifest: XcircuiteRunManifest?,
+        manifest: FlowRunManifest?,
         maxEvidenceAgeDays: Int?
-    ) -> FlowRunReleaseEnvelope.Requirement {
-        let path = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)"
+    ) async -> FlowRunReleaseEnvelope.Requirement {
+        let path = "runs/\(runID)/\(relativePath)"
         let reference = manifest?.artifacts.first { reference in
-            reference.artifactID == artifactID && reference.path == path
+            reference.artifactID == artifactID
+                && matchesStoragePath(reference.path, logicalPath: path)
         }
         if reference == nil,
            let mismatchedReference = manifest?.artifacts.first(where: { reference in
-               reference.artifactID == artifactID || reference.path == path
+               reference.artifactID == artifactID
+                   || matchesStoragePath(reference.path, logicalPath: path)
            }) {
             return FlowRunReleaseEnvelope.Requirement(
                 requirementID: requirementID,
@@ -220,7 +223,27 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             )
         }
 
-        let integrity = fileReferenceVerifier.verify(reference, projectRoot: projectRoot)
+        let integrity: FlowArtifactIntegrityRecord
+        do {
+            _ = try await persistence.loadArtifactContent(for: reference)
+            integrity = FlowArtifactIntegrityRecord(
+                status: .verified,
+                path: reference.locator.location.value,
+                expectedSHA256: reference.digest.hexadecimalValue,
+                actualSHA256: reference.digest.hexadecimalValue,
+                expectedByteCount: reference.byteCount,
+                actualByteCount: reference.byteCount,
+                message: "Artifact content was verified by the injected persistence boundary."
+            )
+        } catch {
+            integrity = FlowArtifactIntegrityRecord(
+                status: .unreadableArtifact,
+                path: reference.locator.location.value,
+                expectedSHA256: reference.digest.hexadecimalValue,
+                expectedByteCount: reference.byteCount,
+                message: error.localizedDescription
+            )
+        }
         guard integrity.status == .verified else {
             return FlowRunReleaseEnvelope.Requirement(
                 requirementID: requirementID,
@@ -234,12 +257,12 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 diagnosticCodes: ["\(missingDiagnosticCode)-integrity-\(integrity.status.rawValue)"]
             )
         }
-        if let ageDiagnosticCode = evidenceAgeDiagnosticCode(
+        if let ageDiagnosticCode = await evidenceAgeDiagnosticCode(
+            artifactID: artifactID,
             reference: reference,
             projectRoot: projectRoot,
             maxEvidenceAgeDays: maxEvidenceAgeDays,
-            diagnosticPrefix: ageDiagnosticPrefix,
-            timestampPath: timestampPath
+            diagnosticPrefix: ageDiagnosticPrefix
         ) {
             return FlowRunReleaseEnvelope.Requirement(
                 requirementID: requirementID,
@@ -253,7 +276,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 diagnosticCodes: [ageDiagnosticCode]
             )
         }
-        let contentDiagnosticCodes = releaseArtifactContentDiagnosticCodes(
+        let contentDiagnosticCodes = await releaseArtifactContentDiagnosticCodes(
             artifactID: artifactID,
             reference: reference,
             projectRoot: projectRoot,
@@ -284,44 +307,53 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         )
     }
 
+    private func matchesStoragePath(_ actualPath: String, logicalPath: String) -> Bool {
+        actualPath == logicalPath || actualPath.hasSuffix("/\(logicalPath)")
+    }
+
     private func releaseArtifactContentDiagnosticCodes(
         artifactID: String,
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL,
         runID: String
-    ) -> [String] {
+    ) async -> [String] {
         switch artifactID {
         case "qualification-corpus-history":
-            corpusHistoryDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await corpusHistoryDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         case "qualification-performance-envelope":
-            performanceEnvelopeDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await performanceEnvelopeDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         case "qualification-contract-audit":
-            contractAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
+            await contractAuditDiagnosticCodes(reference: reference, projectRoot: projectRoot)
         case "release-qualification-result":
-            releaseQualificationDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID)
+            await releaseQualificationDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID)
         case "qualification-retention-index":
-            retentionIndexDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID, maxEvidenceAgeDays: nil)
+            await retentionIndexDiagnosticCodes(reference: reference, projectRoot: projectRoot, runID: runID, maxEvidenceAgeDays: nil)
         default:
             []
         }
     }
 
     private func corpusHistoryDiagnosticCodes(
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL
-    ) -> [String] {
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-corpus-history-path-invalid"]
+    ) async -> [String] {
+        let countCodes = await corpusCountDiagnosticCodes(reference: reference)
+        if !countCodes.isEmpty {
+            return countCodes
         }
-        let artifactValue: XcircuiteJSONValue
+        let artifact: FlowRunReleaseCorpusHistory
         do {
-            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifact = try await decodeArtifact(
+                FlowRunReleaseCorpusHistory.self,
+                reference: reference,
+                projectRoot: projectRoot
+            )
         } catch {
             return ["release-envelope-corpus-history-unreadable"]
         }
 
         var codes = Set<String>()
-        if let dashboardStatus = stringValue(value(at: ["dashboardStatus"], in: artifactValue)) {
+        if let dashboardStatus = artifact.dashboardStatus {
             if dashboardStatus != "passed" {
                 codes.insert("release-envelope-corpus-dashboard-not-passed")
             }
@@ -329,7 +361,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-corpus-dashboard-status-missing")
         }
 
-        if let historyStatus = stringValue(value(at: ["historyStatus"], in: artifactValue)) {
+        if let historyStatus = artifact.historyStatus {
             if historyStatus != "passed" {
                 codes.insert("release-envelope-corpus-history-not-passed")
             }
@@ -337,7 +369,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-corpus-history-status-missing")
         }
 
-        if let retainedStatus = stringValue(value(at: ["retainedSignoffSuiteStatus"], in: artifactValue)) {
+        if let retainedStatus = artifact.retainedSignoffSuiteStatus {
             if retainedStatus != "passed" {
                 codes.insert("release-envelope-corpus-retained-signoff-suite-not-passed")
             }
@@ -345,18 +377,11 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-corpus-retained-signoff-suite-status-missing")
         }
 
-        if let previousEntryCount = integerValue(
-            value(at: ["previousEntryCount"], in: artifactValue),
-            missingCode: "release-envelope-corpus-previous-history-missing",
-            invalidCode: "release-envelope-corpus-previous-history-count-invalid",
-            codes: &codes
-        ) {
-            if previousEntryCount <= 0 {
-                codes.insert("release-envelope-corpus-previous-history-missing")
-            }
+        if artifact.previousEntryCount <= 0 {
+            codes.insert("release-envelope-corpus-previous-history-missing")
         }
 
-        if let appended = boolValue(value(at: ["appended"], in: artifactValue)) {
+        if let appended = artifact.appended {
             if !appended {
                 codes.insert("release-envelope-corpus-history-not-appended")
             }
@@ -364,55 +389,36 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-corpus-history-appended-missing")
         }
 
-        if let diagnostics = arrayValue(value(at: ["diagnostics"], in: artifactValue)), !diagnostics.isEmpty {
+        if !artifact.diagnostics.isEmpty {
             codes.insert("release-envelope-corpus-diagnostics-present")
         }
 
-        guard let domains = arrayValue(value(at: ["domains"], in: artifactValue)), !domains.isEmpty else {
+        guard !artifact.domains.isEmpty else {
             codes.insert("release-envelope-corpus-domains-missing")
             return codes.sorted()
         }
 
-        for domainValue in domains {
-            guard case .object(let domain) = domainValue else {
-                codes.insert("release-envelope-corpus-domain-unreadable")
-                continue
-            }
-            if let domainStatus = stringValue(domain["status"]), domainStatus != "passed" {
+        for domain in artifact.domains {
+            if let domainStatus = domain.status, domainStatus != "passed" {
                 codes.insert("release-envelope-corpus-domain-failed")
             }
-            if boolValue(domain["qualified"]) != true {
+            if domain.qualified != true {
                 codes.insert("release-envelope-corpus-domain-unqualified")
             }
-            if let caseCount = integerValue(
-                domain["caseCount"],
-                missingCode: "release-envelope-corpus-domain-case-count-missing",
-                invalidCode: "release-envelope-corpus-domain-case-count-invalid",
-                codes: &codes
-            ) {
-                if caseCount <= 0 {
-                    codes.insert("release-envelope-corpus-domain-case-count-missing")
-                }
+            if let caseCount = domain.caseCount, caseCount <= 0 {
+                codes.insert("release-envelope-corpus-domain-case-count-missing")
+            } else if domain.caseCount == nil {
+                codes.insert("release-envelope-corpus-domain-case-count-missing")
             }
-            if let passRate = numberValue(domain["passRate"]), passRate < 1 {
+            if let passRate = domain.passRate, passRate < 1 {
                 codes.insert("release-envelope-corpus-domain-pass-rate-below-one")
             }
-            if let coverageTagCount = integerValue(
-                domain["coverageTagCount"],
-                missingCode: "release-envelope-corpus-domain-coverage-missing",
-                invalidCode: "release-envelope-corpus-domain-coverage-count-invalid",
-                codes: &codes
-            ) {
-                if coverageTagCount <= 0 {
-                    codes.insert("release-envelope-corpus-domain-coverage-missing")
-                }
+            if let coverageTagCount = domain.coverageTagCount, coverageTagCount <= 0 {
+                codes.insert("release-envelope-corpus-domain-coverage-missing")
+            } else if domain.coverageTagCount == nil {
+                codes.insert("release-envelope-corpus-domain-coverage-missing")
             }
-            if let failureCount = integerValue(
-                domain["failureCount"],
-                missingCode: "release-envelope-corpus-domain-failure-count-missing",
-                invalidCode: "release-envelope-corpus-domain-failure-count-invalid",
-                codes: &codes
-            ), failureCount > 0 {
+            if domain.failureCount > 0 {
                 codes.insert("release-envelope-corpus-domain-failures")
             }
         }
@@ -420,21 +426,26 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func performanceEnvelopeDiagnosticCodes(
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL
-    ) -> [String] {
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-performance-envelope-path-invalid"]
+    ) async -> [String] {
+        let countCodes = await performanceCountDiagnosticCodes(reference: reference)
+        if !countCodes.isEmpty {
+            return countCodes
         }
-        let artifactValue: XcircuiteJSONValue
+        let artifact: FlowRunReleasePerformanceEnvelope
         do {
-            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifact = try await decodeArtifact(
+                FlowRunReleasePerformanceEnvelope.self,
+                reference: reference,
+                projectRoot: projectRoot
+            )
         } catch {
             return ["release-envelope-performance-envelope-unreadable"]
         }
 
         var codes = Set<String>()
-        let historyStatus = stringValue(value(at: ["historyStatus"], in: artifactValue))
+        let historyStatus = artifact.historyStatus
         if let historyStatus {
             if historyStatus != "passed" {
                 codes.insert("release-envelope-performance-history-failed")
@@ -443,7 +454,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-performance-history-status-missing")
         }
 
-        let promotionStatus = stringValue(value(at: ["promotionStatus"], in: artifactValue))
+        let promotionStatus = artifact.promotionStatus
         if let promotionStatus {
             if promotionStatus != "passed" {
                 codes.insert("release-envelope-performance-promotion-failed")
@@ -452,51 +463,35 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             codes.insert("release-envelope-performance-promotion-status-missing")
         }
 
-        if let promotionFailureCount = integerValue(
-            value(at: ["promotionFailureCount"], in: artifactValue),
-            missingCode: "release-envelope-performance-promotion-failure-count-missing",
-            invalidCode: "release-envelope-performance-promotion-failure-count-invalid",
-            codes: &codes
-        ) {
-            if promotionFailureCount > 0 {
-                codes.insert("release-envelope-performance-promotion-failures")
-            }
+        if artifact.promotionFailureCount > 0 {
+            codes.insert("release-envelope-performance-promotion-failures")
         }
 
-        let maxTotalDurationRegression = numberValue(value(at: ["maxTotalDurationRegression"], in: artifactValue))
-        guard let domains = arrayValue(value(at: ["domains"], in: artifactValue)), !domains.isEmpty else {
+        let maxTotalDurationRegression = artifact.maxTotalDurationRegression
+        guard !artifact.domains.isEmpty else {
             codes.insert("release-envelope-performance-domains-missing")
             return codes.sorted()
         }
 
-        for domainValue in domains {
-            guard case .object(let domain) = domainValue else {
-                codes.insert("release-envelope-performance-domain-unreadable")
-                continue
-            }
-            let domainStatus = stringValue(domain["status"])
+        for domain in artifact.domains {
+            let domainStatus = domain.status
             if let domainStatus, domainStatus != "passed" {
                 codes.insert("release-envelope-performance-domain-failed")
             }
-            if let failureCount = integerValue(
-                domain["failureCount"],
-                missingCode: "release-envelope-performance-domain-failure-count-missing",
-                invalidCode: "release-envelope-performance-domain-failure-count-invalid",
-                codes: &codes
-            ), failureCount > 0 {
+            if domain.failureCount > 0 {
                 codes.insert("release-envelope-performance-domain-failures")
             }
-            if let current = numberValue(domain["currentTotalDurationSeconds"]),
-               let maximum = numberValue(domain["maxAllowedTotalDurationSeconds"]),
+            if let current = domain.currentTotalDurationSeconds,
+               let maximum = domain.maxAllowedTotalDurationSeconds,
                current > maximum {
                 codes.insert("release-envelope-performance-duration-budget-exceeded")
             }
-            if let ratio = numberValue(domain["durationRegressionRatio"]),
+            if let ratio = domain.durationRegressionRatio,
                let maximum = maxTotalDurationRegression,
                ratio > maximum {
                 codes.insert("release-envelope-performance-regression-budget-exceeded")
             }
-            if maxTotalDurationRegression == nil && numberValue(domain["maxAllowedTotalDurationSeconds"]) == nil {
+            if maxTotalDurationRegression == nil && domain.maxAllowedTotalDurationSeconds == nil {
                 codes.insert("release-envelope-performance-domain-budget-missing")
             }
         }
@@ -504,177 +499,209 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func contractAuditDiagnosticCodes(
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL
-    ) -> [String] {
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-contract-audit-path-invalid"]
+    ) async -> [String] {
+        let countCodes = await contractCountDiagnosticCodes(reference: reference)
+        if !countCodes.isEmpty {
+            return countCodes
         }
-        let artifactValue: XcircuiteJSONValue
+        let artifact: FlowRunReleaseContractAudit
         do {
-            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifact = try await decodeArtifact(
+                FlowRunReleaseContractAudit.self,
+                reference: reference,
+                projectRoot: projectRoot
+            )
         } catch {
             return ["release-envelope-contract-audit-unreadable"]
         }
 
         var codes = Set<String>()
-        if let status = stringValue(value(at: ["status"], in: artifactValue)) {
-            if status != "passed" {
-                codes.insert("release-envelope-contract-audit-not-passed")
-            }
-        } else {
-            codes.insert("release-envelope-contract-audit-status-missing")
+        if artifact.status != "passed" {
+            codes.insert("release-envelope-contract-audit-not-passed")
         }
 
-        if let contractCount = integerValue(
-            value(at: ["contractCount"], in: artifactValue),
-            missingCode: "release-envelope-contract-audit-contract-count-missing",
-            invalidCode: "release-envelope-contract-audit-contract-count-invalid",
-            codes: &codes
-        ) {
-            if contractCount <= 0 {
-                codes.insert("release-envelope-contract-audit-contract-count-missing")
-            }
+        if artifact.contractCount <= 0 {
+            codes.insert("release-envelope-contract-audit-contract-count-missing")
         }
 
-        if let failedContractCount = integerValue(
-            value(at: ["failedContractCount"], in: artifactValue),
-            missingCode: "release-envelope-contract-audit-failed-contract-count-missing",
-            invalidCode: "release-envelope-contract-audit-failed-contract-count-invalid",
-            codes: &codes
-        ) {
-            if failedContractCount > 0 {
-                codes.insert("release-envelope-contract-audit-failed-contracts")
-            }
+        if artifact.failedContractCount > 0 {
+            codes.insert("release-envelope-contract-audit-failed-contracts")
         }
 
-        if let diagnostics = arrayValue(value(at: ["diagnostics"], in: artifactValue)), !diagnostics.isEmpty {
+        if !artifact.diagnostics.isEmpty {
             codes.insert("release-envelope-contract-audit-diagnostics-present")
         }
 
-        guard let contracts = arrayValue(value(at: ["contracts"], in: artifactValue)), !contracts.isEmpty else {
+        guard !artifact.contracts.isEmpty else {
             codes.insert("release-envelope-contract-audit-contracts-missing")
             return codes.sorted()
         }
 
-        for contractValue in contracts {
-            guard case .object(let contract) = contractValue else {
-                codes.insert("release-envelope-contract-audit-contract-unreadable")
-                continue
-            }
-            if let status = stringValue(contract["status"]), status != "passed" {
+        for contract in artifact.contracts {
+            if contract.status != "passed" {
                 codes.insert("release-envelope-contract-audit-contract-failed")
             }
-            if let requiredPathCount = integerValue(
-                contract["requiredPathCount"],
-                missingCode: "release-envelope-contract-audit-contract-required-paths-missing",
-                invalidCode: "release-envelope-contract-audit-contract-required-path-count-invalid",
-                codes: &codes
-            ) {
-                if requiredPathCount <= 0 {
-                    codes.insert("release-envelope-contract-audit-contract-required-paths-missing")
-                }
+            if contract.requiredPathCount <= 0 {
+                codes.insert("release-envelope-contract-audit-contract-required-paths-missing")
             }
-            if let failureCount = integerValue(
-                contract["failureCount"],
-                missingCode: "release-envelope-contract-audit-contract-failure-count-missing",
-                invalidCode: "release-envelope-contract-audit-contract-failure-count-invalid",
-                codes: &codes
-            ), failureCount > 0 {
+            if contract.failureCount > 0 {
                 codes.insert("release-envelope-contract-audit-contract-failures")
             }
         }
         return codes.sorted()
     }
 
+    private func corpusCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+        do {
+            let content = try await persistence.loadArtifactContent(for: reference)
+            let document = try JSONDecoder().decode(CorpusCountDocument.self, from: content)
+            var codes: Set<String> = []
+            if !isWholeNumber(document.previousEntryCount) {
+                codes.insert("release-envelope-corpus-previous-history-count-invalid")
+            }
+            for domain in document.domains {
+                if let value = domain.caseCount, !isWholeNumber(value) {
+                    codes.insert("release-envelope-corpus-domain-case-count-invalid")
+                }
+                if let value = domain.coverageTagCount, !isWholeNumber(value) {
+                    codes.insert("release-envelope-corpus-domain-coverage-count-invalid")
+                }
+                if !isWholeNumber(domain.failureCount) {
+                    codes.insert("release-envelope-corpus-domain-failure-count-invalid")
+                }
+            }
+            return codes.sorted()
+        } catch {
+            return []
+        }
+    }
+
+    private func performanceCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+        do {
+            let content = try await persistence.loadArtifactContent(for: reference)
+            let document = try JSONDecoder().decode(PerformanceCountDocument.self, from: content)
+            var codes: Set<String> = []
+            if !isWholeNumber(document.promotionFailureCount) {
+                codes.insert("release-envelope-performance-promotion-failure-count-invalid")
+            }
+            if document.domains.contains(where: { !isWholeNumber($0.failureCount) }) {
+                codes.insert("release-envelope-performance-domain-failure-count-invalid")
+            }
+            return codes.sorted()
+        } catch {
+            return []
+        }
+    }
+
+    private func contractCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+        do {
+            let content = try await persistence.loadArtifactContent(for: reference)
+            let document = try JSONDecoder().decode(ContractCountDocument.self, from: content)
+            var codes: Set<String> = []
+            if !isWholeNumber(document.contractCount) {
+                codes.insert("release-envelope-contract-audit-contract-count-invalid")
+            }
+            if !isWholeNumber(document.failedContractCount) {
+                codes.insert("release-envelope-contract-audit-failed-contract-count-invalid")
+            }
+            if document.contracts.contains(where: { !isWholeNumber($0.requiredPathCount) }) {
+                codes.insert("release-envelope-contract-audit-contract-required-path-count-invalid")
+            }
+            if document.contracts.contains(where: { !isWholeNumber($0.failureCount) }) {
+                codes.insert("release-envelope-contract-audit-contract-failure-count-invalid")
+            }
+            return codes.sorted()
+        } catch {
+            return []
+        }
+    }
+
+    private func isWholeNumber(_ value: Double) -> Bool {
+        value.isFinite && value.rounded(.towardZero) == value
+    }
+
     private func releaseQualificationDiagnosticCodes(
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL,
         runID: String
-    ) -> [String] {
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-release-qualification-path-invalid"]
-        }
-        let artifactValue: XcircuiteJSONValue
+    ) async -> [String] {
+        let artifact: FlowRunReleaseQualificationArtifact
         do {
-            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            artifact = try await decodeArtifact(
+                FlowRunReleaseQualificationArtifact.self,
+                reference: reference,
+                projectRoot: projectRoot
+            )
         } catch {
             return ["release-envelope-release-qualification-unreadable"]
         }
 
         var codes = Set<String>()
-        if let observedRunID = stringValue(value(at: ["runID"], in: artifactValue)), !runID.isEmpty,
+        if let observedRunID = artifact.runID, !runID.isEmpty,
            observedRunID != runID {
             codes.insert("release-envelope-release-qualification-run-id-mismatch")
-        } else if stringValue(value(at: ["runID"], in: artifactValue)) == nil {
+        } else if artifact.runID == nil {
             codes.insert("release-envelope-release-qualification-run-id-missing")
         }
-        if stringValue(value(at: ["status"], in: artifactValue)) != "completed" {
+        if artifact.status != "completed" {
             codes.insert("release-envelope-release-qualification-not-completed")
         }
 
-        guard let payload = objectValue(value(at: ["payload"], in: artifactValue)) else {
+        guard let payload = artifact.payload else {
             codes.insert("release-envelope-release-qualification-payload-missing")
             return codes.sorted()
         }
-        if boolValue(payload["qualified"]) != true {
+        if !payload.qualified {
             codes.insert("release-envelope-release-qualification-not-qualified")
         }
-        if let promotionStatus = stringValue(payload["promotionStatus"]) {
+        if let promotionStatus = payload.promotionStatus {
             if promotionStatus == "blocked" {
                 codes.insert("release-envelope-release-qualification-promotion-blocked")
             }
         } else {
             codes.insert("release-envelope-release-qualification-promotion-status-missing")
         }
-        if let digest = stringValue(payload["qualificationDigest"]), digest.isEmpty {
+        if let digest = payload.qualificationDigest, digest.isEmpty {
             codes.insert("release-envelope-release-qualification-digest-missing")
-        } else if stringValue(payload["qualificationDigest"]) == nil {
+        } else if payload.qualificationDigest == nil {
             codes.insert("release-envelope-release-qualification-digest-missing")
         }
-        if let promotionFailures = arrayValue(payload["promotionFailureCodes"]), !promotionFailures.isEmpty {
+        if let promotionFailures = payload.promotionFailureCodes, !promotionFailures.isEmpty {
             codes.insert("release-envelope-release-qualification-promotion-failures")
         }
-        if let blockedLanes = arrayValue(payload["blockedLanes"]), !blockedLanes.isEmpty {
+        if let blockedLanes = payload.blockedLanes, !blockedLanes.isEmpty {
             codes.insert("release-envelope-release-qualification-blocked-lanes")
         }
-        if let failedLanes = arrayValue(payload["failedLanes"]), !failedLanes.isEmpty {
+        if let failedLanes = payload.failedLanes, !failedLanes.isEmpty {
             codes.insert("release-envelope-release-qualification-failed-lanes")
         }
-        if objectValue(payload["qualificationScope"]) == nil {
+        if payload.qualificationScope == nil {
             codes.insert("release-envelope-release-qualification-scope-missing")
-        } else if let scope = objectValue(payload["qualificationScope"]),
-                  ["implementationID", "binaryDigest", "algorithmVersion", "processProfileID", "deckDigest"].contains(where: {
-                      stringValue(scope[$0])?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
-                  }) {
+        } else if let scope = payload.qualificationScope,
+                  [scope.implementationID, scope.binaryDigest, scope.algorithmVersion, scope.processProfileID, scope.deckDigest]
+                    .contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
             codes.insert("release-envelope-release-qualification-scope-incomplete")
         }
-        guard let lanes = arrayValue(payload["laneResults"]), !lanes.isEmpty else {
+        guard let lanes = payload.laneResults, !lanes.isEmpty else {
             codes.insert("release-envelope-release-qualification-lanes-missing")
             return codes.sorted()
         }
-        for laneValue in lanes {
-            guard let lane = objectValue(laneValue) else {
-                codes.insert("release-envelope-release-qualification-lane-unreadable")
-                continue
-            }
-            if stringValue(lane["status"]) != "passed" {
+        for lane in lanes {
+            if lane.status != "passed" {
                 codes.insert("release-envelope-release-qualification-lane-failed")
             }
-            if boolValue(lane["qualified"]) != true {
+            if !lane.qualified {
                 codes.insert("release-envelope-release-qualification-lane-unqualified")
             }
-            if let failures = arrayValue(lane["failureCodes"]), !failures.isEmpty {
+            if !lane.failureCodes.isEmpty {
                 codes.insert("release-envelope-release-qualification-lane-failures")
             }
         }
-        if let diagnostics = arrayValue(value(at: ["diagnostics"], in: artifactValue)) {
-            for diagnosticValue in diagnostics {
-                guard let diagnostic = objectValue(diagnosticValue) else {
-                    codes.insert("release-envelope-release-qualification-diagnostic-unreadable")
-                    continue
-                }
-                if stringValue(diagnostic["severity"]) == "error" {
+        if let diagnostics = artifact.diagnostics {
+            for diagnostic in diagnostics {
+                if diagnostic.severity == "error" {
                     codes.insert("release-envelope-release-qualification-diagnostics-present")
                 }
             }
@@ -683,21 +710,21 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func retentionIndexDiagnosticCodes(
-        reference: XcircuiteFileReference,
+        reference: ArtifactReference,
         projectRoot: URL,
         runID: String,
         maxEvidenceAgeDays: Int?
-    ) -> [String] {
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return ["release-envelope-retention-index-path-invalid"]
-        }
+    ) async -> [String] {
         do {
-            let index = try storage.readJSON(
+            let index = try await decodeArtifact(
                 FlowRunReleaseRetentionIndex.self,
-                from: artifactURL
+                reference: reference,
+                projectRoot: projectRoot
             )
             let maximumAgeSeconds = maxEvidenceAgeDays.map { Double($0) * 24 * 60 * 60 }
-            let validation = try DefaultFlowRunReleaseRetentionIndexValidator().validate(
+            let validation = try await DefaultFlowRunReleaseRetentionIndexValidator(
+                persistence: persistence
+            ).validate(
                 index: index,
                 runID: runID,
                 projectRoot: projectRoot,
@@ -711,28 +738,42 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func evidenceAgeDiagnosticCode(
-        reference: XcircuiteFileReference,
+        artifactID: String,
+        reference: ArtifactReference,
         projectRoot: URL,
         maxEvidenceAgeDays: Int?,
-        diagnosticPrefix: String,
-        timestampPath: [String] = ["collectedAt"]
-    ) -> String? {
+        diagnosticPrefix: String
+    ) async -> String? {
         guard let maxEvidenceAgeDays else {
             return nil
         }
         guard maxEvidenceAgeDays >= 0 else {
             return "\(diagnosticPrefix)-age-policy-invalid"
         }
-        guard let artifactURL = fileReferenceVerifier.resolvedURL(for: reference, projectRoot: projectRoot) else {
-            return "\(diagnosticPrefix)-path-invalid"
-        }
-        let artifactValue: XcircuiteJSONValue
+        let collectedAt: String?
         do {
-            artifactValue = try storage.readJSON(XcircuiteJSONValue.self, from: artifactURL)
+            switch artifactID {
+            case "qualification-corpus-history":
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+            case "qualification-performance-envelope":
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+            case "qualification-contract-audit":
+                collectedAt = try await decodeArtifact(EvidenceTimestampDocument.self, reference: reference, projectRoot: projectRoot).collectedAt
+            case "release-qualification-result":
+                collectedAt = try await decodeArtifact(
+                    FlowRunReleaseQualificationArtifact.self,
+                    reference: reference,
+                    projectRoot: projectRoot
+                ).metadata?.completedAt
+            case "qualification-retention-index":
+                collectedAt = try await decodeArtifact(FlowRunReleaseRetentionIndex.self, reference: reference, projectRoot: projectRoot).recordedAt
+            default:
+                collectedAt = nil
+            }
         } catch {
             return "\(diagnosticPrefix)-collected-at-unreadable"
         }
-        guard let collectedAt = stringValue(value(at: timestampPath, in: artifactValue)) else {
+        guard let collectedAt else {
             return "\(diagnosticPrefix)-collected-at-missing"
         }
         guard let collectedDate = parseISO8601Date(collectedAt) else {
@@ -855,32 +896,33 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         _ envelope: FlowRunReleaseEnvelope,
         runID: String,
         projectRoot: URL
-    ) throws -> ArtifactReference {
-        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
-        let qualificationDirectory = runDirectory.appending(path: "qualification")
-        try storage.ensureDirectory(at: qualificationDirectory)
-        let envelopeURL = qualificationDirectory.appending(path: "release-envelope.json")
-        try storage.writeJSON(envelope, to: envelopeURL, forProjectAt: projectRoot)
-
-        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try storage.makeArtifactReference(
-            forProjectRelativePath: projectRelativePath,
-            artifactID: Self.artifactID,
-            role: .output,
-            kind: .report,
-            format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID,
-            verifiedByRunID: nil
+    ) async throws -> ArtifactReference {
+        let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try await persistence.persistArtifact(
+            content: encoder.encode(envelope),
+            id: ArtifactID(rawValue: Self.artifactID),
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            runID: runID,
+            mode: .replaceable
         )
-        do {
-            try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
-        } catch {
-            guard envelope.diagnostics.contains(where: { $0.code == "release-envelope-run-manifest-unreadable" }) else {
-                throw error
-            }
-        }
-        return reference
+    }
+
+    private func decodeArtifact<Value: Decodable>(
+        _ type: Value.Type,
+        reference: ArtifactReference,
+        projectRoot: URL
+    ) async throws -> Value {
+        let content = try await persistence.loadArtifactContent(
+            for: reference
+        )
+        return try JSONDecoder().decode(type, from: content)
     }
 
     private func severityRank(_ severity: FlowDiagnosticSeverity) -> Int {
@@ -894,76 +936,42 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
     }
 
-    private func value(
-        at path: [String],
-        in value: XcircuiteJSONValue?
-    ) -> XcircuiteJSONValue? {
-        var current = value
-        for segment in path {
-            guard case .object(let object) = current else {
-                return nil
-            }
-            current = object[segment]
-        }
-        return current
-    }
-
-    private func stringValue(_ value: XcircuiteJSONValue?) -> String? {
-        guard case .string(let string) = value else {
-            return nil
-        }
-        return string
-    }
-
-    private func objectValue(_ value: XcircuiteJSONValue?) -> [String: XcircuiteJSONValue]? {
-        guard case .object(let object) = value else {
-            return nil
-        }
-        return object
-    }
-
-    private func numberValue(_ value: XcircuiteJSONValue?) -> Double? {
-        guard case .number(let number) = value else {
-            return nil
-        }
-        return number
-    }
-
-    private func integerValue(
-        _ value: XcircuiteJSONValue?,
-        missingCode: String,
-        invalidCode: String,
-        codes: inout Set<String>
-    ) -> Int? {
-        guard let number = numberValue(value) else {
-            codes.insert(missingCode)
-            return nil
-        }
-        guard number.isFinite,
-              number.rounded(.towardZero) == number,
-              number >= Double(Int.min),
-              number <= Double(Int.max) else {
-            codes.insert(invalidCode)
-            return nil
-        }
-        return Int(number)
-    }
-
-    private func boolValue(_ value: XcircuiteJSONValue?) -> Bool? {
-        guard case .bool(let bool) = value else {
-            return nil
-        }
-        return bool
-    }
-
-    private func arrayValue(_ value: XcircuiteJSONValue?) -> [XcircuiteJSONValue]? {
-        guard case .array(let array) = value else {
-            return nil
-        }
-        return array
-    }
-
     private func uniqueSorted(_ values: [String]) -> [String] {
         Array(Set(values)).sorted()
     }
+}
+
+private struct CorpusCountDocument: Decodable {
+    struct Domain: Decodable {
+        var caseCount: Double?
+        var coverageTagCount: Double?
+        var failureCount: Double
+    }
+
+    var previousEntryCount: Double
+    var domains: [Domain]
+}
+
+private struct EvidenceTimestampDocument: Decodable {
+    var collectedAt: String
+}
+
+private struct PerformanceCountDocument: Decodable {
+    struct Domain: Decodable {
+        var failureCount: Double
+    }
+
+    var promotionFailureCount: Double
+    var domains: [Domain]
+}
+
+private struct ContractCountDocument: Decodable {
+    struct Contract: Decodable {
+        var requiredPathCount: Double
+        var failureCount: Double
+    }
+
+    var contractCount: Double
+    var failedContractCount: Double
+    var contracts: [Contract]
 }

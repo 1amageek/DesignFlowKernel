@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public protocol FlowRunReleaseRetentionIndexBuilding: Sendable {
@@ -5,11 +6,11 @@ public protocol FlowRunReleaseRetentionIndexBuilding: Sendable {
         runID: String,
         workflowRunID: String,
         projectRoot: URL,
-        sourceDashboardPath: String,
-        historyPath: String,
+        sourceDashboard: ArtifactReference,
+        history: ArtifactReference,
         previousEntryCount: Int,
         retentionDays: Int,
         minimumRetentionDays: Int,
         recordedAt: Date
-    ) throws -> FlowRunReleaseRetentionIndex
+    ) async throws -> FlowRunReleaseRetentionIndex
 }

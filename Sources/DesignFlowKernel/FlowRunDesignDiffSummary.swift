@@ -3,16 +3,16 @@ import Foundation
 public struct FlowRunDesignDiffSummary: Sendable, Hashable, Codable {
     public var title: String
     public var actor: String
-    public var reviewState: XcircuiteDesignDiffReviewState
+    public var reviewState: DesignDiffReviewState
     public var changeCount: Int
-    public var domains: [XcircuiteDesignDiffDomain]
+    public var domains: [DesignDiffDomain]
 
     public init(
         title: String,
         actor: String,
-        reviewState: XcircuiteDesignDiffReviewState,
+        reviewState: DesignDiffReviewState,
         changeCount: Int,
-        domains: [XcircuiteDesignDiffDomain]
+        domains: [DesignDiffDomain]
     ) {
         self.title = title
         self.actor = actor

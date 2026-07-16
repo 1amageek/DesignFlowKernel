@@ -15,25 +15,25 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
 
     private let loader: any FlowRunLedgerLoading
     private let reviewBundler: any FlowRunReviewBundling
-    private let storage: XcircuiteWorkspaceStore
+    private let persistence: any FlowArtifactPersisting
     private let identifierPolicy = FlowRunReviewIdentifierPolicy()
 
     public init(
-        loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler(),
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
+        loader: any FlowRunLedgerLoading,
+        reviewBundler: any FlowRunReviewBundling,
+        persistence: any FlowArtifactPersisting
     ) {
         self.loader = loader
         self.reviewBundler = reviewBundler
-        self.storage = storage
+        self.persistence = persistence
     }
 
     public func makeStageArtifactLadder(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunStageArtifactLadder {
-        let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
-        let bundle = try reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
+    ) async throws -> FlowRunStageArtifactLadder {
+        let ledger = try await loader.loadRunLedger(runID: runID)
+        let bundle = try await reviewBundler.makeReviewBundle(runID: runID, projectRoot: projectRoot)
         return makeStageArtifactLadder(
             from: bundle,
             stageResults: ledger.stages,
@@ -44,26 +44,23 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
     public func buildStageArtifactLadder(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunStageArtifactLadderBuildResult {
-        let ladder = try makeStageArtifactLadder(runID: runID, projectRoot: projectRoot)
-        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
-        let reviewDirectory = runDirectory.appending(path: "review")
-        try storage.ensureDirectory(at: reviewDirectory)
-
-        let ladderURL = reviewDirectory.appending(path: "stage-artifact-ladder.json")
-        try storage.writeJSON(ladder, to: ladderURL, forProjectAt: projectRoot)
-
-        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try storage.makeArtifactReference(
-            forProjectRelativePath: projectRelativePath,
-            artifactID: Self.artifactID,
-            role: .output,
-            kind: .report,
-            format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID
+    ) async throws -> FlowRunStageArtifactLadderBuildResult {
+        let ladder = try await makeStageArtifactLadder(runID: runID, projectRoot: projectRoot)
+        let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let reference = try await persistence.persistArtifact(
+            content: encoder.encode(ladder),
+            id: ArtifactID(rawValue: Self.artifactID),
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            runID: runID,
+            mode: .replaceable
         )
-        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
         return FlowRunStageArtifactLadderBuildResult(ladder: ladder, artifact: reference)
     }
 
@@ -160,7 +157,6 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             runID: bundle.runID,
             status: bundle.status,
             readiness: readiness,
-            runDirectoryPath: bundle.runDirectoryPath,
             summary: summary,
             runArtifacts: sortedArtifacts(runArtifacts),
             stages: stages,
@@ -231,7 +227,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         if searchable.contains("lvs") {
             return "lvs"
         }
-        if searchable.contains("pex") || searchable.contains("spef") || artifact.kind == .parasitic || artifact.format == .spef {
+        if searchable.contains("pex") || searchable.contains("spef") || artifact.kind == .parasitics || artifact.format == .spef {
             return "pex"
         }
         if searchable.contains("export") || artifact.format == .oasis || artifact.format == .gdsii

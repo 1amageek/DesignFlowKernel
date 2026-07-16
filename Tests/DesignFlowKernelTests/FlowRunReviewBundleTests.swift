@@ -1,6 +1,5 @@
 import DesignFlowKernel
 import CircuiteFoundation
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -17,7 +16,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -26,13 +25,13 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: summaryPayload]
     )
-    try XcircuiteWorkspaceStore().writeDesignDiff(
-        XcircuiteDesignDiff(
+    try await TestFlowInfrastructure.bound(to: root).writeDesignDiff(
+        DesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
             actor: "agent-1",
             changes: [
-                XcircuiteDesignDiffChange(
+                DesignDiffChange(
                     changeID: "change-1",
                     domain: .layout,
                     operation: .replace,
@@ -46,7 +45,7 @@ extension FlowRunLedgerSummaryTests {
         inProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -81,14 +80,14 @@ extension FlowRunLedgerSummaryTests {
             && $0.stageID == "001-drc"
             && $0.path == summaryPath
     })
-    let expectedSummaryDigest = XcircuiteHasher().sha256(data: summaryPayload)
+    let expectedSummaryDigest = try TestContentDigester().sha256(data: summaryPayload)
     #expect(summaryArtifact.sha256 == expectedSummaryDigest)
-    #expect(summaryArtifact.byteCount == Int64(summaryPayload.count))
+    #expect(summaryArtifact.byteCount == UInt64(summaryPayload.count))
     #expect(summaryArtifact.integrity?.status == .verified)
     #expect(summaryArtifact.integrity?.expectedSHA256 == expectedSummaryDigest)
     #expect(summaryArtifact.integrity?.actualSHA256 == expectedSummaryDigest)
-    #expect(summaryArtifact.integrity?.expectedByteCount == Int64(summaryPayload.count))
-    #expect(summaryArtifact.integrity?.actualByteCount == Int64(summaryPayload.count))
+    #expect(summaryArtifact.integrity?.expectedByteCount == UInt64(summaryPayload.count))
+    #expect(summaryArtifact.integrity?.actualByteCount == UInt64(summaryPayload.count))
     #expect(bundle.coverageRefs?.contains {
         $0.domain == "diff"
             && $0.path == ".xcircuite/runs/run-1/design-diff.json"
@@ -139,7 +138,7 @@ extension FlowRunLedgerSummaryTests {
     let editReportPayload = Data(#"{"schemaVersion":1,"stepID":"step-1","edits":[]}"#.utf8)
 
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuiteWorkspaceStore()
+    let store = await TestFlowInfrastructure.bound(to: root)
     try FileManager.default.createDirectory(
         at: root.appending(path: planningPath).deletingLastPathComponent(),
         withIntermediateDirectories: true
@@ -161,125 +160,125 @@ extension FlowRunLedgerSummaryTests {
     )
     try editedNetlistPayload.write(to: root.appending(path: editedNetlistPath), options: .atomic)
     try editReportPayload.write(to: root.appending(path: editReportPath), options: .atomic)
-    let reference = try store.fileReference(
+    let reference = try await store.fileReference(
         forProjectRelativePath: planningPath,
         artifactID: "planning-action-domain-snapshot",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
-    let problemReference = try store.fileReference(
+    try await store.upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
+    let problemReference = try await store.fileReference(
         forProjectRelativePath: problemPath,
         artifactID: "planning-problem",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(problemReference, runID: "run-1", inProjectAt: root)
-    let problemTranslationAuditReference = try store.fileReference(
+    try await store.upsertRunArtifact(problemReference, runID: "run-1", inProjectAt: root)
+    let problemTranslationAuditReference = try await store.fileReference(
         forProjectRelativePath: problemTranslationAuditPath,
         artifactID: "planning-problem-translation-audit",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(problemTranslationAuditReference, runID: "run-1", inProjectAt: root)
-    let candidatePlanReference = try store.fileReference(
+    try await store.upsertRunArtifact(problemTranslationAuditReference, runID: "run-1", inProjectAt: root)
+    let candidatePlanReference = try await store.fileReference(
         forProjectRelativePath: candidatePlanPath,
         artifactID: "planning-candidate-plan",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(candidatePlanReference, runID: "run-1", inProjectAt: root)
-    let symbolicPlannerTraceReference = try store.fileReference(
+    try await store.upsertRunArtifact(candidatePlanReference, runID: "run-1", inProjectAt: root)
+    let symbolicPlannerTraceReference = try await store.fileReference(
         forProjectRelativePath: symbolicPlannerTracePath,
         artifactID: "planning-symbolic-planner-trace",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(symbolicPlannerTraceReference, runID: "run-1", inProjectAt: root)
-    let parameterCandidatesReference = try store.fileReference(
+    try await store.upsertRunArtifact(symbolicPlannerTraceReference, runID: "run-1", inProjectAt: root)
+    let parameterCandidatesReference = try await store.fileReference(
         forProjectRelativePath: parameterCandidatesPath,
         artifactID: "planning-parameter-candidates",
         kind: .other,
         format: .text,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(parameterCandidatesReference, runID: "run-1", inProjectAt: root)
-    let searchTraceReference = try store.fileReference(
+    try await store.upsertRunArtifact(parameterCandidatesReference, runID: "run-1", inProjectAt: root)
+    let searchTraceReference = try await store.fileReference(
         forProjectRelativePath: searchTracePath,
         artifactID: "planning-parameter-candidate-search-trace",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(searchTraceReference, runID: "run-1", inProjectAt: root)
-    let selectionTraceReference = try store.fileReference(
+    try await store.upsertRunArtifact(searchTraceReference, runID: "run-1", inProjectAt: root)
+    let selectionTraceReference = try await store.fileReference(
         forProjectRelativePath: selectionTracePath,
         artifactID: "planning-parameter-candidate-selection-trace",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(selectionTraceReference, runID: "run-1", inProjectAt: root)
-    let planVerificationReference = try store.fileReference(
+    try await store.upsertRunArtifact(selectionTraceReference, runID: "run-1", inProjectAt: root)
+    let planVerificationReference = try await store.fileReference(
         forProjectRelativePath: planVerificationPath,
         artifactID: "planning-plan-verification",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(planVerificationReference, runID: "run-1", inProjectAt: root)
-    let rejectedPlansReference = try store.fileReference(
+    try await store.upsertRunArtifact(planVerificationReference, runID: "run-1", inProjectAt: root)
+    let rejectedPlansReference = try await store.fileReference(
         forProjectRelativePath: rejectedPlansPath,
         artifactID: "planning-rejected-plans",
         kind: .other,
         format: .text,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(rejectedPlansReference, runID: "run-1", inProjectAt: root)
-    let planExecutionReference = try store.fileReference(
+    try await store.upsertRunArtifact(rejectedPlansReference, runID: "run-1", inProjectAt: root)
+    let planExecutionReference = try await store.fileReference(
         forProjectRelativePath: planExecutionPath,
         artifactID: "planning-plan-execution",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(planExecutionReference, runID: "run-1", inProjectAt: root)
-    let editedNetlistReference = try store.fileReference(
+    try await store.upsertRunArtifact(planExecutionReference, runID: "run-1", inProjectAt: root)
+    let editedNetlistReference = try await store.fileReference(
         forProjectRelativePath: editedNetlistPath,
         artifactID: "candidate-step-1-edited-netlist",
         kind: .netlist,
         format: .spice,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(editedNetlistReference, runID: "run-1", inProjectAt: root)
-    let editReportReference = try store.fileReference(
+    try await store.upsertRunArtifact(editedNetlistReference, runID: "run-1", inProjectAt: root)
+    let editReportReference = try await store.fileReference(
         forProjectRelativePath: editReportPath,
         artifactID: "candidate-step-1-netlist-parameter-edit-report",
         kind: .report,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(editReportReference, runID: "run-1", inProjectAt: root)
+    try await store.upsertRunArtifact(editReportReference, runID: "run-1", inProjectAt: root)
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -291,8 +290,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(planningArtifact.kind == .other)
     #expect(planningArtifact.format == .json)
-    #expect(planningArtifact.sha256 == XcircuiteHasher().sha256(data: planningPayload))
-    #expect(planningArtifact.byteCount == Int64(planningPayload.count))
+    #expect(planningArtifact.sha256 == (try TestContentDigester().sha256(data: planningPayload)))
+    #expect(planningArtifact.byteCount == UInt64(planningPayload.count))
     #expect(planningArtifact.integrity?.status == .verified)
     let problemArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-problem"
@@ -301,8 +300,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(problemArtifact.kind == .other)
     #expect(problemArtifact.format == .json)
-    #expect(problemArtifact.sha256 == XcircuiteHasher().sha256(data: problemPayload))
-    #expect(problemArtifact.byteCount == Int64(problemPayload.count))
+    #expect(problemArtifact.sha256 == (try TestContentDigester().sha256(data: problemPayload)))
+    #expect(problemArtifact.byteCount == UInt64(problemPayload.count))
     #expect(problemArtifact.integrity?.status == .verified)
     let problemTranslationAuditArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-problem-translation-audit"
@@ -311,8 +310,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(problemTranslationAuditArtifact.kind == .other)
     #expect(problemTranslationAuditArtifact.format == .json)
-    #expect(problemTranslationAuditArtifact.sha256 == XcircuiteHasher().sha256(data: problemTranslationAuditPayload))
-    #expect(problemTranslationAuditArtifact.byteCount == Int64(problemTranslationAuditPayload.count))
+    #expect(problemTranslationAuditArtifact.sha256 == (try TestContentDigester().sha256(data: problemTranslationAuditPayload)))
+    #expect(problemTranslationAuditArtifact.byteCount == UInt64(problemTranslationAuditPayload.count))
     #expect(problemTranslationAuditArtifact.integrity?.status == .verified)
     let candidatePlanArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-candidate-plan"
@@ -321,8 +320,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(candidatePlanArtifact.kind == .other)
     #expect(candidatePlanArtifact.format == .json)
-    #expect(candidatePlanArtifact.sha256 == XcircuiteHasher().sha256(data: candidatePlanPayload))
-    #expect(candidatePlanArtifact.byteCount == Int64(candidatePlanPayload.count))
+    #expect(candidatePlanArtifact.sha256 == (try TestContentDigester().sha256(data: candidatePlanPayload)))
+    #expect(candidatePlanArtifact.byteCount == UInt64(candidatePlanPayload.count))
     #expect(candidatePlanArtifact.integrity?.status == .verified)
     let symbolicPlannerTraceArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-symbolic-planner-trace"
@@ -331,8 +330,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(symbolicPlannerTraceArtifact.kind == .other)
     #expect(symbolicPlannerTraceArtifact.format == .json)
-    #expect(symbolicPlannerTraceArtifact.sha256 == XcircuiteHasher().sha256(data: symbolicPlannerTracePayload))
-    #expect(symbolicPlannerTraceArtifact.byteCount == Int64(symbolicPlannerTracePayload.count))
+    #expect(symbolicPlannerTraceArtifact.sha256 == (try TestContentDigester().sha256(data: symbolicPlannerTracePayload)))
+    #expect(symbolicPlannerTraceArtifact.byteCount == UInt64(symbolicPlannerTracePayload.count))
     #expect(symbolicPlannerTraceArtifact.integrity?.status == .verified)
     let parameterCandidatesArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-parameter-candidates"
@@ -341,8 +340,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(parameterCandidatesArtifact.kind == .other)
     #expect(parameterCandidatesArtifact.format == .text)
-    #expect(parameterCandidatesArtifact.sha256 == XcircuiteHasher().sha256(data: parameterCandidatesPayload))
-    #expect(parameterCandidatesArtifact.byteCount == Int64(parameterCandidatesPayload.count))
+    #expect(parameterCandidatesArtifact.sha256 == (try TestContentDigester().sha256(data: parameterCandidatesPayload)))
+    #expect(parameterCandidatesArtifact.byteCount == UInt64(parameterCandidatesPayload.count))
     #expect(parameterCandidatesArtifact.integrity?.status == .verified)
     let searchTraceArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-parameter-candidate-search-trace"
@@ -351,8 +350,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(searchTraceArtifact.kind == .other)
     #expect(searchTraceArtifact.format == .json)
-    #expect(searchTraceArtifact.sha256 == XcircuiteHasher().sha256(data: searchTracePayload))
-    #expect(searchTraceArtifact.byteCount == Int64(searchTracePayload.count))
+    #expect(searchTraceArtifact.sha256 == (try TestContentDigester().sha256(data: searchTracePayload)))
+    #expect(searchTraceArtifact.byteCount == UInt64(searchTracePayload.count))
     #expect(searchTraceArtifact.integrity?.status == .verified)
     let selectionTraceArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-parameter-candidate-selection-trace"
@@ -361,8 +360,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(selectionTraceArtifact.kind == .other)
     #expect(selectionTraceArtifact.format == .json)
-    #expect(selectionTraceArtifact.sha256 == XcircuiteHasher().sha256(data: selectionTracePayload))
-    #expect(selectionTraceArtifact.byteCount == Int64(selectionTracePayload.count))
+    #expect(selectionTraceArtifact.sha256 == (try TestContentDigester().sha256(data: selectionTracePayload)))
+    #expect(selectionTraceArtifact.byteCount == UInt64(selectionTracePayload.count))
     #expect(selectionTraceArtifact.integrity?.status == .verified)
     let planVerificationArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-plan-verification"
@@ -371,8 +370,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(planVerificationArtifact.kind == .other)
     #expect(planVerificationArtifact.format == .json)
-    #expect(planVerificationArtifact.sha256 == XcircuiteHasher().sha256(data: planVerificationPayload))
-    #expect(planVerificationArtifact.byteCount == Int64(planVerificationPayload.count))
+    #expect(planVerificationArtifact.sha256 == (try TestContentDigester().sha256(data: planVerificationPayload)))
+    #expect(planVerificationArtifact.byteCount == UInt64(planVerificationPayload.count))
     #expect(planVerificationArtifact.integrity?.status == .verified)
     let planningCorrectnessItem = try #require(bundle.reviewItems.first {
         $0.kind == .planningCorrectness
@@ -428,8 +427,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(rejectedPlansArtifact.kind == .other)
     #expect(rejectedPlansArtifact.format == .text)
-    #expect(rejectedPlansArtifact.sha256 == XcircuiteHasher().sha256(data: rejectedPlansPayload))
-    #expect(rejectedPlansArtifact.byteCount == Int64(rejectedPlansPayload.count))
+    #expect(rejectedPlansArtifact.sha256 == (try TestContentDigester().sha256(data: rejectedPlansPayload)))
+    #expect(rejectedPlansArtifact.byteCount == UInt64(rejectedPlansPayload.count))
     #expect(rejectedPlansArtifact.integrity?.status == .verified)
     let planningFeedbackItem = try #require(bundle.reviewItems.first {
         $0.itemID == "planning-rejected-feedback"
@@ -467,8 +466,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(planExecutionArtifact.kind == .other)
     #expect(planExecutionArtifact.format == .json)
-    #expect(planExecutionArtifact.sha256 == XcircuiteHasher().sha256(data: planExecutionPayload))
-    #expect(planExecutionArtifact.byteCount == Int64(planExecutionPayload.count))
+    #expect(planExecutionArtifact.sha256 == (try TestContentDigester().sha256(data: planExecutionPayload)))
+    #expect(planExecutionArtifact.byteCount == UInt64(planExecutionPayload.count))
     #expect(planExecutionArtifact.integrity?.status == .verified)
     let editedNetlistArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-edited-netlist"
@@ -477,8 +476,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(editedNetlistArtifact.kind == .netlist)
     #expect(editedNetlistArtifact.format == .spice)
-    #expect(editedNetlistArtifact.sha256 == XcircuiteHasher().sha256(data: editedNetlistPayload))
-    #expect(editedNetlistArtifact.byteCount == Int64(editedNetlistPayload.count))
+    #expect(editedNetlistArtifact.sha256 == (try TestContentDigester().sha256(data: editedNetlistPayload)))
+    #expect(editedNetlistArtifact.byteCount == UInt64(editedNetlistPayload.count))
     #expect(editedNetlistArtifact.integrity?.status == .verified)
     let editReportArtifact = try #require(bundle.artifacts.first {
         $0.role == "planning-netlist-parameter-edit-report"
@@ -487,8 +486,8 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(editReportArtifact.kind == .report)
     #expect(editReportArtifact.format == .json)
-    #expect(editReportArtifact.sha256 == XcircuiteHasher().sha256(data: editReportPayload))
-    #expect(editReportArtifact.byteCount == Int64(editReportPayload.count))
+    #expect(editReportArtifact.sha256 == (try TestContentDigester().sha256(data: editReportPayload)))
+    #expect(editReportArtifact.byteCount == UInt64(editReportPayload.count))
     #expect(editReportArtifact.integrity?.status == .verified)
 }
 
@@ -504,42 +503,42 @@ extension FlowRunLedgerSummaryTests {
     let releaseEnvelopePath = ".xcircuite/runs/\(runID)/qualification/release-envelope.json"
 
     try await createBlockedApprovalRun(root: root, runID: runID)
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"passed","kind":"signoff-qualification-ci-history-dashboard","actionItems":[],"entries":[{"status":"passed"}]}"#.utf8),
         path: dashboardPath,
         artifactID: "signoff-qualification-ci-history-dashboard",
         root: root,
         runID: runID
     )
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"passed"}"#.utf8),
         path: historyPath,
         artifactID: "signoff-qualification-ci-history",
         root: root,
         runID: runID
     )
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"passed","artifactRefs":[]}"#.utf8),
         path: retentionIndexPath,
         artifactID: "signoff-qualification-ci-retention-index",
         root: root,
         runID: runID
     )
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"needsReview","actionItems":[{"code":"retention_index_review_dashboard_ref_byte_count_mismatch","nextAction":"refresh-retention-index"}]}"#.utf8),
         path: indexReviewPath,
         artifactID: "ci-retention-index-review",
         root: root,
         runID: runID
     )
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"failed","failures":[{"code":"retained_ci_regression_budget_evidence_stale"}],"actionItems":[{"code":"retained_ci_regression_budget_refresh_history"}]}"#.utf8),
         path: budgetPath,
         artifactID: "retained-ci-regression-budget",
         root: root,
         runID: runID
     )
-    try writeRunArtifact(
+    try await writeRunArtifact(
         Data(#"{"schemaVersion":1,"status":"blocked","requirements":[{"requirementID":"retained-corpus-history","required":true,"status":"blocked","diagnosticCodes":["release-envelope-corpus-history-stale"]}],"diagnostics":[{"code":"release-envelope-corpus-history-stale","severity":"error"}]}"#.utf8),
         path: releaseEnvelopePath,
         artifactID: "qualification-release-envelope",
@@ -547,7 +546,7 @@ extension FlowRunLedgerSummaryTests {
         runID: runID
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: runID,
         projectRoot: root
     )
@@ -603,7 +602,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -613,7 +612,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -643,7 +642,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -652,7 +651,7 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: summaryPayload]
     )
-    var result = try XcircuiteWorkspaceStore().readJSON(
+    var result = try await TestFlowInfrastructure.bound(to: root).readJSON(
         FlowStageResult.self,
         from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
     )
@@ -664,13 +663,13 @@ extension FlowRunLedgerSummaryTests {
         byteCount: 1,
         producer: originalArtifact.producer
     )
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         result,
         to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"),
         forProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -682,7 +681,7 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(summaryArtifact.integrity?.status == .byteCountMismatch)
     #expect(summaryArtifact.integrity?.expectedByteCount == 1)
-    #expect(summaryArtifact.integrity?.actualByteCount == Int64(summaryPayload.count))
+    #expect(summaryArtifact.integrity?.actualByteCount == UInt64(summaryPayload.count))
     #expect(bundle.reviewItems.contains {
         $0.kind == .artifactIntegrity
             && $0.status == .needsRepair
@@ -696,7 +695,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         FlowRunPlan(
             runID: "run-1",
             intent: "Tampered intent",
@@ -708,7 +707,7 @@ extension FlowRunLedgerSummaryTests {
         forProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -735,7 +734,7 @@ extension FlowRunLedgerSummaryTests {
     try Data(#"{"stageID":"001-drc","status":"blocked","diagnostics":[{"severity":"warning","code":"TAMPERED","message":"tampered"}],"gates":[],"artifacts":[],"attempts":[]}"#.utf8)
         .write(to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"), options: .atomic)
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -759,7 +758,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-review-tampered-approval")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -769,20 +768,20 @@ extension FlowRunLedgerSummaryTests {
         )
     )
     var approval = try #require(
-        try XcircuiteWorkspaceStore().loadApproval(
+        try await TestFlowInfrastructure.bound(to: root).loadApproval(
             runID: "run-1",
             stageID: "001-drc",
             inProjectAt: root
         )
     )
     approval.reviewer = "intruder"
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         approval,
         to: root.appending(path: ".xcircuite/runs/run-1/approvals/001-drc.json"),
         forProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -801,14 +800,14 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    _ = try DefaultFlowRunCancellationRecorder().requestCancellation(
+    _ = try await makeTestCancellationRecorder(projectRoot: root).requestCancellation(
         projectRoot: root,
         runID: "run-1",
         requestedBy: "reviewer-1",
         reason: "Stop before resume."
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -834,7 +833,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -844,18 +843,18 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: payload]
     )
     let resultPath = ".xcircuite/runs/run-1/stages/001-drc/result.json"
-    var result = try XcircuiteWorkspaceStore().readJSON(
+    var result = try await TestFlowInfrastructure.bound(to: root).readJSON(
         FlowStageResult.self,
         from: root.appending(path: resultPath)
     )
     result.stageID = "../escape"
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         result,
         to: root.appending(path: resultPath),
         forProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -882,23 +881,23 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-review-approved")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuiteWorkspaceStore()
-    try store.writeApproval(
-        XcircuiteApprovalRecord(
+    let store = await TestFlowInfrastructure.bound(to: root)
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            projectRoot: root,
             runID: "run-1",
             stageID: "001-drc",
             verdict: .approved,
             reviewer: "reviewer-1",
             note: "DRC report reviewed."
-        ),
-        inProjectAt: root
+        )
     )
-    try store.appendReviewDecisionAction(
-        XcircuiteRunReviewDecisionActionRequest(
+    try await store.appendReviewDecisionAction(
+        FlowRunReviewDecisionRequest(
             actionID: "waive-drc-width",
             runID: "run-1",
             stageID: "001-drc",
-            actor: XcircuiteRunActionActor(kind: .human, identifier: "reviewer-1"),
+            actor: FlowRunActor(kind: .human, identifier: "reviewer-1"),
             decisionKind: .waiver,
             decision: "waived",
             targetID: "drc-width-1",
@@ -907,12 +906,12 @@ extension FlowRunLedgerSummaryTests {
         ),
         inProjectAt: root
     )
-    try store.appendReviewDecisionAction(
-        XcircuiteRunReviewDecisionActionRequest(
+    try await store.appendReviewDecisionAction(
+        FlowRunReviewDecisionRequest(
             actionID: "resume-after-approval",
             runID: "run-1",
             stageID: "001-drc",
-            actor: XcircuiteRunActionActor(kind: .human, identifier: "reviewer-1"),
+            actor: FlowRunActor(kind: .human, identifier: "reviewer-1"),
             decisionKind: .resume,
             decision: "resume",
             targetID: "001-drc",
@@ -922,7 +921,7 @@ extension FlowRunLedgerSummaryTests {
         inProjectAt: root
     )
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -956,7 +955,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createArtifactCoverageFailureRun(root: root, runID: "run-1")
 
-    let summary = try DefaultFlowRunLedgerInspector().inspectRun(
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
         projectRoot: root
     )
@@ -980,7 +979,7 @@ extension FlowRunLedgerSummaryTests {
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
     try await createArtifactCoverageFailureRun(root: root, runID: "run-1")
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",
         projectRoot: root
     )
@@ -1001,7 +1000,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
 
     let descriptor = drcDescriptor()
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -1027,7 +1026,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let summary = try DefaultFlowRunLedgerInspector().inspectRun(
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
         projectRoot: root
     )

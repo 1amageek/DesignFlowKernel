@@ -5,18 +5,18 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
     private let loader: FlowRunLedgerLoading
     private let orchestrator: DefaultFlowOrchestrator
     private let inspector: FlowRunLedgerInspecting
-    private let fileReferenceVerifier: XcircuiteFileReferenceVerifier
+    private let artifactPersistence: any FlowArtifactPersisting
 
     public init(
-        loader: FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        orchestrator: DefaultFlowOrchestrator = DefaultFlowOrchestrator(),
-        inspector: FlowRunLedgerInspecting = DefaultFlowRunLedgerInspector(),
-        fileReferenceVerifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier()
+        loader: FlowRunLedgerLoading,
+        orchestrator: DefaultFlowOrchestrator,
+        inspector: FlowRunLedgerInspecting,
+        artifactPersistence: any FlowArtifactPersisting
     ) {
         self.loader = loader
         self.orchestrator = orchestrator
         self.inspector = inspector
-        self.fileReferenceVerifier = fileReferenceVerifier
+        self.artifactPersistence = artifactPersistence
     }
 
     public func resumeRun(
@@ -41,15 +41,14 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         executors: [any FlowStageExecutor],
         toolchainProfile: FlowToolchainProfileRecord?
     ) async throws -> FlowRunResumeResult {
-        let ledger = try loader.loadRunLedger(
-            runID: request.runID,
-            projectRoot: request.projectRoot
+        let ledger = try await loader.loadRunLedger(
+            runID: request.runID
         )
         guard let plan = ledger.plan else {
             throw FlowRunResumeError.missingPlan(request.runID)
         }
         try validateResumableStatus(ledger)
-        try validatePlanIntegrity(ledger, projectRoot: request.projectRoot)
+        try await validatePlanIntegrity(ledger, projectRoot: request.projectRoot)
         var operationRequest = plan.makeRequest(projectRoot: request.projectRoot)
         if operationRequest.toolchainProfile == nil {
             operationRequest.toolchainProfile = toolchainProfile
@@ -62,7 +61,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
             healthResults: healthResults,
             executors: executors
         )
-        let summary = try inspector.inspectRun(
+        let summary = try await inspector.inspectRun(
             runID: request.runID,
             projectRoot: request.projectRoot
         )
@@ -87,16 +86,21 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
     private func validatePlanIntegrity(
         _ ledger: FlowRunLedger,
         projectRoot: URL
-    ) throws {
-        let planPath = "\(XcircuiteWorkspace.directoryName)/runs/\(ledger.runID)/plan.json"
-        guard let reference = ledger.runManifest.artifacts.first(where: { $0.path == planPath }) else {
+    ) async throws {
+        let planPath = "runs/\(ledger.runID)/plan.json"
+        guard let reference = ledger.runManifest.artifacts.first(where: {
+            $0.id.rawValue == "run-plan" || $0.path == planPath
+        }) else {
             throw FlowRunResumeError.missingPlanReference(ledger.runID)
         }
-        let integrity = fileReferenceVerifier.verify(reference, projectRoot: projectRoot)
-        guard integrity.status == .verified else {
+        do {
+            _ = try await artifactPersistence.loadArtifactContent(
+                for: reference
+            )
+        } catch {
             throw FlowRunResumeError.invalidPlanReference(
                 runID: ledger.runID,
-                status: integrity.status
+                status: .unreadableArtifact
             )
         }
     }

@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch main https://github.com/1amageek/XcircuitePackage.git ../XcircuitePackage
+          git clone --depth 1 --branch main https://github.com/1amageek/CircuiteFoundation.git ../CircuiteFoundation
           git clone --depth 1 --branch main https://github.com/1amageek/ToolQualification.git ../ToolQualification
 
       - name: Build the design-flow CLI

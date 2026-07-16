@@ -3,26 +3,22 @@ import Foundation
 public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
     private let progressStore: FlowRunProgressStore
 
-    public init(progressStore: FlowRunProgressStore = FlowRunProgressStore()) {
+    public init(progressStore: FlowRunProgressStore) {
         self.progressStore = progressStore
-    }
-
-    public init(storage: any FlowExecutionStorage) {
-        self.progressStore = FlowRunProgressStore(storage: storage)
     }
 
     public func snapshot(
         request: FlowRunProgressSubscriptionRequest
-    ) throws -> FlowRunProgressSnapshot {
+    ) async throws -> FlowRunProgressSnapshot {
         try validate(request)
-        return try makeSnapshot(request: request)
+        return try await makeSnapshot(request: request)
     }
 
     public func waitForProgress(
         request: FlowRunProgressSubscriptionRequest
     ) async throws -> FlowRunProgressSnapshot {
         try validate(request)
-        var current = try makeSnapshot(request: request)
+        var current = try await makeSnapshot(request: request)
         guard request.waitForNewEvents, current.events.isEmpty, !current.isTerminal else {
             return current
         }
@@ -38,13 +34,13 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
                 break
             }
             try await Task.sleep(nanoseconds: UInt64(sleepMilliseconds) * 1_000_000)
-            current = try makeSnapshot(request: request)
+            current = try await makeSnapshot(request: request)
             if !current.events.isEmpty || current.isTerminal {
                 return current
             }
         }
 
-        return try makeSnapshot(request: request)
+        return try await makeSnapshot(request: request)
     }
 
     public func followProgress(
@@ -54,7 +50,7 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
         try validate(request)
         let deadline = Date().addingTimeInterval(Double(request.timeoutMilliseconds) / 1_000.0)
         var cursor = request.afterSequence
-        var latest = try makeSnapshot(request: request)
+        var latest = try await makeSnapshot(request: request)
 
         while true {
             let remainingMilliseconds = remainingMilliseconds(until: deadline, request: request)
@@ -85,10 +81,9 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
 
     private func makeSnapshot(
         request: FlowRunProgressSubscriptionRequest
-    ) throws -> FlowRunProgressSnapshot {
-        let allEvents = try progressStore.loadProgressEvents(
-            runID: request.runID,
-            projectRoot: request.projectRoot
+    ) async throws -> FlowRunProgressSnapshot {
+        let allEvents = try await progressStore.loadProgressEvents(
+            runID: request.runID
         )
         let filteredEvents = allEvents.filter { $0.sequence > request.afterSequence }
         let latestSequence = allEvents.last?.sequence ?? 0
@@ -103,7 +98,7 @@ public struct DefaultFlowRunProgressSubscriber: FlowRunProgressSubscribing {
     }
 
     private func validate(_ request: FlowRunProgressSubscriptionRequest) throws {
-        try XcircuiteIdentifierValidator().validate(request.runID, kind: .runID)
+        try FlowIdentifierValidator().validate(request.runID, kind: .runID)
         guard request.afterSequence >= 0 else {
             throw FlowRunProgressSubscriptionError.invalidSequence(request.afterSequence)
         }

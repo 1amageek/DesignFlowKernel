@@ -4,6 +4,7 @@ public enum FlowRunLedgerPersistenceError: Error, Sendable, Equatable, Localized
     case invalidTransition(runID: String, from: String, to: String)
     case resumeTargetNotFound(runID: String)
     case runIdentifierMismatch(requested: String, stored: String)
+    case concurrentUpdate(runID: String, expectedRevision: Int, actualRevision: Int)
     case artifactIntegrityFailure(path: String, reason: String)
     case encodingFailed(String)
     case decodingFailed(String)
@@ -17,6 +18,8 @@ public enum FlowRunLedgerPersistenceError: Error, Sendable, Equatable, Localized
             "Resume target run was not found: \(runID)"
         case .runIdentifierMismatch(let requested, let stored):
             "Loaded run ledger identifier does not match the requested run: requested \(requested), stored \(stored)"
+        case .concurrentUpdate(let runID, let expectedRevision, let actualRevision):
+            "Concurrent run-ledger update for \(runID): expected revision \(expectedRevision), found \(actualRevision)"
         case .artifactIntegrityFailure(let path, let reason):
             "Run artifact integrity failure at \(path): \(reason)"
         case .encodingFailed(let message):

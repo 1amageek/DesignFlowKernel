@@ -15,7 +15,7 @@ public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
         public var purpose: String
         public var artifactIDs: [String]
         public var artifactPaths: [String]
-        public var artifactIntegrity: [XcircuiteFileReferenceIntegrity]
+        public var artifactIntegrity: [FlowArtifactIntegrityRecord]
         public var diagnosticCodes: [String]
 
         public init(
@@ -26,7 +26,7 @@ public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
             purpose: String,
             artifactIDs: [String] = [],
             artifactPaths: [String] = [],
-            artifactIntegrity: [XcircuiteFileReferenceIntegrity] = [],
+            artifactIntegrity: [FlowArtifactIntegrityRecord] = [],
             diagnosticCodes: [String] = []
         ) {
             self.requirementID = requirementID

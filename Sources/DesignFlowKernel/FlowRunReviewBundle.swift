@@ -35,36 +35,33 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
     public var schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
-    public var runDirectoryPath: String
     public var summary: FlowRunLedgerSummary
     public var reviewItems: [FlowRunReviewItem]
     public var artifacts: [FlowRunReviewArtifact]
-    public var approvals: [XcircuiteApprovalRecord]
-    public var decisionActions: [XcircuiteRunReviewDecisionAction]?
+    public var approvals: [FlowApprovalRecord]
+    public var decisionActions: [FlowRunReviewDecision]?
     public var coverageRefs: [CoverageRef]?
-    public var agentLoopSnapshot: XcircuiteAgentLoopSnapshot?
-    public var runGuardVerdict: XcircuiteRunGuardVerdict?
-    public var crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation?
+    public var agentLoopSnapshot: FlowAgentLoopSnapshot?
+    public var runGuardVerdict: FlowRunGuardVerdict?
+    public var crossArtifactEvaluation: FlowCrossArtifactEvaluation?
 
     public init(
         schemaVersion: Int = 1,
         runID: String,
         status: FlowRunStatus,
-        runDirectoryPath: String,
         summary: FlowRunLedgerSummary,
         reviewItems: [FlowRunReviewItem] = [],
         artifacts: [FlowRunReviewArtifact] = [],
-        approvals: [XcircuiteApprovalRecord] = [],
-        decisionActions: [XcircuiteRunReviewDecisionAction]? = nil,
+        approvals: [FlowApprovalRecord] = [],
+        decisionActions: [FlowRunReviewDecision]? = nil,
         coverageRefs: [CoverageRef]? = nil,
-        agentLoopSnapshot: XcircuiteAgentLoopSnapshot? = nil,
-        runGuardVerdict: XcircuiteRunGuardVerdict? = nil,
-        crossArtifactEvaluation: XcircuiteCrossArtifactEvaluation? = nil
+        agentLoopSnapshot: FlowAgentLoopSnapshot? = nil,
+        runGuardVerdict: FlowRunGuardVerdict? = nil,
+        crossArtifactEvaluation: FlowCrossArtifactEvaluation? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.runID = runID
         self.status = status
-        self.runDirectoryPath = runDirectoryPath
         self.summary = summary
         self.reviewItems = reviewItems
         self.artifacts = artifacts

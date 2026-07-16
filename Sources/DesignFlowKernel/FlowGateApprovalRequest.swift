@@ -6,7 +6,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
     public var stageID: String
     public var verdict: FlowGateApprovalVerdict
     public var reviewer: String
-    public var reviewerKind: XcircuiteRunActionActor.Kind
+    public var reviewerKind: FlowRunActor.Kind
     public var note: String
     public var decidedAt: Date
 
@@ -16,7 +16,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
         stageID: String,
         verdict: FlowGateApprovalVerdict,
         reviewer: String,
-        reviewerKind: XcircuiteRunActionActor.Kind = .human,
+        reviewerKind: FlowRunActor.Kind = .human,
         note: String = "",
         decidedAt: Date = Date()
     ) {
@@ -49,7 +49,7 @@ public struct FlowGateApprovalRequest: Sendable, Hashable, Codable {
         verdict = try container.decode(FlowGateApprovalVerdict.self, forKey: .verdict)
         reviewer = try container.decode(String.self, forKey: .reviewer)
         reviewerKind = try container.decode(
-            XcircuiteRunActionActor.Kind.self,
+            FlowRunActor.Kind.self,
             forKey: .reviewerKind
         )
         note = try container.decode(String.self, forKey: .note)

@@ -3,12 +3,12 @@ import Foundation
 
 public struct FlowRunCrossArtifactEvaluationResult: Sendable, Hashable, Codable {
     public var runID: String
-    public var evaluation: XcircuiteCrossArtifactEvaluation
+    public var evaluation: FlowCrossArtifactEvaluation
     public var artifactReferences: [ArtifactReference]
 
     public init(
         runID: String,
-        evaluation: XcircuiteCrossArtifactEvaluation,
+        evaluation: FlowCrossArtifactEvaluation,
         artifactReferences: [ArtifactReference] = []
     ) {
         self.runID = runID
@@ -19,7 +19,7 @@ public struct FlowRunCrossArtifactEvaluationResult: Sendable, Hashable, Codable 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         runID = try container.decode(String.self, forKey: .runID)
-        evaluation = try container.decode(XcircuiteCrossArtifactEvaluation.self, forKey: .evaluation)
+        evaluation = try container.decode(FlowCrossArtifactEvaluation.self, forKey: .evaluation)
         artifactReferences = try container.decode([ArtifactReference].self, forKey: .artifactReferences)
     }
 

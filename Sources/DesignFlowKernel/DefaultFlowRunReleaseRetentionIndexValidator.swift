@@ -1,15 +1,16 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetentionIndexValidating {
-    private let storage: any FlowExecutionStorage
-    private let hasher: XcircuiteHasher
+    private let persistence: any FlowArtifactPersisting
+    private let digester: any ContentDigesting
 
     public init(
-        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
-        hasher: XcircuiteHasher = XcircuiteHasher()
+        persistence: any FlowArtifactPersisting,
+        digester: any ContentDigesting = SHA256ContentDigester()
     ) {
-        self.storage = storage
-        self.hasher = hasher
+        self.persistence = persistence
+        self.digester = digester
     }
 
     public func validate(
@@ -18,7 +19,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
         projectRoot: URL,
         currentDate: Date,
         maximumAgeSeconds: TimeInterval?
-    ) throws -> FlowRunReleaseRetentionValidationResult {
+    ) async throws -> FlowRunReleaseRetentionValidationResult {
         var diagnostics: [FlowDiagnostic] = []
         func add(_ code: String, _ message: String) {
             diagnostics.append(FlowDiagnostic(severity: .error, code: code, message: message))
@@ -65,14 +66,30 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
             add("retention-index-recorded-at-invalid", "Retention index recordedAt is not a valid ISO 8601 timestamp.")
         }
 
-        let dashboardURL = try resolvedProjectURL(index.sourceDashboardPath, projectRoot: projectRoot)
-        let historyURL = try resolvedProjectURL(index.historyPath, projectRoot: projectRoot)
-        let dashboardData = try Data(contentsOf: dashboardURL)
-        let historyData = try Data(contentsOf: historyURL)
-        if hasher.sha256(data: dashboardData) != index.sourceDashboardSHA256 {
+        guard let dashboardData = try await persistence.loadArtifactContent(
+            at: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: index.sourceDashboardPath),
+                role: .output,
+                kind: .report,
+                format: .json
+            )
+        ) else {
+            throw FlowRunReleaseRetentionError.missingSourceArtifact(index.sourceDashboardPath)
+        }
+        guard let historyData = try await persistence.loadArtifactContent(
+            at: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: index.historyPath),
+                role: .output,
+                kind: .report,
+                format: .text
+            )
+        ) else {
+            throw FlowRunReleaseRetentionError.missingSourceArtifact(index.historyPath)
+        }
+        if try digester.digest(data: dashboardData, using: .sha256).hexadecimalValue != index.sourceDashboardSHA256 {
             add("retention-index-dashboard-digest-mismatch", "Source dashboard digest does not match the retained index.")
         }
-        if hasher.sha256(data: historyData) != index.historySHA256 {
+        if try digester.digest(data: historyData, using: .sha256).hexadecimalValue != index.historySHA256 {
             add("retention-index-history-digest-mismatch", "History digest does not match the retained index.")
         }
         if Int64(historyData.count) != index.historyByteCount {
@@ -88,8 +105,8 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
         }
         validateChain(entries, runID: runID, add: add)
         do {
-            let dashboard = try JSONDecoder().decode(XcircuiteJSONValue.self, from: dashboardData)
-            if let dashboardRunID = stringValue(value(at: ["runID"], in: dashboard)),
+            let dashboard = try JSONDecoder().decode(FlowRunSignoffDashboard.self, from: dashboardData)
+            if let dashboardRunID = dashboard.runID,
                dashboardRunID != runID {
                 add("retention-index-dashboard-run-id-mismatch", "Source dashboard run ID does not match the requested run.")
             }
@@ -108,7 +125,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
 
     private func decodeHistoryEntries(_ data: Data) throws -> [FlowRunReleaseHistoryEntry] {
         guard let string = String(data: data, encoding: .utf8) else {
-            throw XcircuiteWorkspaceError.decodeFailed("Retention history is not UTF-8 JSONL.")
+            throw FlowRunReleaseRetentionError.invalidHistoryEncoding
         }
         let decoder = JSONDecoder()
         return try string.split(whereSeparator: { $0.isNewline }).map { line in
@@ -149,7 +166,7 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
                 add("retention-index-entry-recorded-at-invalid", "Retention history entry timestamp is invalid.")
             }
             do {
-                let computed = try entry.computedSHA256(using: hasher)
+                let computed = try entry.computedSHA256(using: digester)
                 if computed != entry.entrySHA256 {
                     add("retention-index-entry-digest-mismatch", "Retention history entry digest does not match its content.")
                 }
@@ -158,10 +175,6 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
             }
             previousDigest = entry.entrySHA256
         }
-    }
-
-    private func resolvedProjectURL(_ path: String, projectRoot: URL) throws -> URL {
-        try storage.url(forProjectRelativePath: path, inProjectAt: projectRoot)
     }
 
     private func parseDate(_ value: String) -> Date? {
@@ -178,17 +191,4 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
         }
     }
 
-    private func value(at path: [String], in value: XcircuiteJSONValue) -> XcircuiteJSONValue? {
-        var current: XcircuiteJSONValue? = value
-        for segment in path {
-            guard case .object(let object) = current else { return nil }
-            current = object[segment]
-        }
-        return current
-    }
-
-    private func stringValue(_ value: XcircuiteJSONValue?) -> String? {
-        guard case .string(let string) = value else { return nil }
-        return string
-    }
 }

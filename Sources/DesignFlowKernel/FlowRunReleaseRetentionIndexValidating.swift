@@ -7,5 +7,5 @@ public protocol FlowRunReleaseRetentionIndexValidating: Sendable {
         projectRoot: URL,
         currentDate: Date,
         maximumAgeSeconds: TimeInterval?
-    ) throws -> FlowRunReleaseRetentionValidationResult
+    ) async throws -> FlowRunReleaseRetentionValidationResult
 }

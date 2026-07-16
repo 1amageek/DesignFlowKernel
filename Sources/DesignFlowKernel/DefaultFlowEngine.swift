@@ -5,7 +5,7 @@ import CircuiteFoundation
 public struct DefaultFlowEngine: FlowEngine {
     private let orchestrator: DefaultFlowOrchestrator
 
-    public init(orchestrator: DefaultFlowOrchestrator = DefaultFlowOrchestrator()) {
+    public init(orchestrator: DefaultFlowOrchestrator) {
         self.orchestrator = orchestrator
     }
 

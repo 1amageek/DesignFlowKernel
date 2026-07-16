@@ -1,5 +1,4 @@
 import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import DesignFlowKernel
@@ -9,11 +8,11 @@ struct FlowRunReleaseRetentionIndexTests {
     private static let evaluationDate = Date(timeIntervalSince1970: 1_800_000_000)
 
     @Test("retention index builder validates a hash-chained append-only history")
-    func builderProducesPassedIndex() throws {
+    func builderProducesPassedIndex() async throws {
         let root = try makeTemporaryRoot("release-retention-index")
         defer { removeTemporaryRoot(root) }
 
-        let index = try makeIndex(root: root)
+        let index = try await makeIndex(root: root)
 
         #expect(index.status == .passed)
         #expect(index.appendOnly)
@@ -23,17 +22,20 @@ struct FlowRunReleaseRetentionIndexTests {
     }
 
     @Test("tampered history is blocked by digest and chain verification")
-    func tamperedHistoryBlocks() throws {
+    func tamperedHistoryBlocks() async throws {
         let root = try makeTemporaryRoot("release-retention-tamper")
         defer { removeTemporaryRoot(root) }
 
-        let index = try makeIndex(root: root)
-        let historyURL = root.appending(path: "retention/history.jsonl")
+        let index = try await makeIndex(root: root)
+        let historyURL = root.appending(path: ".xcircuite/retention/history.jsonl")
         var tampered = try Data(contentsOf: historyURL)
         tampered.append(Data("\n".utf8))
         try tampered.write(to: historyURL, options: .atomic)
 
-        let result = try DefaultFlowRunReleaseRetentionIndexValidator().validate(
+        let store = await TestFlowInfrastructure.bound(to: root)
+        let result = try await DefaultFlowRunReleaseRetentionIndexValidator(
+            persistence: store
+        ).validate(
             index: index,
             runID: "run-1",
             projectRoot: root,
@@ -47,71 +49,26 @@ struct FlowRunReleaseRetentionIndexTests {
     }
 
     @Test("short retention window blocks release evidence")
-    func shortRetentionWindowBlocks() throws {
+    func shortRetentionWindowBlocks() async throws {
         let root = try makeTemporaryRoot("release-retention-short")
         defer { removeTemporaryRoot(root) }
 
-        let index = try makeIndex(root: root, retentionDays: 7, minimumRetentionDays: 30)
+        let index = try await makeIndex(root: root, retentionDays: 7, minimumRetentionDays: 30)
 
         #expect(index.status == .blocked)
         #expect(index.diagnostics.contains { $0.code == "retention-index-retention-window-too-short" })
     }
 
     @Test("history without a new appended entry blocks release evidence")
-    func nonAppendingHistoryBlocks() throws {
+    func nonAppendingHistoryBlocks() async throws {
         let root = try makeTemporaryRoot("release-retention-no-append")
         defer { removeTemporaryRoot(root) }
 
-        let index = try makeIndex(root: root, previousEntryCount: 1)
+        let index = try await makeIndex(root: root, previousEntryCount: 1)
 
         #expect(index.status == .blocked)
         #expect(index.diagnostics.contains { $0.code == "retention-index-not-append-only" })
         #expect(index.diagnostics.contains { $0.code == "retention-index-history-not-advanced" })
-    }
-
-    @Test("retention index CLI persists a release artifact and validates it")
-    func cliBuildsAndValidatesRetentionIndex() async throws {
-        let root = try makeTemporaryRoot("release-retention-cli")
-        defer { removeTemporaryRoot(root) }
-
-        _ = try makeIndex(root: root)
-        let storage = XcircuiteWorkspaceStore()
-
-        let build = try await DesignFlowCLICommand.runProcess(arguments: [
-            "build-retention-index",
-            "--project-root", root.path(percentEncoded: false),
-            "--run-id", "run-1",
-            "--workflow-run-id", "workflow-run-1",
-            "--source-dashboard", "retention/dashboard.json",
-            "--history", "retention/history.jsonl",
-            "--previous-entry-count", "0",
-            "--retention-days", "30",
-            "--minimum-retention-days", "30",
-        ])
-        let buildData = try #require(build.output.data(using: .utf8))
-        let buildResult = try JSONDecoder().decode(
-            FlowRunReleaseRetentionIndexBuildResult.self,
-            from: buildData
-        )
-        #expect(build.exitCode == 0)
-        #expect(buildResult.index.status == .passed)
-        #expect(buildResult.artifact.artifactID == "qualification-retention-index")
-
-        let validation = try await DesignFlowCLICommand.runProcess(arguments: [
-            "validate-retention-index",
-            "--project-root", root.path(percentEncoded: false),
-            "--run-id", "run-1",
-        ])
-        let validationData = try #require(validation.output.data(using: .utf8))
-        let validationResult = try JSONDecoder().decode(
-            FlowRunReleaseRetentionValidationResult.self,
-            from: validationData
-        )
-
-        #expect(validation.exitCode == 0)
-        #expect(validationResult.status == .passed)
-        let manifest = try storage.loadRunManifest(runID: "run-1", inProjectAt: root)
-        #expect(manifest.artifacts.contains { $0.artifactID == "qualification-retention-index" })
     }
 
     private func makeIndex(
@@ -119,13 +76,23 @@ struct FlowRunReleaseRetentionIndexTests {
         previousEntryCount: Int = 0,
         retentionDays: Int = 30,
         minimumRetentionDays: Int = 30
-    ) throws -> FlowRunReleaseRetentionIndex {
-        let retentionDirectory = root.appending(path: "retention")
-        try FileManager.default.createDirectory(at: retentionDirectory, withIntermediateDirectories: true)
+    ) async throws -> FlowRunReleaseRetentionIndex {
+        let store = await TestFlowInfrastructure.bound(to: root)
         let timestamp = timestamp(Self.evaluationDate)
-        try Data(#"{"runID":"run-1"}"#.utf8).write(
-            to: retentionDirectory.appending(path: "dashboard.json"),
-            options: .atomic
+        let dashboardData = Data(
+            #"{"schemaVersion":1,"runID":"run-1","status":"passed","history":{"status":"passed"},"retainedSignoffSuite":{"status":"passed"}}"#.utf8
+        )
+        let dashboard = try await store.persistArtifact(
+            content: dashboardData,
+            id: ArtifactID(rawValue: "retention-dashboard"),
+            locator: ArtifactLocator(
+                location: ArtifactLocation(workspaceRelativePath: "retention/dashboard.json"),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            runID: "run-1",
+            mode: .replaceable
         )
         var entry = FlowRunReleaseHistoryEntry(
             sequence: 1,
@@ -141,17 +108,29 @@ struct FlowRunReleaseRetentionIndexTests {
         encoder.outputFormatting = [.sortedKeys]
         var historyData = try encoder.encode(entry)
         historyData.append(Data("\n".utf8))
-        try historyData.write(
-            to: retentionDirectory.appending(path: "history.jsonl"),
-            options: .atomic
+        let history = try await store.persistArtifact(
+            content: historyData,
+            id: ArtifactID(rawValue: "retention-history"),
+            locator: ArtifactLocator(
+                location: ArtifactLocation(workspaceRelativePath: "retention/history.jsonl"),
+                role: .output,
+                kind: .report,
+                format: .text
+            ),
+            runID: "run-1",
+            mode: .replaceable
         )
 
-        return try DefaultFlowRunReleaseRetentionIndexBuilder().build(
+        let validator = DefaultFlowRunReleaseRetentionIndexValidator(persistence: store)
+        return try await DefaultFlowRunReleaseRetentionIndexBuilder(
+            persistence: store,
+            validator: validator
+        ).build(
             runID: "run-1",
             workflowRunID: "workflow-run-1",
             projectRoot: root,
-            sourceDashboardPath: "retention/dashboard.json",
-            historyPath: "retention/history.jsonl",
+            sourceDashboard: dashboard,
+            history: history,
             previousEntryCount: previousEntryCount,
             retentionDays: retentionDays,
             minimumRetentionDays: minimumRetentionDays,

@@ -1,5 +1,4 @@
 import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -11,7 +10,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
 
     let descriptor = drcDescriptor()
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -38,13 +37,13 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    try XcircuiteWorkspaceStore().writeDesignDiff(
-        XcircuiteDesignDiff(
+    try await TestFlowInfrastructure.bound(to: root).writeDesignDiff(
+        DesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
             actor: "agent-1",
             changes: [
-                XcircuiteDesignDiffChange(
+                DesignDiffChange(
                     changeID: "change-1",
                     domain: .layout,
                     operation: .replace,
@@ -57,24 +56,24 @@ extension FlowRunLedgerSummaryTests {
         ),
         inProjectAt: root
     )
-    try XcircuiteWorkspaceStore().appendRunAction(
-        XcircuiteRunActionRecord(
+    try await TestFlowInfrastructure.bound(to: root).appendRunAction(
+        FlowRunActionRecord(
             actionID: "action-1",
             runID: "run-1",
             stageID: "001-drc",
-            actor: XcircuiteRunActionActor(kind: .agent, identifier: "agent-1"),
+            actor: FlowRunActor(kind: .agent, identifier: "agent-1"),
             actionKind: "proposeDRCRepair",
             status: .blocked
         ),
         inProjectAt: root
     )
 
-    let summary = try DefaultFlowRunLedgerInspector().inspectRun(
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
         runID: "run-1",
         projectRoot: root
     )
 
-    #expect(summary.schemaVersion == 1)
+    #expect(summary.schemaVersion == FlowRunLedgerSummary.currentSchemaVersion)
     #expect(summary.runID == "run-1")
     #expect(summary.status == .blocked)
     #expect(summary.stages.map(\.stageID) == ["001-drc"])

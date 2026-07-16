@@ -1,5 +1,4 @@
 import Foundation
-import DesignFlowCLISupport
 import DesignFlowKernel
 import Testing
 import ToolQualification
@@ -21,7 +20,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -36,8 +35,8 @@ struct DefaultFlowOrchestratorTests {
         #expect(fileExists(".xcircuite/runs/run-1/stages/001-preflight/result.json", in: root))
         #expect(fileExists(".xcircuite/runs/run-1/stages/002-drc/result.json", in: root))
 
-        let runManifest = try XcircuiteWorkspaceStore().readJSON(
-            XcircuiteRunManifest.self,
+        let runManifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+            FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
         )
         #expect(runManifest.runID == "run-1")
@@ -48,19 +47,19 @@ struct DefaultFlowOrchestratorTests {
         #expect(runManifest.finishedAt != nil)
         #expect(runManifest.revision >= 2)
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         #expect(toolchain.runID == "run-1")
         #expect(toolchain.stages.map(\.stageID) == ["001-preflight", "002-drc"])
         #expect(toolchain.stages.allSatisfy { $0.requiredTool == nil })
         #expect(toolchain.stages.allSatisfy { $0.selectedToolID == nil })
-        _ = try assertToolchainArtifact(in: root, runID: "run-1")
+        _ = try await assertToolchainArtifact(in: root, runID: "run-1")
     }
 
     @Test func successfulFlowPersistsProgressEventsForReview() async throws {
         let root = try makeTemporaryRoot("progress")
         defer { removeTemporaryRoot(root) }
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-progress",
@@ -79,7 +78,7 @@ struct DefaultFlowOrchestratorTests {
         )
 
         #expect(result.status == .succeeded)
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(runID: "run-progress", projectRoot: root)
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-progress")
         #expect(ledger.progressEvents.map(\.kind) == [
             .runStarted,
             .stageStarted,
@@ -93,8 +92,8 @@ struct DefaultFlowOrchestratorTests {
         #expect(summary.progressEventCount == 6)
         #expect(summary.latestProgressEvent?.kind == .runFinished)
 
-        let manifest = try XcircuiteWorkspaceStore().readJSON(
-            XcircuiteRunManifest.self,
+        let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+            FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-progress/manifest.json")
         )
         #expect(manifest.artifacts.contains {
@@ -103,7 +102,7 @@ struct DefaultFlowOrchestratorTests {
                 && $0.format == .text
         })
 
-        let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+        let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-progress",
             projectRoot: root
         )
@@ -127,7 +126,7 @@ struct DefaultFlowOrchestratorTests {
             pexTechnology: .jsonFile(path: "tech/pex.json"),
             metadata: ["source": "unit-test"]
         )
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-profile",
@@ -145,16 +144,16 @@ struct DefaultFlowOrchestratorTests {
         )
 
         #expect(result.status == .succeeded)
-        let plan = try XcircuiteWorkspaceStore().readJSON(
+        let plan = try await TestFlowInfrastructure.bound(to: root).readJSON(
             FlowRunPlan.self,
             from: root.appending(path: ".xcircuite/runs/run-profile/plan.json")
         )
         #expect(plan.toolchainProfile == profile)
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-profile")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-profile")
         #expect(toolchain.profile == profile)
 
-        let summary = try DefaultFlowRunLedgerInspector().inspectRun(
+        let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
             runID: "run-profile",
             projectRoot: root
         )
@@ -169,7 +168,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("progress-snapshot")
         defer { removeTemporaryRoot(root) }
 
-        _ = try await DefaultFlowOrchestrator().run(
+        _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-progress-snapshot",
@@ -187,7 +186,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let snapshot = try DefaultFlowRunProgressSubscriber().snapshot(
+        let snapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
                 projectRoot: root,
                 runID: "run-progress-snapshot",
@@ -202,16 +201,16 @@ struct DefaultFlowOrchestratorTests {
         #expect(snapshot.isTerminal)
     }
 
-    @Test func progressStoreAppendsLongDurationStressLedgerWithoutReplayingHistory() throws {
+    @Test func progressStoreAppendsLongDurationStressLedgerWithoutReplayingHistory() async throws {
         let root = try makeTemporaryRoot("progress-stress")
         defer { removeTemporaryRoot(root) }
 
         let runID = "run-progress-stress"
-        let store = FlowRunProgressStore()
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let store = FlowRunProgressStore(persistence: infrastructure)
         let stressEventCount = 640
-        try store.appendEvent(
+        try await store.appendEvent(
             runID: runID,
-            projectRoot: root,
             kind: .runStarted,
             runStatus: .running,
             message: "Run started."
@@ -219,9 +218,8 @@ struct DefaultFlowOrchestratorTests {
         for index in 1...stressEventCount {
             let kind: FlowRunProgressEventKind = index.isMultiple(of: 2) ? .stageFinished : .stageStarted
             let status: FlowStageStatus = index.isMultiple(of: 2) ? .succeeded : .running
-            try store.appendEvent(
+            try await store.appendEvent(
                 runID: runID,
-                projectRoot: root,
                 kind: kind,
                 stageID: "stress-stage-\(index)",
                 stageStatus: status,
@@ -229,15 +227,14 @@ struct DefaultFlowOrchestratorTests {
                 message: "Stress progress event \(index)."
             )
         }
-        try store.appendEvent(
+        try await store.appendEvent(
             runID: runID,
-            projectRoot: root,
             kind: .runFinished,
             runStatus: .succeeded,
             message: "Run succeeded."
         )
 
-        let fullSnapshot = try DefaultFlowRunProgressSubscriber().snapshot(
+        let fullSnapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
                 projectRoot: root,
                 runID: runID
@@ -250,7 +247,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(fullSnapshot.terminalStatus == .succeeded)
         #expect(fullSnapshot.isTerminal)
 
-        let tailSnapshot = try DefaultFlowRunProgressSubscriber().snapshot(
+        let tailSnapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
                 projectRoot: root,
                 runID: runID,
@@ -261,22 +258,22 @@ struct DefaultFlowOrchestratorTests {
         #expect(tailSnapshot.events.last?.kind == .runFinished)
         #expect(tailSnapshot.terminalStatus == .succeeded)
 
-        let artifacts = try store.runLevelArtifacts(runID: runID, projectRoot: root)
+        let artifacts = try await store.runLevelArtifacts(runID: runID)
         let expectedProgressPath = ".xcircuite/runs/\(runID)/progress.jsonl"
         let hasProgressArtifact = artifacts.contains { artifact in
             artifact.artifactID == "run-progress"
                 && artifact.path == expectedProgressPath
-                && (artifact.byteCount ?? 0) > 0
+                && artifact.byteCount > 0
         }
         #expect(hasProgressArtifact)
         try copyProgressStressArtifactIfRequested(root: root, runID: runID)
     }
 
-    @Test func progressRunCLIEmitsSnapshotJSON() async throws {
+    @Test func progressSubscriberEmitsSnapshot() async throws {
         let root = try makeTemporaryRoot("progress-cli-snapshot")
         defer { removeTemporaryRoot(root) }
 
-        _ = try await DefaultFlowOrchestrator().run(
+        _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-progress-cli",
@@ -292,71 +289,54 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let json = try DesignFlowCLICommand.run(arguments: [
-            "progress-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-progress-cli",
-            "--since-sequence",
-            "2",
-        ])
-        let snapshot = try JSONDecoder().decode(
-            FlowRunProgressSnapshot.self,
-            from: try #require(json.data(using: .utf8))
+        let snapshot = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
+            request: FlowRunProgressSubscriptionRequest(
+                projectRoot: root,
+                runID: "run-progress-cli",
+                afterSequence: 2
+            )
         )
 
         #expect(snapshot.events.map(\.kind) == [.stageFinished, .runFinished])
         #expect(snapshot.terminalStatus == .succeeded)
     }
 
-    @Test func progressRunCLIFollowStreamsNewEventsAsJSONL() async throws {
+    @Test func progressSubscriberFollowsNewEvents() async throws {
         let root = try makeTemporaryRoot("progress-cli-follow")
         defer { removeTemporaryRoot(root) }
 
         let sink = ProgressLineSink()
 
-        async let followResult = DesignFlowCLICommand.runStreaming(arguments: [
-            "progress-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-progress-follow",
-            "--follow",
-            "--timeout-milliseconds",
-            "1000",
-            "--poll-interval-milliseconds",
-            "10",
-        ]) { line in
-            await sink.append(line)
+        async let followResult = makeTestProgressSubscriber(projectRoot: root).followProgress(
+            request: FlowRunProgressSubscriptionRequest(
+                projectRoot: root,
+                runID: "run-progress-follow",
+                waitForNewEvents: true,
+                timeoutMilliseconds: 1_000,
+                pollIntervalMilliseconds: 10
+            )
+        ) { event in
+            await sink.append(event)
         }
 
-        let progressStore = FlowRunProgressStore()
-        try progressStore.appendEvent(
+        let progressStore = FlowRunProgressStore(persistence: await TestFlowInfrastructure.bound(to: root))
+        try await progressStore.appendEvent(
             runID: "run-progress-follow",
-            projectRoot: root,
             kind: .runStarted,
             runStatus: .running,
             message: "Run started."
         )
-        try progressStore.appendEvent(
+        try await progressStore.appendEvent(
             runID: "run-progress-follow",
-            projectRoot: root,
             kind: .runFinished,
             runStatus: .succeeded,
             message: "Run succeeded."
         )
 
         let result = try await followResult
-        #expect(result.isEmpty)
+        #expect(result.isTerminal)
 
-        let events = try await sink.lines()
-            .map { line in
-                try JSONDecoder().decode(
-                    FlowRunProgressEvent.self,
-                    from: Data(line.utf8)
-                )
-            }
+        let events = await sink.events()
 
         #expect(events.map(\.kind) == [.runStarted, .runFinished])
         #expect(events.last?.runStatus == .succeeded)
@@ -367,19 +347,16 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let sink = ProgressLineSink()
-        async let followResult = DesignFlowCLICommand.runStreaming(arguments: [
-            "progress-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-progress-retry",
-            "--follow",
-            "--timeout-milliseconds",
-            "2000",
-            "--poll-interval-milliseconds",
-            "10",
-        ]) { line in
-            await sink.append(line)
+        async let followResult = makeTestProgressSubscriber(projectRoot: root).followProgress(
+            request: FlowRunProgressSubscriptionRequest(
+                projectRoot: root,
+                runID: "run-progress-retry",
+                waitForNewEvents: true,
+                timeoutMilliseconds: 2_000,
+                pollIntervalMilliseconds: 10
+            )
+        ) { event in
+            await sink.append(event)
         }
 
         let script = StageResultScript(results: [
@@ -397,7 +374,7 @@ struct DefaultFlowOrchestratorTests {
             FlowStageResult(stageID: "001-drc", status: .succeeded),
         ])
 
-        let runResult = try await DefaultFlowOrchestrator().run(
+        let runResult = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-progress-retry",
@@ -429,14 +406,8 @@ struct DefaultFlowOrchestratorTests {
         #expect(await script.executionCount() == 2)
 
         let result = try await followResult
-        #expect(result.isEmpty)
-        let events = try await sink.lines()
-            .map { line in
-                try JSONDecoder().decode(
-                    FlowRunProgressEvent.self,
-                    from: Data(line.utf8)
-                )
-            }
+        #expect(result.isTerminal)
+        let events = await sink.events()
 
         #expect(events.map(\.kind) == [
             .runStarted,
@@ -451,7 +422,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(events[2].stageStatus == .failed)
         #expect(events.last?.runStatus == .succeeded)
 
-        let recovered = try DefaultFlowRunProgressSubscriber().snapshot(
+        let recovered = try await makeTestProgressSubscriber(projectRoot: root).snapshot(
             request: FlowRunProgressSubscriptionRequest(
                 projectRoot: root,
                 runID: "run-progress-retry",
@@ -469,29 +440,19 @@ struct DefaultFlowOrchestratorTests {
         #expect(recovered.isTerminal)
     }
 
-    @Test func cancellationRequestCLIStopsRunBeforeNextStageAndIsReviewable() async throws {
+    @Test func cancellationRecorderStopsRunBeforeNextStageAndIsReviewable() async throws {
         let root = try makeTemporaryRoot("cancel")
         defer { removeTemporaryRoot(root) }
 
-        let cancellationJSON = try DesignFlowCLICommand.run(arguments: [
-            "request-cancel",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-cancel",
-            "--requested-by",
-            "reviewer-1",
-            "--reason",
-            "stop before signoff",
-            "--pretty",
-        ])
-        let cancellation = try JSONDecoder().decode(
-            FlowRunCancellationResult.self,
-            from: try #require(cancellationJSON.data(using: .utf8))
+        let cancellation = try await makeTestCancellationRecorder(projectRoot: root).requestCancellation(
+            projectRoot: root,
+            runID: "run-cancel",
+            requestedBy: "reviewer-1",
+            reason: "stop before signoff"
         )
         #expect(cancellation.status == "recorded")
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-cancel",
@@ -514,23 +475,15 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.gates.contains { $0.gateID == "cancellation" && $0.status == .failed })
         #expect(stage.diagnostics.contains { $0.code == "RUN_CANCELLATION_REQUESTED" })
 
-        let summaryJSON = try DesignFlowCLICommand.run(arguments: [
-            "inspect-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-cancel",
-            "--pretty",
-        ])
-        let summary = try JSONDecoder().decode(
-            FlowRunLedgerSummary.self,
-            from: try #require(summaryJSON.data(using: .utf8))
+        let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
+            runID: "run-cancel",
+            projectRoot: root
         )
         #expect(summary.status == .cancelled)
         #expect(summary.cancellationRequest?.requestedBy == "reviewer-1")
         #expect(summary.nextActions.contains { $0.kind == "reviewCancellation" })
 
-        let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+        let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-cancel",
             projectRoot: root
         )
@@ -547,7 +500,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("cooperative-cancel")
         defer { removeTemporaryRoot(root) }
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-cooperative-cancel",
@@ -572,9 +525,8 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.gates.contains { $0.gateID == "cancellation" && $0.status == .failed })
         #expect(stage.diagnostics.contains { $0.code == "RUN_CANCELLATION_REQUESTED" })
 
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(
-            runID: "run-cooperative-cancel",
-            projectRoot: root
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(
+            runID: "run-cooperative-cancel"
         )
         #expect(ledger.cancellationRequest?.requestedBy == "long-drc-tool")
         #expect(ledger.progressEvents.map(\.kind) == [
@@ -590,7 +542,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(summary.nextActions.contains { $0.kind == "reviewCancellation" })
         #expect(summary.latestProgressEvent?.kind == .runFinished)
 
-        let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+        let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-cooperative-cancel",
             projectRoot: root
         )
@@ -615,7 +567,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -648,7 +600,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
             healthResults: [
@@ -672,7 +624,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -698,7 +650,7 @@ struct DefaultFlowOrchestratorTests {
             ]
         )
 
-        let persisted = try XcircuiteWorkspaceStore().readJSON(
+        let persisted = try await TestFlowInfrastructure.bound(to: root).readJSON(
             FlowStageResult.self,
             from: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
         )
@@ -710,7 +662,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(persisted.gates.contains { $0.gateID == "tool-trust" && $0.status == .passed })
         #expect(persisted.diagnostics.contains { $0.code == "TOOL_SELECTED" })
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         #expect(toolchain.schemaVersion == 1)
         #expect(toolchain.runID == "run-1")
         let record = try #require(toolchain.stages.first)
@@ -727,7 +679,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(evaluation.descriptor.toolID == "native-drc")
         #expect(evaluation.decision.status == .eligible)
         #expect(evaluation.health?.evidence.contains { $0.kind == .corpus } == true)
-        _ = try assertToolchainArtifact(in: root, runID: "run-1")
+        _ = try await assertToolchainArtifact(in: root, runID: "run-1")
     }
 
     @Test func stageBlocksWhenRequiredEvidenceIsMissing() async throws {
@@ -735,7 +687,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -767,7 +719,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.diagnostics.contains { $0.code == "MISSING_REQUIRED_EVIDENCE" })
         #expect(stage.gates.contains { $0.gateID == "tool-trust" && $0.status == .failed })
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         let record = try #require(toolchain.stages.first)
         #expect(record.stageID == "001-drc")
         #expect(record.executorToolID == "native-drc")
@@ -781,7 +733,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(evaluation.health?.evidence.contains {
             $0.evidenceID == "smoke-1" && $0.kind == .smoke
         } == true)
-        _ = try assertToolchainArtifact(in: root, runID: "run-1")
+        _ = try await assertToolchainArtifact(in: root, runID: "run-1")
     }
 
     @Test func stageBlocksWhenRequiredQualifiedEvidenceFails() async throws {
@@ -789,7 +741,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -810,12 +762,7 @@ struct DefaultFlowOrchestratorTests {
                     evidence: [
                         ToolEvidence(
                             evidenceID: "corpus-1",
-                            kind: .corpus,
-                            qualification: ToolEvidenceQualificationSummary(
-                                qualified: false,
-                                observedMetrics: ["passRate": 0.5],
-                                failureCodes: ["pass_rate_below_minimum"]
-                            )
+                            kind: .corpus
                         ),
                     ]
                 ),
@@ -831,7 +778,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.diagnostics.contains { $0.code == "UNQUALIFIED_REQUIRED_EVIDENCE" })
         #expect(stage.gates.contains { $0.gateID == "tool-trust" && $0.status == .failed })
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         let record = try #require(toolchain.stages.first)
         #expect(record.requiredTool?.requiredQualifiedEvidenceKinds == [.corpus])
         #expect(record.selectedToolID == nil)
@@ -840,9 +787,9 @@ struct DefaultFlowOrchestratorTests {
         #expect(evaluation.decision.diagnostics.contains {
             $0.code == "UNQUALIFIED_REQUIRED_EVIDENCE"
         })
-        #expect(evaluation.health?.evidence.first?.qualification?.failureCodes == [
-            "pass_rate_below_minimum",
-        ])
+        #expect(evaluation.decision.diagnostics.contains {
+            $0.code == "QUALIFICATION_EVIDENCE_ARTIFACT_MISSING"
+        })
     }
 
     @Test func stageBlocksWhenRequiredEvidenceIsStale() async throws {
@@ -850,7 +797,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -875,7 +822,6 @@ struct DefaultFlowOrchestratorTests {
                         ToolEvidence(
                             evidenceID: "corpus-1",
                             kind: .corpus,
-                            qualification: passingQualificationSummary(),
                             checkedAt: Date(timeIntervalSince1970: 0)
                         ),
                     ]
@@ -892,7 +838,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.diagnostics.contains { $0.code == "STALE_REQUIRED_EVIDENCE" })
         #expect(stage.gates.contains { $0.gateID == "tool-trust" && $0.status == .failed })
 
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         let record = try #require(toolchain.stages.first)
         #expect(record.requiredTool?.maximumEvidenceAgeSeconds == 1)
         #expect(record.selectedToolID == nil)
@@ -908,7 +854,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -936,23 +882,23 @@ struct DefaultFlowOrchestratorTests {
         )
         #expect(result.status == .blocked)
 
-        try XcircuiteWorkspaceStore().writeApproval(
-            XcircuiteApprovalRecord(
+        _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+            FlowGateApprovalRequest(
+                projectRoot: root,
                 runID: "run-1",
                 stageID: "001-drc",
                 verdict: .approved,
                 reviewer: "reviewer-1",
                 note: "approved after reviewing DRC"
-            ),
-            inProjectAt: root
+            )
         )
-        try XcircuiteWorkspaceStore().writeDesignDiff(
-            XcircuiteDesignDiff(
+        try await TestFlowInfrastructure.bound(to: root).writeDesignDiff(
+            DesignDiff(
                 runID: "run-1",
                 title: "DRC review proposal",
                 actor: "agent-1",
                 changes: [
-                    XcircuiteDesignDiffChange(
+                    DesignDiffChange(
                         changeID: "change-1",
                         domain: .layout,
                         operation: .replace,
@@ -965,16 +911,16 @@ struct DefaultFlowOrchestratorTests {
             ),
             inProjectAt: root
         )
-        try XcircuiteWorkspaceStore().appendRunAction(
-            XcircuiteRunActionRecord(
+        try await TestFlowInfrastructure.bound(to: root).appendRunAction(
+            FlowRunActionRecord(
                 actionID: "action-1",
                 runID: "run-1",
                 stageID: "001-drc",
-                actor: XcircuiteRunActionActor(kind: .agent, identifier: "agent-1"),
+                actor: FlowRunActor(kind: .agent, identifier: "agent-1"),
                 actionKind: "loadRunReview",
                 status: .blocked,
                 diagnostics: [
-                    XcircuiteRunActionDiagnostic(
+                    FlowRunDiagnostic(
                         severity: .warning,
                         code: "APPROVAL_PENDING",
                         message: "Stage awaits approval."
@@ -984,9 +930,8 @@ struct DefaultFlowOrchestratorTests {
             inProjectAt: root
         )
 
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
         #expect(ledger.runID == "run-1")
-        #expect(ledger.runDirectory.lastPathComponent == "run-1")
         #expect(ledger.runManifest.status == .blocked)
         #expect(ledger.runResult.status == .blocked)
         #expect(ledger.stages.count == 1)
@@ -1013,7 +958,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(action.actor.kind == .agent)
         #expect(action.diagnostics.first?.code == "APPROVAL_PENDING")
         #expect(ledger.actions.contains {
-            $0.actionKind == XcircuiteRunReviewDecisionActionKind.approval.rawValue
+            $0.actionKind == FlowRunReviewDecisionKind.approval.rawValue
                 && $0.actor.kind == .human
         })
 
@@ -1027,7 +972,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("run-ledger-missing-stage-result")
         defer { removeTemporaryRoot(root) }
 
-        _ = try await DefaultFlowOrchestrator().run(
+        _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -1047,26 +992,21 @@ struct DefaultFlowOrchestratorTests {
         )
 
         do {
-            _ = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
+            _ = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
             Issue.record("Expected missing stage result to fail closed")
-        } catch let error as XcircuiteWorkspaceError {
-            guard case .readFailed(let message) = error else {
-                Issue.record("Expected readFailed, got \(error)")
-                return
-            }
-            #expect(message.contains("stage result missing"))
-            #expect(message.contains("001-drc"))
         } catch {
-            throw error
+            #expect(FileManager.default.fileExists(
+                atPath: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json").path()
+            ) == false)
         }
     }
 
-    @Test func runLedgerLoaderRejectsUnsafeRunID() throws {
+    @Test func runLedgerLoaderRejectsUnsafeRunID() async throws {
         let root = try makeTemporaryRoot("run-ledger-unsafe")
         defer { removeTemporaryRoot(root) }
 
-        #expect(throws: XcircuiteWorkspaceError.self) {
-            try FlowRunLedgerLoader().loadRunLedger(runID: "../escape", projectRoot: root)
+        await #expect(throws: FlowIdentifierValidationError.self) {
+            try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "../escape")
         }
     }
 
@@ -1075,7 +1015,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         let descriptor = drcDescriptor()
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -1119,7 +1059,7 @@ struct DefaultFlowOrchestratorTests {
         executorOwned.toolID = "zeta-drc"
         executorOwned.displayName = "Zeta DRC"
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -1153,7 +1093,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(result.status == .succeeded)
         #expect(result.stages[0].status == .succeeded)
         #expect(!result.stages[0].diagnostics.contains { $0.code == "EXECUTOR_TOOL_MISMATCH" })
-        let toolchain = try readToolchainManifest(in: root, runID: "run-1")
+        let toolchain = try await readToolchainManifest(in: root, runID: "run-1")
         #expect(toolchain.stages.first { $0.stageID == "001-drc" }?.selectedToolID == executorOwned.toolID)
     }
 
@@ -1161,7 +1101,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("executor-failure")
         defer { removeTemporaryRoot(root) }
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -1186,8 +1126,8 @@ struct DefaultFlowOrchestratorTests {
         #expect(fileExists(".xcircuite/runs/run-1/stages/001-drc/result.json", in: root))
         #expect(!fileExists(".xcircuite/runs/run-1/stages/002-lvs/result.json", in: root))
 
-        let runManifest = try XcircuiteWorkspaceStore().readJSON(
-            XcircuiteRunManifest.self,
+        let runManifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+            FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
         )
         #expect(runManifest.status == .failed)
@@ -1212,7 +1152,7 @@ struct DefaultFlowOrchestratorTests {
             FlowStageResult(stageID: "001-drc", status: .succeeded),
         ])
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-retry-success",
@@ -1244,24 +1184,21 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.attempts[1].retryDecision.shouldRetry == false)
         #expect(stage.attempts[1].retryDecision.reason == .stageDidNotFail)
 
-        let attempts = try XcircuiteWorkspaceStore().readJSON(
+        let attempts = try await TestFlowInfrastructure.bound(to: root).readJSON(
             [FlowStageAttemptRecord].self,
             from: root.appending(path: ".xcircuite/runs/run-retry-success/stages/001-drc/attempts.json")
         )
         #expect(attempts.map(\.attemptIndex) == [1, 2])
 
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(
-            runID: "run-retry-success",
-            projectRoot: root
-        )
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-retry-success")
         #expect(ledger.progressEvents.map(\.kind).contains(.stageRetryScheduled))
         let summary = DefaultFlowRunLedgerSummarizer().summarize(ledger)
         #expect(summary.stages.first?.attemptCount == 2)
         #expect(summary.stages.first?.retryCount == 1)
         #expect(summary.nextActions.contains { $0.kind == "reviewRetryAttempts" })
 
-        let manifest = try XcircuiteWorkspaceStore().readJSON(
-            XcircuiteRunManifest.self,
+        let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+            FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/run-retry-success/manifest.json")
         )
         #expect(manifest.artifacts.contains {
@@ -1269,7 +1206,7 @@ struct DefaultFlowOrchestratorTests {
                 && $0.path == ".xcircuite/runs/run-retry-success/stages/001-drc/attempts.json"
         })
 
-        let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+        let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
             runID: "run-retry-success",
             projectRoot: root
         )
@@ -1294,7 +1231,7 @@ struct DefaultFlowOrchestratorTests {
             ),
         ])
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-retry-nonretryable",
@@ -1324,10 +1261,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.attempts[0].retryDecision.shouldRetry == false)
         #expect(stage.attempts[0].retryDecision.reason == .notRetryable)
 
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(
-            runID: "run-retry-nonretryable",
-            projectRoot: root
-        )
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-retry-nonretryable")
         #expect(!ledger.progressEvents.map(\.kind).contains(.stageRetryScheduled))
     }
 
@@ -1335,7 +1269,7 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("retry-cancellation")
         defer { removeTemporaryRoot(root) }
 
-        let result = try await DefaultFlowOrchestrator().run(
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 projectRoot: root,
                 runID: "run-retry-cancellation",
@@ -1367,10 +1301,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(stage.attempts[0].retryDecision.shouldRetry == false)
         #expect(stage.attempts[0].retryDecision.reason == .cancellationObserved)
 
-        let ledger = try FlowRunLedgerLoader().loadRunLedger(
-            runID: "run-retry-cancellation",
-            projectRoot: root
-        )
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-retry-cancellation")
         #expect(!ledger.progressEvents.map(\.kind).contains(.stageRetryScheduled))
     }
 
@@ -1379,7 +1310,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         await #expect(throws: FlowExecutionError.self) {
-            try await DefaultFlowOrchestrator().run(
+            try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
                     projectRoot: root,
                     runID: "run-invalid-retry-policy",
@@ -1410,7 +1341,7 @@ struct DefaultFlowOrchestratorTests {
         defer { removeTemporaryRoot(root) }
 
         await #expect(throws: FlowExecutionError.self) {
-            try await DefaultFlowOrchestrator().run(
+            try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
                     projectRoot: root,
                     runID: "run-1",
@@ -1445,7 +1376,7 @@ struct DefaultFlowOrchestratorTests {
         )
 
         await #expect(throws: FlowExecutionError.self) {
-            try await DefaultFlowOrchestrator().run(
+            try await makeTestOrchestrator(projectRoot: root).run(
                 request: request,
                 toolRegistry: ToolRegistry(),
                 healthResults: [:],
@@ -1461,8 +1392,8 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("unsafe-run-id")
         defer { removeTemporaryRoot(root) }
 
-        await #expect(throws: XcircuiteWorkspaceError.self) {
-            try await DefaultFlowOrchestrator().run(
+        await #expect(throws: FlowIdentifierValidationError.self) {
+            try await makeTestOrchestrator(projectRoot: root).run(
                 request: FlowOperationRequest(
                     projectRoot: root,
                     runID: "../escape",
@@ -1478,7 +1409,7 @@ struct DefaultFlowOrchestratorTests {
                 ]
             )
         }
-        #expect(!fileExists(".xcircuite/escape", in: root))
+        #expect(!fileExists("escape", in: root))
     }
 
     private func drcRequirement(
@@ -1489,7 +1420,7 @@ struct DefaultFlowOrchestratorTests {
         ToolTrustRequirement(
             kind: .drc,
             operationID: "run-drc",
-            minimumLevel: .corpusChecked,
+            minimumLevel: .smokeChecked,
             requiredInputFormats: [.oasis],
             requiredOutputFormats: [.json],
             requiredEvidenceKinds: requiredEvidenceKinds,
@@ -1511,7 +1442,7 @@ struct DefaultFlowOrchestratorTests {
                     outputFormats: [.json]
                 ),
             ],
-            trustProfile: ToolTrustProfile(level: .corpusChecked),
+            trustProfile: ToolTrustProfile(level: .smokeChecked),
             environment: ToolEnvironment(platform: "macOS")
         )
     }
@@ -1519,17 +1450,7 @@ struct DefaultFlowOrchestratorTests {
     private func qualifiedCorpusEvidence(_ evidenceID: String = "corpus-1") -> ToolEvidence {
         ToolEvidence(
             evidenceID: evidenceID,
-            kind: .corpus,
-            qualification: passingQualificationSummary()
-        )
-    }
-
-    private func passingQualificationSummary() -> ToolEvidenceQualificationSummary {
-        ToolEvidenceQualificationSummary(
-            qualified: true,
-            policyID: "unit-test-policy",
-            observedMetrics: ["passRate": 1],
-            observedCounts: ["caseCount": 1]
+            kind: .corpus
         )
     }
 
@@ -1581,25 +1502,25 @@ struct DefaultFlowOrchestratorTests {
         try FileManager.default.copyItem(at: source, to: destination)
     }
 
-    private func readToolchainManifest(in root: URL, runID: String) throws -> FlowToolchainManifest {
-        try XcircuiteWorkspaceStore().readJSON(
+    private func readToolchainManifest(in root: URL, runID: String) async throws -> FlowToolchainManifest {
+        try await TestFlowInfrastructure.bound(to: root).readJSON(
             FlowToolchainManifest.self,
             from: root.appending(path: ".xcircuite/runs/\(runID)/toolchain.json")
         )
     }
 
-    private func assertToolchainArtifact(in root: URL, runID: String) throws -> XcircuiteFileReference {
-        let runManifest = try XcircuiteWorkspaceStore().readJSON(
-            XcircuiteRunManifest.self,
+    private func assertToolchainArtifact(in root: URL, runID: String) async throws -> ArtifactReference {
+        let runManifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+            FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
         )
         let path = ".xcircuite/runs/\(runID)/toolchain.json"
         let reference = try #require(runManifest.artifacts.first { $0.path == path })
         #expect(reference.kind == .other)
         #expect(reference.format == .json)
-        let sha256 = try #require(reference.sha256)
+        let sha256 = reference.sha256
         #expect(!sha256.isEmpty)
-        #expect(reference.producedByRunID == runID)
+        #expect(reference.producer?.identifier == runID)
         return reference
     }
 }
@@ -1651,13 +1572,13 @@ private actor StageResultScript {
 }
 
 private actor ProgressLineSink {
-    private var state: [String] = []
+    private var state: [FlowRunProgressEvent] = []
 
-    func append(_ line: String) {
-        state.append(line)
+    func append(_ event: FlowRunProgressEvent) {
+        state.append(event)
     }
 
-    func lines() -> [String] {
+    func events() -> [FlowRunProgressEvent] {
         state
     }
 }
@@ -1698,13 +1619,13 @@ private struct CooperativeCancellationStageExecutor: FlowStageExecutor {
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        _ = try DefaultFlowRunCancellationRecorder().requestCancellation(
+        _ = try await makeTestCancellationRecorder(projectRoot: context.projectRoot).requestCancellation(
             projectRoot: context.projectRoot,
             runID: context.runID,
             requestedBy: toolID,
             reason: "cooperative cancellation checkpoint"
         )
-        try context.checkCancellation()
+        try await context.checkCancellation()
         return FlowStageResult(stageID: stage.stageID, status: .succeeded)
     }
 }
@@ -1739,7 +1660,7 @@ struct ApprovalGateTests {
 
         // 1. No decision recorded: the run blocks at the gate; the
         //    second stage never runs.
-        let blocked = try await DefaultFlowOrchestrator().run(
+        let blocked = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -1753,18 +1674,18 @@ struct ApprovalGateTests {
 
         // 2. The cockpit records the decision; re-running the same runID
         //    resumes past the gate.
-        try XcircuiteWorkspaceStore().writeApproval(
-            XcircuiteApprovalRecord(
+        _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+            FlowGateApprovalRequest(
+                projectRoot: root,
                 runID: "run-approve",
                 stageID: "001-drc",
                 verdict: .approved,
                 reviewer: "reviewer-1",
                 note: "looks clean"
-            ),
-            inProjectAt: root
+            )
         )
         request.allowExistingRunDirectory = true
-        let resumed = try await DefaultFlowOrchestrator().run(
+        let resumed = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -1783,29 +1704,37 @@ struct ApprovalGateTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { removeTemporaryItem(root) }
 
-        let request = FlowOperationRequest(
+        var request = FlowOperationRequest(
             projectRoot: root,
             runID: "run-reject",
             intent: "Approval flow",
             stages: [
                 FlowStageDefinition(stageID: "001-drc", displayName: "DRC", requiresApproval: true),
-            ],
-            allowExistingRunDirectory: true
+            ]
         )
-        try XcircuiteWorkspaceStore().createWorkspace(at: root)
-        _ = try XcircuiteWorkspaceStore().createRunDirectory(for: "run-reject", inProjectAt: root)
-        try XcircuiteWorkspaceStore().writeApproval(
-            XcircuiteApprovalRecord(
+        let initial = try await makeTestOrchestrator(projectRoot: root).run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: [
+                StubStageExecutor(stageID: "001-drc", toolID: "drc-tool", status: .succeeded),
+            ]
+        )
+        #expect(initial.status == .blocked)
+        _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+            FlowGateApprovalRequest(
+                projectRoot: root,
                 runID: "run-reject",
                 stageID: "001-drc",
                 verdict: .rejected,
                 reviewer: "reviewer-1",
                 note: "needs a wider rail"
-            ),
-            inProjectAt: root
+            )
         )
 
-        let result = try await DefaultFlowOrchestrator().run(
+        request.allowExistingRunDirectory = true
+
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],

@@ -5,8 +5,7 @@ public struct FlowExecutionContext: Sendable {
     public var projectRoot: URL
     public var runID: String
     public var runDirectory: URL
-    /// Storage capabilities exposed to stage executors.
-    public var storage: any FlowExecutionStorage
+    public var infrastructure: any FlowRunInfrastructure
     public var toolRegistry: ToolRegistry
     public var healthResults: [String: ToolHealthCheckResult]
 
@@ -14,27 +13,24 @@ public struct FlowExecutionContext: Sendable {
         projectRoot: URL,
         runID: String,
         runDirectory: URL,
-        storage: any FlowExecutionStorage,
+        infrastructure: any FlowRunInfrastructure,
         toolRegistry: ToolRegistry,
         healthResults: [String: ToolHealthCheckResult]
     ) {
         self.projectRoot = projectRoot
         self.runID = runID
         self.runDirectory = runDirectory
-        self.storage = storage
+        self.infrastructure = infrastructure
         self.toolRegistry = toolRegistry
         self.healthResults = healthResults
     }
 
-    public func loadCancellationRequest() throws -> FlowRunCancellationRequest? {
-        try storage.loadCancellationRequest(
-            runID: runID,
-            projectRoot: projectRoot
-        )
+    public func loadCancellationRequest() async throws -> FlowRunCancellationRequest? {
+        try await infrastructure.loadCancellationRequest(runID: runID)
     }
 
-    public func checkCancellation() throws {
-        if let request = try loadCancellationRequest() {
+    public func checkCancellation() async throws {
+        if let request = try await loadCancellationRequest() {
             throw FlowRunCancellationError.requested(request)
         }
     }

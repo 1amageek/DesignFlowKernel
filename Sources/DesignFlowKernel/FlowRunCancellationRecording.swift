@@ -6,5 +6,5 @@ public protocol FlowRunCancellationRecording: Sendable {
         runID: String,
         requestedBy: String,
         reason: String
-    ) throws -> FlowRunCancellationResult
+    ) async throws -> FlowRunCancellationResult
 }

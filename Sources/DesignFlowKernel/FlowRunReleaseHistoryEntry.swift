@@ -1,3 +1,4 @@
+import CircuiteFoundation
 import Foundation
 
 public struct FlowRunReleaseHistoryEntry: Sendable, Hashable, Codable {
@@ -27,8 +28,13 @@ public struct FlowRunReleaseHistoryEntry: Sendable, Hashable, Codable {
         self.entrySHA256 = entrySHA256
     }
 
-    public func computedSHA256(using hasher: XcircuiteHasher = XcircuiteHasher()) throws -> String {
-        hasher.sha256(data: try canonicalHashMaterial())
+    public func computedSHA256(
+        using digester: any ContentDigesting = SHA256ContentDigester()
+    ) throws -> String {
+        try digester.digest(
+            data: canonicalHashMaterial(),
+            using: .sha256
+        ).hexadecimalValue
     }
 
     public var isStructurallyValid: Bool {

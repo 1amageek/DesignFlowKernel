@@ -125,13 +125,17 @@ polling workers.
 ## Approval gate and resume
 
 Stages with `requiresApproval` evaluate an `approval` gate after execution, read from
-`runs/<run-id>/approvals/<stage-id>.json` (`XcircuiteApprovalRecord`, latest wins):
+`runs/<run-id>/approvals/<stage-id>.json` (`FlowApprovalRecord`, latest wins):
 
 | Approval state | Gate result | Run behavior |
 |---|---|---|
 | approved | passed | continue to the next stage |
+| waived with a non-empty review reason | passed with `STAGE_WAIVED` warning | continue while preserving the evidence-bound exception |
 | rejected | failed (`STAGE_REJECTED`) | stage fails, run fails |
 | absent | — | run stops as `blocked` (`APPROVAL_PENDING`) |
+
+Approval and waiver decisions bind the exact plan and stage-result artifact
+references reviewed by the human. A waiver without a reason is rejected.
 
 Resume is re-running the same runID: `approvals/` survives run directory re-creation,
 so recording a decision and re-running moves past the gate. The review cockpit and

@@ -5,15 +5,15 @@ public protocol FlowRunReleaseEnvelopeBuilding: Sendable {
         runID: String,
         projectRoot: URL,
         maxEvidenceAgeDays: Int?
-    ) throws -> FlowRunReleaseEnvelopeBuildResult
+    ) async throws -> FlowRunReleaseEnvelopeBuildResult
 }
 
 public extension FlowRunReleaseEnvelopeBuilding {
     func buildReleaseEnvelope(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunReleaseEnvelopeBuildResult {
-        try buildReleaseEnvelope(
+    ) async throws -> FlowRunReleaseEnvelopeBuildResult {
+        try await buildReleaseEnvelope(
             runID: runID,
             projectRoot: projectRoot,
             maxEvidenceAgeDays: 30

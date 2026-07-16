@@ -1,4 +1,5 @@
 import Foundation
+import CircuiteFoundation
 
 public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
@@ -59,10 +60,10 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         public var artifactID: String?
         public var stageID: String?
         public var path: String
-        public var kind: XcircuiteFileKind
-        public var format: XcircuiteFileFormat
+        public var kind: ArtifactKind
+        public var format: ArtifactFormat
         public var sha256: String?
-        public var byteCount: Int64?
+        public var byteCount: UInt64?
         public var integrity: FlowRunReviewArtifactIntegrity?
         public var statusRef: String?
         public var handoffRole: String?
@@ -73,10 +74,10 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             artifactID: String? = nil,
             stageID: String? = nil,
             path: String,
-            kind: XcircuiteFileKind,
-            format: XcircuiteFileFormat,
+            kind: ArtifactKind,
+            format: ArtifactFormat,
             sha256: String? = nil,
-            byteCount: Int64? = nil,
+            byteCount: UInt64? = nil,
             integrity: FlowRunReviewArtifactIntegrity? = nil,
             statusRef: String? = nil,
             handoffRole: String? = nil
@@ -105,7 +106,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         public var domain: String
         public var statusRef: String?
         public var sha256: String?
-        public var byteCount: Int64?
+        public var byteCount: UInt64?
 
         public init(
             role: String,
@@ -116,7 +117,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
             domain: String,
             statusRef: String? = nil,
             sha256: String? = nil,
-            byteCount: Int64? = nil
+            byteCount: UInt64? = nil
         ) {
             self.role = role
             self.fromStageID = fromStageID
@@ -271,7 +272,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
     public var runID: String
     public var status: FlowRunStatus
     public var readiness: Readiness
-    public var runDirectoryPath: String
     public var summary: Summary
     public var runArtifacts: [Artifact]
     public var stages: [Stage]
@@ -284,7 +284,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         runID: String,
         status: FlowRunStatus,
         readiness: Readiness,
-        runDirectoryPath: String,
         summary: Summary,
         runArtifacts: [Artifact] = [],
         stages: [Stage] = [],
@@ -297,7 +296,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         self.runID = runID
         self.status = status
         self.readiness = readiness
-        self.runDirectoryPath = runDirectoryPath
         self.summary = summary
         self.runArtifacts = runArtifacts
         self.stages = stages
@@ -312,7 +310,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         case runID
         case status
         case readiness
-        case runDirectoryPath
         case summary
         case runArtifacts
         case stages
@@ -335,7 +332,6 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         runID = try container.decode(String.self, forKey: .runID)
         status = try container.decode(FlowRunStatus.self, forKey: .status)
         readiness = try container.decode(Readiness.self, forKey: .readiness)
-        runDirectoryPath = try container.decode(String.self, forKey: .runDirectoryPath)
         summary = try container.decode(Summary.self, forKey: .summary)
         runArtifacts = try container.decode([Artifact].self, forKey: .runArtifacts)
         stages = try container.decode([Stage].self, forKey: .stages)

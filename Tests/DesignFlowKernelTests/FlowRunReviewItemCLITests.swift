@@ -1,27 +1,18 @@
-import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
 import DesignFlowKernel
 
 extension FlowRunLedgerSummaryTests {
-@Test func reviewRunCLICommandEmitsArtifactCoverageRepairItemJSON() async throws {
+@Test func reviewBundlerEmitsArtifactCoverageRepairItem() async throws {
     let root = try makeTemporaryRoot("agent-review-artifact-coverage-cli")
     defer { removeTemporaryRoot(root) }
     try await createArtifactCoverageFailureRun(root: root, runID: "run-1")
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "review-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let bundle = try JSONDecoder().decode(FlowRunReviewBundle.self, from: data)
 
     #expect(bundle.reviewItems.contains {
         $0.kind == .artifactCoverage
@@ -43,27 +34,20 @@ extension FlowRunLedgerSummaryTests {
         withIntermediateDirectories: true
     )
     try payload.write(to: root.appending(path: planVerificationPath), options: .atomic)
-    let reference = try XcircuiteWorkspaceStore().fileReference(
+    let reference = try await TestFlowInfrastructure.bound(to: root).fileReference(
         forProjectRelativePath: planVerificationPath,
         artifactID: "planning-plan-verification",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try XcircuiteWorkspaceStore().upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
+    try await TestFlowInfrastructure.bound(to: root).upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "review-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let bundle = try JSONDecoder().decode(FlowRunReviewBundle.self, from: data)
 
     let planningCorrectnessItem = try #require(bundle.reviewItems.first {
         $0.kind == .planningCorrectness
@@ -85,7 +69,7 @@ extension FlowRunLedgerSummaryTests {
     """.utf8)
 
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    try writeRunArtifact(
+    try await writeRunArtifact(
         payload,
         path: auditPath,
         artifactID: "planning-problem-translation-audit",
@@ -93,17 +77,10 @@ extension FlowRunLedgerSummaryTests {
         runID: "run-1"
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "review-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let bundle = try JSONDecoder().decode(FlowRunReviewBundle.self, from: data)
 
     let item = try #require(bundle.reviewItems.first {
         $0.kind == .planningCorrectness

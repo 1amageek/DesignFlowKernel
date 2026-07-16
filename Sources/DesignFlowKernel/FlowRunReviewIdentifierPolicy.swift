@@ -1,15 +1,12 @@
 import Foundation
 
 struct FlowRunReviewIdentifierPolicy: Sendable {
-    private let validator: XcircuiteIdentifierValidator
-    private let hasher: XcircuiteHasher
+    private let validator: FlowIdentifierValidator
 
     init(
-        validator: XcircuiteIdentifierValidator = XcircuiteIdentifierValidator(),
-        hasher: XcircuiteHasher = XcircuiteHasher()
+        validator: FlowIdentifierValidator = FlowIdentifierValidator()
     ) {
         self.validator = validator
-        self.hasher = hasher
     }
 
     func isValidRunID(_ value: String) -> Bool {
@@ -42,14 +39,14 @@ struct FlowRunReviewIdentifierPolicy: Sendable {
         guard let stageID, isValidRunID(runID), isValidStageID(stageID) else {
             return nil
         }
-        return "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/stages/\(stageID)/result.json"
+        return "runs/\(runID)/stages/\(stageID)/result.json"
     }
 
     func approvalArtifactPath(runID: String, stageID: String) -> String? {
         guard isValidRunID(runID), isValidStageID(stageID) else {
             return nil
         }
-        return "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/approvals/\(stageID).json"
+        return "runs/\(runID)/approvals/\(stageID).json"
     }
 
     func invalidStageIdentifierIntegrity(_ stageID: String) -> FlowRunReviewArtifactIntegrity {
@@ -66,7 +63,7 @@ struct FlowRunReviewIdentifierPolicy: Sendable {
         )
     }
 
-    private func isValidIdentifier(_ value: String, kind: XcircuiteIdentifierKind) -> Bool {
+    private func isValidIdentifier(_ value: String, kind: FlowIdentifierKind) -> Bool {
         do {
             try validator.validate(value, kind: kind)
             return true
@@ -76,6 +73,6 @@ struct FlowRunReviewIdentifierPolicy: Sendable {
     }
 
     private func digestPrefix(for value: String) -> String {
-        String(hasher.sha256(data: Data(value.utf8)).prefix(12))
+        String(ArtifactID(stableKey: value).rawValue.dropFirst("derived-".count).prefix(12))
     }
 }

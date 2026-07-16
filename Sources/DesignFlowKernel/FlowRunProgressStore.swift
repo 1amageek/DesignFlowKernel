@@ -1,29 +1,31 @@
 import CircuiteFoundation
 import Foundation
 
+/// Coordinates typed progress records while delegating persistence to the
+/// workspace owner.
 public struct FlowRunProgressStore: Sendable {
     public static let progressRelativePath = "progress.jsonl"
     public static let cancellationRelativePath = "cancellation.json"
 
-    private let storage: any FlowExecutionStorage
+    private let persistence: any FlowRunProgressPersisting
 
-    public init(
-        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
-    ) {
-        self.storage = storage
+    public init(persistence: any FlowRunProgressPersisting) {
+        self.persistence = persistence
     }
 
     @discardableResult
     public func appendEvent(
         runID: String,
-        projectRoot: URL,
         kind: FlowRunProgressEventKind,
         stageID: String? = nil,
         stageStatus: FlowStageStatus? = nil,
         runStatus: FlowRunStatus? = nil,
         message: String
-    ) throws -> FlowRunProgressEvent {
-        let sequence = try nextProgressSequence(runID: runID, projectRoot: projectRoot)
+    ) async throws -> FlowRunProgressEvent {
+        let events = try await persistence.loadProgressEvents(
+            runID: runID
+        )
+        let sequence = (events.last?.sequence ?? 0) + 1
         let event = FlowRunProgressEvent(
             runID: runID,
             sequence: sequence,
@@ -33,269 +35,38 @@ public struct FlowRunProgressStore: Sendable {
             runStatus: runStatus,
             message: message
         )
-        try appendJSONLine(event, to: progressURL(runID: runID, projectRoot: projectRoot), projectRoot: projectRoot)
-        try upsertRunLevelArtifactIfManifestExists(
-            runID: runID,
-            projectRoot: projectRoot,
-            relativePath: Self.progressRelativePath,
-            artifactID: "run-progress",
-            format: .text
-        )
+        _ = try await persistence.appendProgressEvent(event)
         return event
     }
 
-    private func nextProgressSequence(
-        runID: String,
-        projectRoot: URL
-    ) throws -> Int {
-        let url = progressURL(runID: runID, projectRoot: projectRoot)
-        guard fileExists(url) else {
-            return 1
-        }
-        guard let line = try lastNonEmptyJSONLine(from: url) else {
-            return 1
-        }
-        let decoder = JSONDecoder()
-        do {
-            let latest = try decoder.decode(FlowRunProgressEvent.self, from: line)
-            return latest.sequence + 1
-        } catch {
-            throw XcircuiteWorkspaceError.decodeFailed(
-                "\(Self.progressRelativePath): latest progress line is invalid: \(error.localizedDescription)"
-            )
-        }
-    }
-
     public func loadProgressEvents(
-        runID: String,
-        projectRoot: URL
-    ) throws -> [FlowRunProgressEvent] {
-        let url = progressURL(runID: runID, projectRoot: projectRoot)
-        guard fileExists(url) else {
-            return []
-        }
-        let data: Data
-        do {
-            data = try Data(contentsOf: url)
-        } catch {
-            throw XcircuiteWorkspaceError.readFailed(
-                "\(Self.progressRelativePath): \(error.localizedDescription)"
-            )
-        }
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw XcircuiteWorkspaceError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8")
-        }
-        let decoder = JSONDecoder()
-        return try text
-            .split(separator: "\n")
-            .map { line in
-                guard let lineData = String(line).data(using: .utf8) else {
-                    throw XcircuiteWorkspaceError.decodeFailed("\(Self.progressRelativePath): invalid UTF-8 line")
-                }
-                return try decoder.decode(FlowRunProgressEvent.self, from: lineData)
-            }
+        runID: String
+    ) async throws -> [FlowRunProgressEvent] {
+        try await persistence.loadProgressEvents(runID: runID)
     }
 
     public func persistCancellationRequest(
-        _ request: FlowRunCancellationRequest,
-        projectRoot: URL
-    ) throws -> FlowRunCancellationResult {
-        let url = cancellationURL(runID: request.runID, projectRoot: projectRoot)
-        try ensureRunDirectory(runID: request.runID, projectRoot: projectRoot)
-        try storage.writeJSON(request, to: url, forProjectAt: projectRoot)
-        try upsertRunLevelArtifactIfManifestExists(
-            runID: request.runID,
-            projectRoot: projectRoot,
-            relativePath: Self.cancellationRelativePath,
-            artifactID: "run-cancellation-request",
-            format: .json
+        _ request: FlowRunCancellationRequest
+    ) async throws -> FlowRunCancellationResult {
+        let reference = try await persistence.persistCancellationRequest(
+            request
         )
         return FlowRunCancellationResult(
             status: "recorded",
             request: request,
-            path: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/\(Self.cancellationRelativePath)"
+            path: reference.locator.location.value
         )
     }
 
     public func loadCancellationRequest(
-        runID: String,
-        projectRoot: URL
-    ) throws -> FlowRunCancellationRequest? {
-        let url = cancellationURL(runID: runID, projectRoot: projectRoot)
-        guard fileExists(url) else {
-            return nil
-        }
-        return try storage.readJSON(FlowRunCancellationRequest.self, from: url)
+        runID: String
+    ) async throws -> FlowRunCancellationRequest? {
+        try await persistence.loadCancellationRequest(runID: runID)
     }
 
     public func runLevelArtifacts(
-        runID: String,
-        projectRoot: URL
-    ) throws -> [XcircuiteFileReference] {
-        var artifacts: [XcircuiteFileReference] = []
-        if fileExists(progressURL(runID: runID, projectRoot: projectRoot)) {
-            artifacts.append(try storage.fileReference(
-                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.progressRelativePath)",
-                artifactID: "run-progress",
-                kind: .other,
-                format: .text,
-                inProjectAt: projectRoot,
-                producedByRunID: runID
-            ))
-        }
-        if fileExists(cancellationURL(runID: runID, projectRoot: projectRoot)) {
-            artifacts.append(try storage.fileReference(
-                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.cancellationRelativePath)",
-                artifactID: "run-cancellation-request",
-                kind: .other,
-                format: .json,
-                inProjectAt: projectRoot,
-                producedByRunID: runID
-            ))
-        }
-        return artifacts
-    }
-
-    private func appendJSONLine<T: Encodable>(
-        _ value: T,
-        to url: URL,
-        projectRoot: URL
-    ) throws {
-        try ensureDirectory(url.deletingLastPathComponent())
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data: Data
-        do {
-            data = try encoder.encode(value)
-        } catch {
-            throw XcircuiteWorkspaceError.encodeFailed(error.localizedDescription)
-        }
-        var line = data
-        line.append(0x0A)
-        do {
-            if fileExists(url) {
-                let handle = try FileHandle(forWritingTo: url)
-                defer { handle.closeFile() }
-                try handle.seekToEnd()
-                try handle.write(contentsOf: line)
-            } else {
-                try line.write(to: url, options: .atomic)
-            }
-        } catch {
-            throw XcircuiteWorkspaceError.writeFailed(
-                "\(url.lastPathComponent): \(error.localizedDescription)"
-            )
-        }
-    }
-
-    private func lastNonEmptyJSONLine(from url: URL) throws -> Data? {
-        let handle: FileHandle
-        do {
-            handle = try FileHandle(forReadingFrom: url)
-        } catch {
-            throw XcircuiteWorkspaceError.readFailed(
-                "\(Self.progressRelativePath): \(error.localizedDescription)"
-            )
-        }
-        defer { handle.closeFile() }
-
-        let fileSize: UInt64
-        do {
-            fileSize = try handle.seekToEnd()
-        } catch {
-            throw XcircuiteWorkspaceError.readFailed(
-                "\(Self.progressRelativePath): \(error.localizedDescription)"
-            )
-        }
-        guard fileSize > 0 else {
-            return nil
-        }
-
-        let chunkSize: UInt64 = 64 * 1_024
-        var offset = fileSize
-        var buffer = Data()
-        while offset > 0 {
-            let readSize = min(chunkSize, offset)
-            offset -= readSize
-            do {
-                try handle.seek(toOffset: offset)
-                let chunk = try handle.read(upToCount: Int(readSize)) ?? Data()
-                var combined = Data()
-                combined.append(chunk)
-                combined.append(buffer)
-                buffer = combined
-            } catch {
-                throw XcircuiteWorkspaceError.readFailed(
-                    "\(Self.progressRelativePath): \(error.localizedDescription)"
-                )
-            }
-
-            let lines = buffer.split(separator: 0x0A, omittingEmptySubsequences: true)
-            if let latest = lines.last, offset == 0 || lines.count > 1 {
-                return Data(latest)
-            }
-        }
-
-        return nil
-    }
-
-    private func ensureRunDirectory(runID: String, projectRoot: URL) throws {
-        try storage.ensureWorkspaceDirectory(forProjectAt: projectRoot)
-        try ensureDirectory(XcircuiteWorkspace(projectRoot: projectRoot).workspaceURL.appending(path: "runs"))
-        try ensureDirectory(runDirectoryURL(runID: runID, projectRoot: projectRoot))
-    }
-
-    private func upsertRunLevelArtifactIfManifestExists(
-        runID: String,
-        projectRoot: URL,
-        relativePath: String,
-        artifactID: String,
-        format: XcircuiteFileFormat
-    ) throws {
-        guard fileExists(runDirectoryURL(runID: runID, projectRoot: projectRoot).appending(path: "manifest.json")) else {
-            return
-        }
-        let foundationFormat: ArtifactFormat = format == .json ? .json : .text
-        let reference = try storage.makeArtifactReference(
-            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(relativePath)",
-            artifactID: artifactID,
-            role: .output,
-            kind: .other,
-            format: foundationFormat,
-            inProjectAt: projectRoot,
-            producedByRunID: runID,
-            verifiedByRunID: nil
-        )
-        try storage.registerArtifact(reference, runID: runID, inProjectAt: projectRoot)
-    }
-
-    private func ensureDirectory(_ url: URL) throws {
-        try storage.ensureDirectory(at: url)
-    }
-
-    private func progressURL(runID: String, projectRoot: URL) -> URL {
-        runDirectoryURL(runID: runID, projectRoot: projectRoot)
-            .appending(path: Self.progressRelativePath)
-    }
-
-    private func cancellationURL(runID: String, projectRoot: URL) -> URL {
-        runDirectoryURL(runID: runID, projectRoot: projectRoot)
-            .appending(path: Self.cancellationRelativePath)
-    }
-
-    private func runDirectoryURL(runID: String, projectRoot: URL) -> URL {
-        XcircuiteWorkspace(projectRoot: projectRoot)
-            .workspaceURL
-            .appending(path: "runs")
-            .appending(path: runID)
-    }
-
-    private func fileExists(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(
-            atPath: url.path(percentEncoded: false),
-            isDirectory: &isDirectory
-        )
-        return exists && !isDirectory.boolValue
+        runID: String
+    ) async throws -> [ArtifactReference] {
+        try await persistence.runControlArtifacts(runID: runID)
     }
 }

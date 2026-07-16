@@ -3,24 +3,24 @@ import Foundation
 
 public struct DefaultFlowRunGuardEvaluator: Sendable {
     private let snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder
-    private let storage: XcircuiteWorkspaceStore
+    private let persistence: any FlowArtifactPersisting
 
     public init(
-        snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder = DefaultFlowRunLoopSnapshotBuilder(),
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
+        snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder,
+        persistence: any FlowArtifactPersisting
     ) {
         self.snapshotBuilder = snapshotBuilder
-        self.storage = storage
+        self.persistence = persistence
     }
 
     public func evaluateRunGuard(
         runID: String,
         projectRoot: URL,
-        profile: XcircuiteAgentLoopProfile = .makeDefault(),
+        profile: FlowAgentLoopProfile = .makeDefault(),
         generatedAt: Date = Date(),
         persist: Bool = true
-    ) throws -> FlowRunGuardEvaluationResult {
-        let summary = try snapshotBuilder.summarizeLoop(
+    ) async throws -> FlowRunGuardEvaluationResult {
+        let summary = try await snapshotBuilder.summarizeLoop(
             runID: runID,
             projectRoot: projectRoot,
             profile: profile,
@@ -39,11 +39,24 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         )
         var artifactReferences = foundationArtifactReferences
         if persist {
-            let verdictArtifact = try storage.writeRunGuardVerdict(
-                verdict,
-                inProjectAt: projectRoot
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let content = try encoder.encode(verdict)
+            let verdictArtifact = try await persistence.persistArtifact(
+                content: content,
+                id: ArtifactID(rawValue: "run-guard-verdict"),
+                locator: ArtifactLocator(
+                    location: try ArtifactLocation(
+                        workspaceRelativePath: "runs/\(runID)/loop/guard-verdict.json"
+                    ),
+                    role: .output,
+                    kind: .report,
+                    format: .json
+                ),
+                runID: runID,
+                mode: .replaceable
             )
-            artifactReferences.append(try verdictArtifact.foundationArtifactReference(role: .output))
+            artifactReferences.append(verdictArtifact)
         }
         return FlowRunGuardEvaluationResult(
             runID: runID,
@@ -57,14 +70,14 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
     private func buildVerdict(
         runID: String,
         projectRoot: URL,
-        profile: XcircuiteAgentLoopProfile,
-        snapshot: XcircuiteAgentLoopSnapshot,
-        iterations: [XcircuiteLoopIterationSummary],
+        profile: FlowAgentLoopProfile,
+        snapshot: FlowAgentLoopSnapshot,
+        iterations: [FlowLoopIterationSummary],
         generatedAt: Date,
         artifactReferences: [ArtifactReference]
-    ) -> XcircuiteRunGuardVerdict {
-        var detectors: [XcircuiteRunGuardVerdict.DetectorResult] = []
-        var requiredActions: [XcircuiteRunGuardVerdict.RequiredAction] = []
+    ) -> FlowRunGuardVerdict {
+        var detectors: [FlowRunGuardVerdict.DetectorResult] = []
+        var requiredActions: [FlowRunGuardVerdict.RequiredAction] = []
 
         if detectorEnabled("budgetExceeded", profile: profile),
            !snapshot.budgetUsage.exceededBudgetIDs.isEmpty {
@@ -129,7 +142,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
 
         if detectorEnabled("approvalRequired", profile: profile),
            snapshot.approvalState.status == .pending || snapshot.approvalState.status == .rejected {
-            let severity: XcircuiteRunGuardSeverity = snapshot.approvalState.status == .rejected ? .error : .warning
+            let severity: FlowRunGuardSeverity = snapshot.approvalState.status == .rejected ? .error : .warning
             detectors.append(
                 detector(
                     "approvalRequired",
@@ -252,7 +265,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             profile: profile,
             status: status
         )
-        return XcircuiteRunGuardVerdict(
+        return FlowRunGuardVerdict(
             verdictID: "guard-\(runID)",
             runID: runID,
             profileID: profile.profileID,
@@ -262,17 +275,14 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             triggeredDetectors: detectors,
             requiredActions: stableUniqueRequiredActions(requiredActions),
             suggestedCommands: suggestedCommands,
-            artifactReferences: artifactReferences,
-            metadata: [
-                "detectorCount": .number(Double(detectors.count)),
-            ]
+            artifactReferences: artifactReferences
         )
     }
 
     private func verdictStatus(
-        snapshot: XcircuiteAgentLoopSnapshot,
-        detectors: [XcircuiteRunGuardVerdict.DetectorResult]
-    ) -> XcircuiteRunGuardVerdict.Status {
+        snapshot: FlowAgentLoopSnapshot,
+        detectors: [FlowRunGuardVerdict.DetectorResult]
+    ) -> FlowRunGuardVerdict.Status {
         if snapshot.resumeReadiness.reasons.contains("run is cancelled") {
             return .cancelled
         }
@@ -288,12 +298,12 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
     private func suggestedCommands(
         projectRoot: URL,
         runID: String,
-        profile: XcircuiteAgentLoopProfile,
-        status: XcircuiteRunGuardVerdict.Status
-    ) -> [XcircuiteRunGuardVerdict.SuggestedCommand] {
+        profile: FlowAgentLoopProfile,
+        status: FlowRunGuardVerdict.Status
+    ) -> [FlowRunGuardVerdict.SuggestedCommand] {
         let projectPath = projectRoot.path(percentEncoded: false)
         var commands = [
-            XcircuiteRunGuardVerdict.SuggestedCommand(
+            FlowRunGuardVerdict.SuggestedCommand(
                 commandID: "design-flow.summarize-loop",
                 executable: "design-flow",
                 arguments: [
@@ -305,7 +315,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                 ],
                 reason: "refresh loop snapshot"
             ),
-            XcircuiteRunGuardVerdict.SuggestedCommand(
+            FlowRunGuardVerdict.SuggestedCommand(
                 commandID: "design-flow.inspect-run",
                 executable: "design-flow",
                 arguments: [
@@ -320,7 +330,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         ]
         if status != .continue {
             commands.append(
-                XcircuiteRunGuardVerdict.SuggestedCommand(
+                FlowRunGuardVerdict.SuggestedCommand(
                     commandID: "design-flow.review-run",
                     executable: "design-flow",
                     arguments: [
@@ -336,7 +346,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         }
         if !profile.requiredEvidence.isEmpty {
             commands.append(
-                XcircuiteRunGuardVerdict.SuggestedCommand(
+                FlowRunGuardVerdict.SuggestedCommand(
                     commandID: "design-flow.evaluate-run-guard",
                     executable: "design-flow",
                     arguments: [
@@ -355,13 +365,13 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
 
     private func detector(
         _ detectorID: String,
-        severity: XcircuiteRunGuardSeverity,
+        severity: FlowRunGuardSeverity,
         reason: String,
         actionIDs: [String] = [],
         artifactIDs: [String] = [],
         diagnosticCodes: [String] = []
-    ) -> XcircuiteRunGuardVerdict.DetectorResult {
-        XcircuiteRunGuardVerdict.DetectorResult(
+    ) -> FlowRunGuardVerdict.DetectorResult {
+        FlowRunGuardVerdict.DetectorResult(
             detectorID: detectorID,
             severity: severity,
             reason: reason,
@@ -374,12 +384,12 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
     private func requiredAction(
         _ actionID: String,
         kind: String,
-        severity: XcircuiteRunGuardSeverity,
+        severity: FlowRunGuardSeverity,
         reason: String,
         artifactIDs: [String] = [],
         stageIDs: [String] = []
-    ) -> XcircuiteRunGuardVerdict.RequiredAction {
-        XcircuiteRunGuardVerdict.RequiredAction(
+    ) -> FlowRunGuardVerdict.RequiredAction {
+        FlowRunGuardVerdict.RequiredAction(
             actionID: actionID,
             kind: kind,
             severity: severity,
@@ -389,16 +399,16 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         )
     }
 
-    private func detectorEnabled(_ detectorID: String, profile: XcircuiteAgentLoopProfile) -> Bool {
+    private func detectorEnabled(_ detectorID: String, profile: FlowAgentLoopProfile) -> Bool {
         profile.detectors.first { $0.detectorID == detectorID }?.enabled ?? true
     }
 
-    private func detectorThreshold(_ detectorID: String, profile: XcircuiteAgentLoopProfile) -> Double? {
+    private func detectorThreshold(_ detectorID: String, profile: FlowAgentLoopProfile) -> Double? {
         profile.detectors.first { $0.detectorID == detectorID }?.threshold
     }
 
     private func repeatedActionKinds(
-        iterations: [XcircuiteLoopIterationSummary],
+        iterations: [FlowLoopIterationSummary],
         threshold: Int
     ) -> [String] {
         let kinds = iterations.flatMap(\.actionKinds)
@@ -410,10 +420,10 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
     }
 
     private func stableUniqueRequiredActions(
-        _ actions: [XcircuiteRunGuardVerdict.RequiredAction]
-    ) -> [XcircuiteRunGuardVerdict.RequiredAction] {
+        _ actions: [FlowRunGuardVerdict.RequiredAction]
+    ) -> [FlowRunGuardVerdict.RequiredAction] {
         var seen: Set<String> = []
-        var result: [XcircuiteRunGuardVerdict.RequiredAction] = []
+        var result: [FlowRunGuardVerdict.RequiredAction] = []
         for action in actions where !seen.contains(action.actionID) {
             seen.insert(action.actionID)
             result.append(action)

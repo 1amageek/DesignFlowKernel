@@ -1,54 +1,35 @@
-import DesignFlowCLISupport
 import Foundation
 import Testing
+@testable import DesignFlowKernel
 
-@Test func designFlowCLIErrorReportIncludesStableDiagnosticFields() throws {
-    let error = DesignFlowCLIError.invalidValue(
-        option: "--timeout-milliseconds",
-        value: "later",
-        expected: "integer"
-    )
+@Test func flowRunNextActionRequiresSuggestedCommandsInCurrentSchema() throws {
+    let payload = Data("""
+    {"actionID":"repair","kind":"repair","severity":"error","reason":"Repair is required.","diagnosticCodes":[]}
+    """.utf8)
 
-    let report = error.report
-
-    #expect(report.schemaVersion == 1)
-    #expect(report.status == "failed")
-    #expect(report.exitCode == 64)
-    #expect(report.diagnostic.severity == "error")
-    #expect(report.diagnostic.code == "design-flow.cli.invalid-value")
-    #expect(report.diagnostic.option == "--timeout-milliseconds")
-    #expect(report.diagnostic.value == "later")
-    #expect(report.diagnostic.expected == "integer")
-    #expect(report.diagnostic.suggestedActions.contains("provide-valid-value:--timeout-milliseconds"))
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowRunNextAction.self, from: payload)
+    }
 }
 
-@Test func designFlowCLIErrorEncodedReportIsMachineReadableJSON() throws {
-    let output = DesignFlowCLIError.missingOption("--project-root").encodedReport()
-    let data = try #require(output.data(using: .utf8))
-    let report = try JSONDecoder().decode(DesignFlowCLIErrorReport.self, from: data)
+@Test func flowRunManifestRequiresCanonicalArtifactReferences() throws {
+    let payload = Data("""
+    {"schemaVersion":1,"runID":"run-1","status":"created","actor":{"kind":"agent","identifier":"agent-1"},"intent":"verify","createdAt":"2026-07-14T00:00:00Z","updatedAt":"2026-07-14T00:00:00Z","revision":0}
+    """.utf8)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
 
-    #expect(report.status == "failed")
-    #expect(report.exitCode == 64)
-    #expect(report.diagnostic.code == "design-flow.cli.missing-option")
-    #expect(report.diagnostic.option == "--project-root")
-    #expect(report.diagnostic.suggestedActions.contains("provide-option:--project-root"))
+    #expect(throws: DecodingError.self) {
+        _ = try decoder.decode(FlowRunManifest.self, from: payload)
+    }
 }
 
-@Test func designFlowCLICommandErrorsCanBeConvertedToReports() throws {
-    do {
-        _ = try DesignFlowCLICommand.run(arguments: [
-            "progress-run",
-            "--project-root",
-            "/tmp/design-flow-test",
-            "--run-id",
-            "run-1",
-            "--follow"
-        ])
-        Issue.record("Command should require runStreaming for follow mode.")
-    } catch let error as DesignFlowCLIError {
-        let report = error.report
-        #expect(report.diagnostic.code == "design-flow.cli.invalid-value")
-        #expect(report.diagnostic.option == "--follow")
-        #expect(report.diagnostic.expected == "use runStreaming for follow mode")
+@Test func flowRunLedgerRequiresCurrentSchemaFields() throws {
+    let payload = Data("""
+    {"schemaVersion":1,"runID":"run-1","runManifest":{},"stages":[]}
+    """.utf8)
+
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowRunLedger.self, from: payload)
     }
 }

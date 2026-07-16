@@ -1,35 +1,36 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValidating {
     public static let artifactID = "review-decision-packet-validation"
     public static let artifactRelativePath = "review/decision-packet-validation.json"
 
-    private let storage: XcircuiteWorkspaceStore
-    private let fileReferenceVerifier: XcircuiteFileReferenceVerifier
+    private let loader: any FlowRunLedgerLoading
+    private let persistence: any FlowArtifactPersisting
     private let reviewBundler: any FlowRunReviewBundling
 
     public init(
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
-        fileReferenceVerifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
-        reviewBundler: any FlowRunReviewBundling = DefaultFlowRunReviewBundler()
+        loader: any FlowRunLedgerLoading,
+        persistence: any FlowArtifactPersisting,
+        reviewBundler: any FlowRunReviewBundling
     ) {
-        self.storage = storage
-        self.fileReferenceVerifier = fileReferenceVerifier
+        self.loader = loader
+        self.persistence = persistence
         self.reviewBundler = reviewBundler
     }
 
     public func validateDecisionPacket(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunDecisionPacketValidationResult {
-        let packetPath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(DefaultFlowRunDecisionPacketBuilder.artifactRelativePath)"
-        var result = makeValidationResult(
+    ) async throws -> FlowRunDecisionPacketValidationResult {
+        let packetPath = "runs/\(runID)/\(DefaultFlowRunDecisionPacketBuilder.artifactRelativePath)"
+        var result = await makeValidationResult(
             runID: runID,
             projectRoot: projectRoot,
             packetPath: packetPath
         )
-        result.validationArtifactPath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        try persist(result, runID: runID, projectRoot: projectRoot)
+        result.validationArtifactPath = "runs/\(runID)/\(Self.artifactRelativePath)"
+        try await persist(result, runID: runID, projectRoot: projectRoot)
         return result
     }
 
@@ -37,13 +38,12 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         runID: String,
         projectRoot: URL,
         packetPath: String
-    ) -> FlowRunDecisionPacketValidationResult {
-        let manifest: XcircuiteRunManifest
+    ) async -> FlowRunDecisionPacketValidationResult {
+        let manifest: FlowRunManifest
         do {
-            manifest = try storage.loadRunManifest(
-                runID: runID,
-                inProjectAt: projectRoot
-            )
+            manifest = try await loader.loadRunLedger(
+                runID: runID
+            ).runManifest
         } catch {
             return blockedResult(
                 runID: runID,
@@ -60,16 +60,38 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
 
         let packetReference = manifest.artifacts.first { reference in
             reference.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
-                && reference.path == packetPath
+                && matchesStoragePath(reference.path, logicalPath: packetPath)
         }
         let mismatchedPacketReference = packetReference == nil
             ? manifest.artifacts.first { reference in
                 reference.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
-                    || reference.path == packetPath
+                    || matchesStoragePath(reference.path, logicalPath: packetPath)
             }
             : nil
-        let packetIntegrity = packetReference.map {
-            fileReferenceVerifier.verify($0, projectRoot: projectRoot)
+        let packetIntegrity: FlowArtifactIntegrityRecord?
+        if let packetReference {
+            do {
+                _ = try await persistence.loadArtifactContent(for: packetReference)
+                packetIntegrity = FlowArtifactIntegrityRecord(
+                    status: .verified,
+                    path: packetReference.locator.location.value,
+                    expectedSHA256: packetReference.digest.hexadecimalValue,
+                    actualSHA256: packetReference.digest.hexadecimalValue,
+                    expectedByteCount: packetReference.byteCount,
+                    actualByteCount: packetReference.byteCount,
+                    message: "Artifact content was verified by the injected persistence boundary."
+                )
+            } catch {
+                packetIntegrity = FlowArtifactIntegrityRecord(
+                    status: .unreadableArtifact,
+                    path: packetReference.locator.location.value,
+                    expectedSHA256: packetReference.digest.hexadecimalValue,
+                    expectedByteCount: packetReference.byteCount,
+                    message: error.localizedDescription
+                )
+            }
+        } else {
+            packetIntegrity = nil
         }
         var diagnostics: [FlowDiagnostic] = []
         if let mismatchedPacketReference {
@@ -77,7 +99,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-artifact-reference-mismatch",
-                    message: "Run manifest decision packet reference must match both artifactID and path: \(mismatchedPacketReference.path)"
+                    message: "Run manifest decision packet reference must match the artifact ID and requested storage-relative path: \(mismatchedPacketReference.path)"
                 )
             )
         } else if packetReference == nil {
@@ -101,10 +123,13 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
 
         let packet: FlowRunDecisionPacket
         do {
-            packet = try storage.readJSON(
-                FlowRunDecisionPacket.self,
-                from: projectRoot.appending(path: packetPath)
+            guard let packetReference else {
+                throw FlowExecutionError.missingArtifact(packetPath)
+            }
+            let content = try await persistence.loadArtifactContent(
+                for: packetReference
             )
+            packet = try JSONDecoder().decode(FlowRunDecisionPacket.self, from: content)
         } catch {
             diagnostics.append(
                 FlowDiagnostic(
@@ -123,11 +148,12 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         }
 
         diagnostics.append(contentsOf: contentDiagnostics(packet: packet, expectedRunID: runID))
-        diagnostics.append(contentsOf: currentStateDiagnostics(
+        let currentState = await currentStateDiagnostics(
             packet: packet,
             runID: runID,
             projectRoot: projectRoot
-        ))
+        )
+        diagnostics.append(contentsOf: currentState)
         return validationResult(
             runID: runID,
             packetPath: packetPath,
@@ -135,6 +161,10 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             packetIntegrity: packetIntegrity,
             diagnostics: diagnostics
         )
+    }
+
+    private func matchesStoragePath(_ actualPath: String, logicalPath: String) -> Bool {
+        actualPath == logicalPath || actualPath.hasSuffix("/\(logicalPath)")
     }
 
     private func contentDiagnostics(
@@ -197,14 +227,17 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         packet: FlowRunDecisionPacket,
         runID: String,
         projectRoot: URL
-    ) -> [FlowDiagnostic] {
+    ) async -> [FlowDiagnostic] {
         let currentPacket: FlowRunDecisionPacket
         do {
-            let currentBundle = try reviewBundler.makeReviewBundle(
+            let currentBundle = try await reviewBundler.makeReviewBundle(
                 runID: runID,
                 projectRoot: projectRoot
             )
-            currentPacket = DefaultFlowRunDecisionPacketBuilder()
+            currentPacket = DefaultFlowRunDecisionPacketBuilder(
+                reviewBundler: reviewBundler,
+                persistence: persistence
+            )
                 .makePacket(from: currentBundle, projectRoot: projectRoot)
         } catch {
             return [
@@ -348,7 +381,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         runID: String,
         packetPath: String,
         packet: FlowRunDecisionPacket,
-        packetIntegrity: XcircuiteFileReferenceIntegrity?,
+        packetIntegrity: FlowArtifactIntegrityRecord?,
         diagnostics: [FlowDiagnostic]
     ) -> FlowRunDecisionPacketValidationResult {
         let requiredArtifacts = packet.requiredArtifacts.filter(\.required)
@@ -398,24 +431,23 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         _ result: FlowRunDecisionPacketValidationResult,
         runID: String,
         projectRoot: URL
-    ) throws {
-        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
-        let reviewDirectory = runDirectory.appending(path: "review")
-        try storage.ensureDirectory(at: reviewDirectory)
-        let validationURL = reviewDirectory.appending(path: "decision-packet-validation.json")
-        try storage.writeJSON(result, to: validationURL, forProjectAt: projectRoot)
-
-        let projectRelativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/\(Self.artifactRelativePath)"
-        let reference = try storage.fileReference(
-            forProjectRelativePath: projectRelativePath,
-            artifactID: Self.artifactID,
-            kind: .report,
-            format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID
-        )
+    ) async throws {
+        let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         do {
-            try storage.upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+            _ = try await persistence.persistArtifact(
+                content: encoder.encode(result),
+                id: ArtifactID(rawValue: Self.artifactID),
+                locator: ArtifactLocator(
+                    location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+                    role: .output,
+                    kind: .report,
+                    format: .json
+                ),
+                runID: runID,
+                mode: .replaceable
+            )
         } catch {
             guard result.diagnostics.contains(where: { $0.code == "decision-packet-run-manifest-unreadable" }) else {
                 throw error

@@ -1,5 +1,4 @@
 import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -19,7 +18,7 @@ extension FlowRunLedgerSummaryTests {
     let postLayoutPath = ".xcircuite/runs/\(runID)/stages/006-post-layout/raw/post-layout-comparison.json"
     let reviewPath = ".xcircuite/runs/\(runID)/stages/007-review/raw/review-summary.json"
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: runID,
@@ -49,7 +48,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "edit-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "edit-design-diff",
                         path: editPath,
                         kind: .designDiff,
@@ -63,7 +62,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "export-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "layout-oasis-export",
                         path: exportPath,
                         kind: .layout,
@@ -77,7 +76,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "drc-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "drc-summary",
                         path: drcPath,
                         kind: .report,
@@ -91,7 +90,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "lvs-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "lvs-summary",
                         path: lvsPath,
                         kind: .report,
@@ -105,10 +104,10 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "pex-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "pex-summary",
                         path: pexPath,
-                        kind: .parasitic,
+                        kind: .parasitics,
                         format: .json
                     ),
                 ],
@@ -119,7 +118,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "post-layout-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "post-layout-comparison-summary",
                         path: postLayoutPath,
                         kind: .measurement,
@@ -133,7 +132,7 @@ extension FlowRunLedgerSummaryTests {
                 toolID: "review-tool",
                 status: .succeeded,
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "review-summary",
                         path: reviewPath,
                         kind: .report,
@@ -145,7 +144,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let result = try DefaultFlowRunStageArtifactLadderBuilder().buildStageArtifactLadder(
+    let result = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
         runID: runID,
         projectRoot: root
     )
@@ -194,7 +193,7 @@ extension FlowRunLedgerSummaryTests {
 
     let drcStage = try #require(result.ladder.stages.first { $0.stageID == "003-drc" })
     #expect(drcStage.category == "drc")
-    #expect(drcStage.statusRef == ".xcircuite/runs/\(runID)/stages/003-drc/result.json")
+    #expect(drcStage.statusRef == "runs/\(runID)/stages/003-drc/result.json")
     #expect(drcStage.domains.contains("drc"))
     #expect(drcStage.domains.contains("retry"))
     #expect(drcStage.artifacts.contains {
@@ -205,13 +204,13 @@ extension FlowRunLedgerSummaryTests {
     #expect(drcStage.artifacts.contains {
         $0.domain == "drc"
             && $0.handoffRole == "stage-output"
-            && $0.statusRef == ".xcircuite/runs/\(runID)/stages/003-drc/result.json"
+            && $0.statusRef == "runs/\(runID)/stages/003-drc/result.json"
     })
     #expect(drcStage.handoffRefs?.contains {
         $0.fromStageID == "003-drc"
             && $0.toStageID == "004-lvs"
             && $0.domain == "drc"
-            && $0.statusRef == ".xcircuite/runs/\(runID)/stages/003-drc/result.json"
+            && $0.statusRef == "runs/\(runID)/stages/003-drc/result.json"
     } == true)
     #expect(drcStage.retryRefs?.contains {
         $0.stageID == "003-drc" && $0.attemptIndex == 1
@@ -230,15 +229,15 @@ extension FlowRunLedgerSummaryTests {
         $0.commandID == "build-stage-artifact-ladder" && $0.readiness == .ready
     })
 
-    let stored = try XcircuiteWorkspaceStore().readJSON(
+    let stored = try await TestFlowInfrastructure.bound(to: root).readJSON(
         FlowRunStageArtifactLadder.self,
         from: root.appending(path: ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json")
     )
     #expect(stored.stages.map(\.stageID) == result.ladder.stages.map(\.stageID))
     #expect(stored.signoffManifestCoverage == result.ladder.signoffManifestCoverage)
 
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
+    let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+        FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
     )
     #expect(manifest.artifacts.contains {
@@ -256,11 +255,11 @@ extension FlowRunLedgerSummaryTests {
         ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json",
     ] {
         let reference = try #require(manifest.artifacts.first { $0.path == path })
-        #expect(reference.sha256?.isEmpty == false)
-        #expect((reference.byteCount ?? 0) > 0)
+        #expect(!reference.sha256.isEmpty)
+        #expect(reference.byteCount > 0)
     }
 
-    let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: runID,
         projectRoot: root
     )
@@ -277,7 +276,7 @@ extension FlowRunLedgerSummaryTests {
     })
 }
 
-@Test func buildStageArtifactLadderCLIEmitsBuildResultJSON() async throws {
+@Test func stageArtifactLadderBuilderEmitsBuildResult() async throws {
     let root = try makeTemporaryRoot("stage-artifact-ladder-cli")
     defer { removeTemporaryRoot(root) }
     let runID = "run-1"
@@ -286,7 +285,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: runID,
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -296,17 +295,10 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: Data(#"{"violationCount":0}"#.utf8)]
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "build-stage-artifact-ladder",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            runID,
-        ]
+    let result = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
+        runID: runID,
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowRunStageArtifactLadderBuildResult.self, from: data)
 
     #expect(result.artifact.artifactID == "review-stage-artifact-ladder")
     #expect(result.ladder.stages.count == 1)
@@ -328,7 +320,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: runID,
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -338,18 +330,18 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: payload]
     )
     let resultPath = ".xcircuite/runs/\(runID)/stages/001-drc/result.json"
-    var result = try XcircuiteWorkspaceStore().readJSON(
+    var result = try await TestFlowInfrastructure.bound(to: root).readJSON(
         FlowStageResult.self,
         from: root.appending(path: resultPath)
     )
     result.stageID = "../escape"
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         result,
         to: root.appending(path: resultPath),
         forProjectAt: root
     )
 
-    let buildResult = try DefaultFlowRunStageArtifactLadderBuilder().buildStageArtifactLadder(
+    let buildResult = try await makeTestStageArtifactLadderBuilder(projectRoot: root).buildStageArtifactLadder(
         runID: runID,
         projectRoot: root
     )
@@ -367,7 +359,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(signoffCoverage.missingRoles.contains("signoff-summary"))
 }
 
-@Test func stageArtifactLadderBlocksHandoffAndSignoffForArtifactWithoutIntegrity() throws {
+@Test func stageArtifactLadderBlocksHandoffAndSignoffForArtifactWithoutIntegrity() async throws {
     let root = try makeTemporaryRoot("stage-artifact-ladder-unverified-artifact")
     defer { removeTemporaryRoot(root) }
     let runID = "run-1"
@@ -375,11 +367,9 @@ extension FlowRunLedgerSummaryTests {
     let bundle = FlowRunReviewBundle(
         runID: runID,
         status: .succeeded,
-        runDirectoryPath: ".xcircuite/runs/\(runID)",
         summary: FlowRunLedgerSummary(
             runID: runID,
             status: .succeeded,
-            runDirectoryPath: ".xcircuite/runs/\(runID)",
             stages: [
                 FlowRunStageSummary(
                     stageID: "001-drc",
@@ -402,7 +392,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let ladder = DefaultFlowRunStageArtifactLadderBuilder().makeStageArtifactLadder(
+    let ladder = await makeTestStageArtifactLadderBuilder(projectRoot: root).makeStageArtifactLadder(
         from: bundle,
         stageResults: [],
         projectRoot: root
@@ -425,18 +415,16 @@ extension FlowRunLedgerSummaryTests {
     #expect(!signoffCoverage.allRequiredArtifactsHaveHashesAndByteCounts)
 }
 
-@Test func stageArtifactLadderBlocksDuplicateStageResultsWithoutTrapping() throws {
+@Test func stageArtifactLadderBlocksDuplicateStageResultsWithoutTrapping() async throws {
     let root = try makeTemporaryRoot("stage-artifact-ladder-duplicate-stage-result")
     defer { removeTemporaryRoot(root) }
     let runID = "run-1"
     let bundle = FlowRunReviewBundle(
         runID: runID,
         status: .succeeded,
-        runDirectoryPath: ".xcircuite/runs/\(runID)",
         summary: FlowRunLedgerSummary(
             runID: runID,
             status: .succeeded,
-            runDirectoryPath: ".xcircuite/runs/\(runID)",
             stages: [
                 FlowRunStageSummary(
                     stageID: "001-drc",
@@ -447,7 +435,7 @@ extension FlowRunLedgerSummaryTests {
         artifacts: []
     )
 
-    let ladder = DefaultFlowRunStageArtifactLadderBuilder().makeStageArtifactLadder(
+    let ladder = await makeTestStageArtifactLadderBuilder(projectRoot: root).makeStageArtifactLadder(
         from: bundle,
         stageResults: [
             FlowStageResult(stageID: "001-drc", status: .succeeded),

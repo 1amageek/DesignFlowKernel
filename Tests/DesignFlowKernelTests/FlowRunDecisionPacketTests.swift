@@ -1,5 +1,3 @@
-import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -34,7 +32,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -44,7 +42,7 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: summaryPayload]
     )
 
-    let result = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    let result = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
@@ -62,14 +60,14 @@ extension FlowRunLedgerSummaryTests {
         $0.commandID == "review-run" && $0.readiness == .ready
     })
 
-    let storedPacket = try XcircuiteWorkspaceStore().readJSON(
+    let storedPacket = try await TestFlowInfrastructure.bound(to: root).readJSON(
         FlowRunDecisionPacket.self,
         from: root.appending(path: ".xcircuite/runs/run-1/review/decision-packet.json")
     )
     #expect(storedPacket.packetID == "decision-packet-run-1")
 
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
+    let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+        FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
     #expect(manifest.artifacts.contains {
@@ -78,7 +76,7 @@ extension FlowRunLedgerSummaryTests {
     })
 }
 
-@Test func buildDecisionPacketCLIEmitsPacketResultJSON() async throws {
+@Test func decisionPacketBuilderEmitsPacketResult() async throws {
     let root = try makeTemporaryRoot("agent-decision-packet-cli")
     defer { removeTemporaryRoot(root) }
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
@@ -87,7 +85,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -97,17 +95,10 @@ extension FlowRunLedgerSummaryTests {
         artifactPayloads: [summaryPath: summaryPayload]
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "build-decision-packet",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let result = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowRunDecisionPacketBuildResult.self, from: data)
 
     #expect(result.artifact.artifactID == "review-decision-packet")
     #expect(result.packet.runID == "run-1")
@@ -127,7 +118,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -136,12 +127,12 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: summaryPayload]
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let validation = try DefaultFlowRunDecisionPacketValidator().validateDecisionPacket(
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
@@ -152,13 +143,13 @@ extension FlowRunLedgerSummaryTests {
     #expect(validation.requiredArtifactCount > 0)
     #expect(validation.unresolvedReviewItemCount == 1)
     #expect(validation.completionIssueCount == 1)
-    #expect(validation.validationArtifactPath == ".xcircuite/runs/run-1/review/decision-packet-validation.json")
+    #expect(validation.validationArtifactPath == "runs/run-1/review/decision-packet-validation.json")
     #expect(validation.diagnostics.contains {
         $0.code == "decision-packet-unresolved-review-item"
     })
 
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
+    let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+        FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
     #expect(manifest.artifacts.contains {
@@ -171,12 +162,12 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-decision-packet-stale-after-approval")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -186,7 +177,7 @@ extension FlowRunLedgerSummaryTests {
         )
     )
 
-    let validation = try DefaultFlowRunDecisionPacketValidator().validateDecisionPacket(
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
@@ -201,46 +192,31 @@ extension FlowRunLedgerSummaryTests {
     })
 }
 
-@Test func validateDecisionPacketProcessExitIsNonZeroWhenValidationBlocks() async throws {
+@Test func decisionPacketValidationReportsBlockedStatus() async throws {
     let root = try makeTemporaryRoot("agent-decision-packet-process-exit")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let result = try await DesignFlowCLICommand.runProcess(
-        arguments: [
-            "validate-decision-packet",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(result.output.data(using: .utf8))
-    let validation = try JSONDecoder().decode(FlowRunDecisionPacketValidationResult.self, from: data)
 
     #expect(validation.status == .blocked)
-    #expect(result.exitCode == 2)
 }
 
-	@Test func validateDecisionPacketCLIBlocksMissingPacketWithJSONDiagnostics() async throws {
+	@Test func decisionPacketValidatorBlocksMissingPacketWithDiagnostics() async throws {
 	    let root = try makeTemporaryRoot("agent-decision-packet-validation-cli")
 	    defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "validate-decision-packet",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let validation = try JSONDecoder().decode(FlowRunDecisionPacketValidationResult.self, from: data)
 
     #expect(validation.status == .blocked)
-    #expect(validation.validationArtifactPath == ".xcircuite/runs/run-1/review/decision-packet-validation.json")
+	    #expect(validation.validationArtifactPath == "runs/run-1/review/decision-packet-validation.json")
     #expect(validation.diagnostics.contains {
         $0.code == "decision-packet-artifact-reference-missing"
     })
@@ -257,7 +233,7 @@ extension FlowRunLedgerSummaryTests {
 	        root: root,
 	        runID: "run-1",
 	        artifacts: [
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "drc-summary",
 	                path: summaryPath,
 	                kind: .report,
@@ -266,25 +242,31 @@ extension FlowRunLedgerSummaryTests {
 	        ],
 	        artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
 	    )
-	    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
 	        projectRoot: root
 	    )
 
-	    let store = XcircuiteWorkspaceStore()
-	    let manifest = try store.loadRunManifest(runID: "run-1", inProjectAt: root)
+	    let store = await TestFlowInfrastructure.bound(to: root)
+	    let manifest = try await store.loadRunManifest(runID: "run-1", inProjectAt: root)
 	    let packetPath = ".xcircuite/runs/run-1/review/decision-packet.json"
-	    var mismatchedReference = try #require(manifest.artifacts.first {
+	    let originalReference = try #require(manifest.artifacts.first {
 	        $0.path == packetPath
 	    })
-	    mismatchedReference.artifactID = "wrong-decision-packet"
-	    _ = try store.upsertRunArtifacts(
+	    let mismatchedReference = ArtifactReference(
+	        id: try ArtifactID(rawValue: "wrong-decision-packet"),
+	        locator: originalReference.locator,
+	        digest: originalReference.digest,
+	        byteCount: originalReference.byteCount,
+	        producer: originalReference.producer
+	    )
+	    _ = try await store.upsertRunArtifacts(
 	        [mismatchedReference],
 	        runID: "run-1",
 	        inProjectAt: root
 	    )
 
-	    let validation = try DefaultFlowRunDecisionPacketValidator().validateDecisionPacket(
+	    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
 	        runID: "run-1",
 	        projectRoot: root
 	    )
@@ -296,55 +278,46 @@ extension FlowRunLedgerSummaryTests {
 	    })
 	}
 
-	@Test func validateDecisionPacketCLIBlocksUnreadableRunManifestWithJSONDiagnostics() async throws {
+	@Test func decisionPacketValidatorBlocksUnreadableRunManifestWithDiagnostics() async throws {
 	    let root = try makeTemporaryRoot("agent-decision-packet-validation-missing-manifest")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuiteWorkspaceStore()
-    try store.createWorkspace(at: root)
-    let runDirectory = try XcircuiteWorkspace(projectRoot: root).runDirectoryURL(for: "run-1")
+    let store = await TestFlowInfrastructure.bound(to: root)
+    try await store.createWorkspace(at: root)
+    let runDirectory = root.appending(path: ".xcircuite/runs/run-1", directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "validate-decision-packet",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let validation = try JSONDecoder().decode(FlowRunDecisionPacketValidationResult.self, from: data)
 
     #expect(validation.status == .blocked)
-    #expect(validation.validationArtifactPath == ".xcircuite/runs/run-1/review/decision-packet-validation.json")
+    #expect(validation.validationArtifactPath == "runs/run-1/review/decision-packet-validation.json")
     #expect(validation.diagnostics.contains {
         $0.code == "decision-packet-run-manifest-unreadable"
     })
 
-    let storedValidation = try store.readJSON(
+    let storedValidation = try await store.readJSON(
         FlowRunDecisionPacketValidationResult.self,
         from: root.appending(path: ".xcircuite/runs/run-1/review/decision-packet-validation.json")
     )
     #expect(storedValidation.status == .blocked)
 }
 
-@Test func decisionPacketBlocksRequiredArtifactWithoutIntegrity() throws {
+@Test func decisionPacketBlocksRequiredArtifactWithoutIntegrity() async throws {
     let root = try makeTemporaryRoot("agent-decision-packet-unverified-artifact")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuiteWorkspaceStore()
-    try store.createWorkspace(at: root)
-    _ = try store.createRunDirectory(for: "run-1", inProjectAt: root)
+    let store = await TestFlowInfrastructure.bound(to: root)
+    try await store.createWorkspace(at: root)
+    _ = try await store.createRunDirectory(for: "run-1", inProjectAt: root)
 
     let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
     let bundle = FlowRunReviewBundle(
         runID: "run-1",
         status: .succeeded,
-        runDirectoryPath: ".xcircuite/runs/run-1",
         summary: FlowRunLedgerSummary(
             runID: "run-1",
             status: .succeeded,
-            runDirectoryPath: ".xcircuite/runs/run-1",
             stages: [
                 FlowRunStageSummary(
                     stageID: "001-drc",
@@ -390,8 +363,9 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let result = try DefaultFlowRunDecisionPacketBuilder(
-        reviewBundler: StaticReviewBundler(bundle: bundle)
+    let result = try await DefaultFlowRunDecisionPacketBuilder(
+        reviewBundler: StaticReviewBundler(bundle: bundle),
+        persistence: store
     ).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
@@ -411,21 +385,19 @@ extension FlowRunLedgerSummaryTests {
     })
 }
 
-@Test func decisionPacketValidatorBlocksReadinessMismatchEvenWithVerifiedPacket() throws {
+@Test func decisionPacketValidatorBlocksReadinessMismatchEvenWithVerifiedPacket() async throws {
     let root = try makeTemporaryRoot("agent-decision-packet-readiness-mismatch")
     defer { removeTemporaryRoot(root) }
-    let store = XcircuiteWorkspaceStore()
-    try store.createWorkspace(at: root)
-    _ = try store.createRunDirectory(for: "run-1", inProjectAt: root)
+    let store = await TestFlowInfrastructure.bound(to: root)
+    try await store.createWorkspace(at: root)
+    _ = try await store.createRunDirectory(for: "run-1", inProjectAt: root)
 
     let bundle = FlowRunReviewBundle(
         runID: "run-1",
         status: .succeeded,
-        runDirectoryPath: ".xcircuite/runs/run-1",
         summary: FlowRunLedgerSummary(
             runID: "run-1",
             status: .succeeded,
-            runDirectoryPath: ".xcircuite/runs/run-1",
             stages: [
                 FlowRunStageSummary(
                     stageID: "001-drc",
@@ -472,8 +444,9 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let build = try DefaultFlowRunDecisionPacketBuilder(
-        reviewBundler: StaticReviewBundler(bundle: bundle)
+    let build = try await DefaultFlowRunDecisionPacketBuilder(
+        reviewBundler: StaticReviewBundler(bundle: bundle),
+        persistence: store
     ).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
@@ -484,22 +457,22 @@ extension FlowRunLedgerSummaryTests {
     var tampered = build.packet
     tampered.readiness = .needsReview
     let packetPath = ".xcircuite/runs/run-1/review/decision-packet.json"
-    try store.writeJSON(
+    try await store.writeJSON(
         tampered,
         to: root.appending(path: packetPath),
         forProjectAt: root
     )
-    let reference = try store.fileReference(
+    let reference = try await store.fileReference(
         forProjectRelativePath: packetPath,
         artifactID: DefaultFlowRunDecisionPacketBuilder.artifactID,
         kind: .report,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try store.upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
+    try await store.upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
 
-    let validation = try DefaultFlowRunDecisionPacketValidator().validateDecisionPacket(
+    let validation = try await makeTestDecisionPacketValidator(projectRoot: root).validateDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )

@@ -165,8 +165,8 @@ public struct FlowRunReleaseContractAudit: Sendable, Hashable, Codable {
         public var contractID: String
         public var owner: String
         public var status: String
-        public var expectedVersion: XcircuiteJSONValue
-        public var observedVersion: XcircuiteJSONValue
+        public var expectedVersion: FlowContractVersion
+        public var observedVersion: FlowContractVersion
         public var requiredPathCount: Int
         public var failureCount: Int
 
@@ -174,8 +174,8 @@ public struct FlowRunReleaseContractAudit: Sendable, Hashable, Codable {
             contractID: String,
             owner: String,
             status: String,
-            expectedVersion: XcircuiteJSONValue,
-            observedVersion: XcircuiteJSONValue,
+            expectedVersion: FlowContractVersion,
+            observedVersion: FlowContractVersion,
             requiredPathCount: Int,
             failureCount: Int
         ) {

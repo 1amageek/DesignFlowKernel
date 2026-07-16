@@ -4,7 +4,7 @@ import Foundation
 /// kernel resumes past a generic approval gate.
 public protocol FlowStageApprovalValidating: Sendable {
     func validateApproval(
-        _ approval: XcircuiteApprovalRecord,
+        _ approval: FlowApprovalRecord,
         reviewedResult: FlowStageResult,
         context: FlowExecutionContext
     ) throws -> [FlowDiagnostic]

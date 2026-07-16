@@ -3,7 +3,7 @@ import Foundation
 public enum FlowRunResumeError: Error, Equatable, LocalizedError {
     case missingPlan(String)
     case missingPlanReference(String)
-    case invalidPlanReference(runID: String, status: XcircuiteFileReferenceIntegrityStatus)
+    case invalidPlanReference(runID: String, status: FlowArtifactVerificationStatus)
     case runStatusNotResumable(runID: String, status: FlowRunStatus)
 
     public var errorDescription: String? {

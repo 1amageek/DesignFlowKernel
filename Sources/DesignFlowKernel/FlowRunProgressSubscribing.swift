@@ -3,7 +3,7 @@ import Foundation
 public protocol FlowRunProgressSubscribing: Sendable {
     func snapshot(
         request: FlowRunProgressSubscriptionRequest
-    ) throws -> FlowRunProgressSnapshot
+    ) async throws -> FlowRunProgressSnapshot
 
     func waitForProgress(
         request: FlowRunProgressSubscriptionRequest

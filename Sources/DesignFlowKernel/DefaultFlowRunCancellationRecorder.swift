@@ -3,7 +3,7 @@ import Foundation
 public struct DefaultFlowRunCancellationRecorder: FlowRunCancellationRecording {
     private let progressStore: FlowRunProgressStore
 
-    public init(progressStore: FlowRunProgressStore = FlowRunProgressStore()) {
+    public init(progressStore: FlowRunProgressStore) {
         self.progressStore = progressStore
     }
 
@@ -12,19 +12,15 @@ public struct DefaultFlowRunCancellationRecorder: FlowRunCancellationRecording {
         runID: String,
         requestedBy: String,
         reason: String
-    ) throws -> FlowRunCancellationResult {
+    ) async throws -> FlowRunCancellationResult {
         let request = FlowRunCancellationRequest(
             runID: runID,
             requestedBy: requestedBy,
             reason: reason
         )
-        let result = try progressStore.persistCancellationRequest(
-            request,
-            projectRoot: projectRoot
-        )
-        _ = try progressStore.appendEvent(
+        let result = try await progressStore.persistCancellationRequest(request)
+        _ = try await progressStore.appendEvent(
             runID: runID,
-            projectRoot: projectRoot,
             kind: .cancellationRequested,
             runStatus: .cancelled,
             message: "Cancellation requested by \(requestedBy): \(reason)"

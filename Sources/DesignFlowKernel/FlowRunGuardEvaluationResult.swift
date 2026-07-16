@@ -4,16 +4,16 @@ import Foundation
 public struct FlowRunGuardEvaluationResult: Sendable, Hashable, Codable {
     public var runID: String
     public var profileID: String
-    public var snapshot: XcircuiteAgentLoopSnapshot
-    public var verdict: XcircuiteRunGuardVerdict
+    public var snapshot: FlowAgentLoopSnapshot
+    public var verdict: FlowRunGuardVerdict
     /// Canonical artifacts produced or consumed while evaluating the guard.
     public var artifactReferences: [ArtifactReference]
 
     public init(
         runID: String,
         profileID: String,
-        snapshot: XcircuiteAgentLoopSnapshot,
-        verdict: XcircuiteRunGuardVerdict,
+        snapshot: FlowAgentLoopSnapshot,
+        verdict: FlowRunGuardVerdict,
         artifactReferences: [ArtifactReference] = []
     ) {
         self.runID = runID

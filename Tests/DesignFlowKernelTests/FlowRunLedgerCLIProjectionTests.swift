@@ -1,16 +1,14 @@
-import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
 import DesignFlowKernel
 
 extension FlowRunLedgerSummaryTests {
-@Test func inspectRunCLICommandEmitsSummaryJSON() async throws {
+@Test func inspectorEmitsSummary() async throws {
     let root = try makeTemporaryRoot("agent-summary-cli")
     defer { removeTemporaryRoot(root) }
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -26,17 +24,10 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "inspect-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let summary = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: data)
 
     #expect(summary.runID == "run-1")
     #expect(summary.status == .succeeded)
@@ -44,11 +35,11 @@ extension FlowRunLedgerSummaryTests {
     #expect(summary.nextActions.map(\.kind) == ["archiveOrContinue"])
 }
 
-@Test func inspectRunCLICommandEmitsSelectedSuggestedCommandJSON() async throws {
+@Test func inspectorEmitsSelectedSuggestedCommand() async throws {
     let root = try makeTemporaryRoot("agent-summary-selected-command-cli")
     defer { removeTemporaryRoot(root) }
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -63,41 +54,32 @@ extension FlowRunLedgerSummaryTests {
             SummaryStageExecutor(stageID: "001-preflight", toolID: "preflight-tool", status: .succeeded),
         ]
     )
-    try XcircuiteWorkspaceStore().appendRunAction(
-        XcircuiteRunActionRecord(
+    try await TestFlowInfrastructure.bound(to: root).appendRunAction(
+        FlowRunActionRecord(
             actionID: "selection-1",
             runID: "run-1",
-            actor: XcircuiteRunActionActor(kind: .human, identifier: "reviewer-1"),
-            actionKind: XcircuiteSuggestedCommandSelection.actionKind,
+            actor: FlowRunActor(kind: .human, identifier: "reviewer-1"),
+            actionKind: FlowSuggestedCommandSelection.actionKind,
             status: .succeeded,
-            metadata: [
-                "nextActionID": .string("verify-candidate-plan:post-execution"),
-                "nextActionKind": .string("verifyPlanningCorrectness"),
-                "commandID": .string("xcircuite-flow.verify-candidate-plan.post-execution"),
-                "readiness": .string("ready"),
-                "executable": .string("xcircuite-flow"),
-                "arguments": .array([
-                    .string("verify-candidate-plan"),
-                    .string("--mode"),
-                    .string("post-execution"),
-                ]),
-                "reason": .string("Run post-execution candidate-plan verification."),
-            ]
+            context: FlowRunActionContext(
+                suggestedCommand: FlowRunActionContext.SuggestedCommand(
+                    nextActionID: "verify-candidate-plan:post-execution",
+                    nextActionKind: "verifyPlanningCorrectness",
+                    commandID: "xcircuite-flow.verify-candidate-plan.post-execution",
+                    readiness: "ready",
+                    executable: "xcircuite-flow",
+                    arguments: ["verify-candidate-plan", "--mode", "post-execution"],
+                    reason: "Run post-execution candidate-plan verification."
+                )
+            )
         ),
         inProjectAt: root
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "inspect-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let summary = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: data)
     let selection = try #require(summary.suggestedCommandSelections.first)
 
     #expect(summary.suggestedCommandSelections.count == 1)
@@ -109,7 +91,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(selection.arguments == ["verify-candidate-plan", "--mode", "post-execution"])
 }
 
-@Test func inspectRunCLICommandEmitsPlanningCorrectnessNextActionJSON() async throws {
+@Test func inspectorEmitsPlanningCorrectnessNextAction() async throws {
     let root = try makeTemporaryRoot("agent-summary-planning-correctness-cli")
     defer { removeTemporaryRoot(root) }
     let planVerificationPath = ".xcircuite/runs/run-1/planning/plan-verification.json"
@@ -123,27 +105,20 @@ extension FlowRunLedgerSummaryTests {
         withIntermediateDirectories: true
     )
     try payload.write(to: root.appending(path: planVerificationPath), options: .atomic)
-    let reference = try XcircuiteWorkspaceStore().fileReference(
+    let reference = try await TestFlowInfrastructure.bound(to: root).fileReference(
         forProjectRelativePath: planVerificationPath,
         artifactID: "planning-plan-verification",
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
-    try XcircuiteWorkspaceStore().upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
+    try await TestFlowInfrastructure.bound(to: root).upsertRunArtifact(reference, runID: "run-1", inProjectAt: root)
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "inspect-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let summary = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: data)
 
     let action = try #require(summary.nextActions.first {
         $0.kind == "repairPlanningCorrectness"
@@ -165,7 +140,7 @@ extension FlowRunLedgerSummaryTests {
     ])
 }
 
-@Test func inspectRunCLICommandEmitsProblemTranslationAuditNextActionJSON() async throws {
+@Test func inspectorEmitsProblemTranslationAuditNextAction() async throws {
     let root = try makeTemporaryRoot("agent-summary-problem-translation-audit-cli")
     defer { removeTemporaryRoot(root) }
     let auditPath = ".xcircuite/runs/run-1/planning/problem-translation-audit.json"
@@ -174,7 +149,7 @@ extension FlowRunLedgerSummaryTests {
     """.utf8)
 
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    try writeRunArtifact(
+    try await writeRunArtifact(
         payload,
         path: auditPath,
         artifactID: "planning-problem-translation-audit",
@@ -182,17 +157,10 @@ extension FlowRunLedgerSummaryTests {
         runID: "run-1"
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "inspect-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let summary = try await makeTestLedgerInspector(projectRoot: root).inspectRun(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let summary = try JSONDecoder().decode(FlowRunLedgerSummary.self, from: data)
 
     let action = try #require(summary.nextActions.first {
         $0.kind == "repairProblemTranslationAudit"
@@ -235,22 +203,15 @@ extension FlowRunLedgerSummaryTests {
     }
 }
 
-@Test func reviewRunCLICommandEmitsReviewBundleJSON() async throws {
+@Test func reviewBundlerEmitsReviewBundle() async throws {
     let root = try makeTemporaryRoot("agent-review-cli")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "review-run",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let bundle = try JSONDecoder().decode(FlowRunReviewBundle.self, from: data)
 
     #expect(bundle.runID == "run-1")
     #expect(bundle.reviewItems.contains {

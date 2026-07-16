@@ -1,5 +1,4 @@
 import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -11,7 +10,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let result = try DefaultFlowGateApprovalRecorder().recordApproval(
+    let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -24,17 +23,17 @@ extension FlowRunLedgerSummaryTests {
 
     #expect(result.approval.verdict == .approved)
     #expect(result.approval.reviewer == "reviewer-1")
-    #expect(result.approval.planSHA256 != nil)
-    #expect(result.approval.planByteCount != nil)
-    #expect(result.approval.stageResultSHA256 != nil)
-    #expect(result.approval.stageResultByteCount != nil)
+    #expect(!result.approval.evidence.plan.digest.hexadecimalValue.isEmpty)
+    #expect(result.approval.evidence.plan.byteCount > 0)
+    #expect(!result.approval.evidence.stageResult.digest.hexadecimalValue.isEmpty)
+    #expect(result.approval.evidence.stageResult.byteCount > 0)
     #expect(result.summary.approvalCount == 1)
     #expect(result.summary.nextActions.contains {
         $0.kind == "resumeRun" && $0.stageID == "001-drc"
     })
     #expect(!result.summary.nextActions.contains { $0.kind == "decideApproval" })
 
-    let persistedApproval = try XcircuiteWorkspaceStore().loadApproval(
+    let persistedApproval = try await TestFlowInfrastructure.bound(to: root).loadApproval(
         runID: "run-1",
         stageID: "001-drc",
         inProjectAt: root
@@ -43,120 +42,73 @@ extension FlowRunLedgerSummaryTests {
     #expect(persisted.verdict == .approved)
     #expect(persisted.note == "DRC report reviewed.")
 
-    let actions = try XcircuiteWorkspaceStore().loadRunActions(runID: "run-1", inProjectAt: root)
-    let approvalAction = try #require(actions.first {
-        $0.actionKind == XcircuiteRunReviewDecisionActionKind.approval.rawValue
-    })
-    #expect(approvalAction.actor.kind == .human)
-    #expect(approvalAction.actor.identifier == "reviewer-1")
-    #expect(approvalAction.metadata["source"] == .string("design-flow.approve-gate"))
-    #expect(approvalAction.metadata["decision"] == .string("approved"))
-    #expect(approvalAction.outputs.map(\.path) == [".xcircuite/runs/run-1/approvals/001-drc.json"])
-
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
-        from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
-    )
-    #expect(manifest.artifacts.contains {
-        $0.path == ".xcircuite/runs/run-1/approvals/001-drc.json"
-            && $0.sha256 != nil
-            && $0.byteCount != nil
-    })
+    let persistedLedger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
+    #expect(persistedLedger.approvals == [persisted])
+    #expect(persisted.evidence.plan.artifactID == "run-plan")
+    #expect(persisted.evidence.stageResult.artifactID == "001-drc-result")
 }
 
-@Test func approveGateCLICommandEmitsResultJSON() async throws {
-    let root = try makeTemporaryRoot("agent-approval-cli")
+@Test func approvalRecorderReturnsRejectedDecisionAndResumeAction() async throws {
+    let root = try makeTemporaryRoot("agent-approval-rejected")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "approve-gate",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-            "--stage-id",
-            "001-drc",
-            "--verdict",
-            "rejected",
-            "--reviewer",
-            "reviewer-1",
-            "--note",
-            "Spacing violation still needs repair.",
-        ]
+    let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            projectRoot: root,
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .rejected,
+            reviewer: "reviewer-1",
+            note: "Spacing violation still needs repair."
+        )
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowGateApprovalResult.self, from: data)
 
     #expect(result.approval.verdict == .rejected)
     #expect(result.approval.stageID == "001-drc")
-    #expect(result.approval.planSHA256 != nil)
-    #expect(result.approval.stageResultSHA256 != nil)
+    #expect(result.approval.evidence.plan.byteCount > 0)
+    #expect(result.approval.evidence.stageResult.byteCount > 0)
     #expect(result.summary.approvalCount == 1)
     #expect(result.summary.nextActions.contains {
         $0.kind == "resumeRun" && $0.stageID == "001-drc"
     })
 }
 
-@Test func approveGateCLIRecordsAgentReviewerKind() async throws {
-    let root = try makeTemporaryRoot("agent-approval-cli-actor-kind")
+@Test func approvalRecorderRecordsAgentReviewerKind() async throws {
+    let root = try makeTemporaryRoot("agent-approval-actor-kind")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "approve-gate",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-            "--stage-id",
-            "001-drc",
-            "--verdict",
-            "approved",
-            "--reviewer",
-            "design-loop-agent",
-            "--reviewer-kind",
-            "agent",
-        ]
+    let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            projectRoot: root,
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .approved,
+            reviewer: "design-loop-agent",
+            reviewerKind: .agent
+        )
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowGateApprovalResult.self, from: data)
     #expect(result.approval.reviewerKind == .agent)
     #expect(result.approval.reviewer == "design-loop-agent")
 
-    let actions = try XcircuiteWorkspaceStore().loadRunActions(runID: "run-1", inProjectAt: root)
-    let approvalAction = try #require(actions.first {
-        $0.actionKind == XcircuiteRunReviewDecisionActionKind.approval.rawValue
-    })
-    #expect(approvalAction.actor.kind == .agent)
-    #expect(approvalAction.actor.identifier == "design-loop-agent")
+    let persisted = try #require(
+        try await TestFlowInfrastructure.bound(to: root).loadApproval(
+            runID: "run-1",
+            stageID: "001-drc"
+        )
+    )
+    #expect(persisted.reviewerKind == .agent)
+    #expect(persisted.reviewer == "design-loop-agent")
 }
 
-@Test func approveGateCLIRejectsUnknownReviewerKind() async throws {
-    let root = try makeTemporaryRoot("agent-approval-cli-bad-actor-kind")
-    defer { removeTemporaryRoot(root) }
-    try await createBlockedApprovalRun(root: root, runID: "run-1")
+@Test func flowGateApprovalRequestRejectsUnknownReviewerKind() throws {
+    let payload = Data("""
+    {"projectRoot":"file:///tmp/project","runID":"run-1","stageID":"001-drc","verdict":"approved","reviewer":"design-loop-agent","reviewerKind":"robot","note":"","decidedAt":0}
+    """.utf8)
 
-    #expect(throws: DesignFlowCLIError.self) {
-        _ = try DesignFlowCLICommand.run(
-            arguments: [
-                "approve-gate",
-                "--project-root",
-                root.path(percentEncoded: false),
-                "--run-id",
-                "run-1",
-                "--stage-id",
-                "001-drc",
-                "--verdict",
-                "approved",
-                "--reviewer",
-                "design-loop-agent",
-                "--reviewer-kind",
-                "robot",
-            ]
-        )
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(FlowGateApprovalRequest.self, from: payload)
     }
 }
 
@@ -164,7 +116,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-approval-no-gate")
     defer { removeTemporaryRoot(root) }
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -180,8 +132,8 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    #expect(throws: FlowGateApprovalError.self) {
-        try DefaultFlowGateApprovalRecorder().recordApproval(
+    await #expect(throws: FlowGateApprovalError.self) {
+        try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
             FlowGateApprovalRequest(
                 projectRoot: root,
                 runID: "run-1",
@@ -198,11 +150,11 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let ledger = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
+    let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
     #expect(ledger.plan?.intent == "Run DRC with human review")
     #expect(ledger.plan?.stages.map(\.stageID) == ["001-drc"])
 
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -213,7 +165,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let descriptor = drcDescriptor()
-    let resumed = try await DefaultFlowRunResumer().resumeRun(
+    let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
@@ -256,7 +208,7 @@ extension FlowRunLedgerSummaryTests {
         SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         SummaryStageExecutor(stageID: "002-drc", toolID: "native-drc", status: .succeeded),
     ]
-    let blocked = try await DefaultFlowOrchestrator().run(
+    let blocked = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -284,10 +236,10 @@ extension FlowRunLedgerSummaryTests {
 
     // The interrupted ledger must stay readable: approval and resume both
     // load it before acting.
-    let ledger = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
+    let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
     #expect(ledger.stages.map(\.stageID) == ["001-drc"])
 
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -298,7 +250,7 @@ extension FlowRunLedgerSummaryTests {
         )
     )
 
-    let resumed = try await DefaultFlowRunResumer().resumeRun(
+    let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: health,
@@ -316,9 +268,9 @@ extension FlowRunLedgerSummaryTests {
     // Rewrite the plan to claim an earlier stage that has no result:
     // the recorded results no longer form a prefix of the plan, which
     // means evidence is missing, not that the run stopped early.
-    let store = XcircuiteWorkspaceStore()
+    let store = await TestFlowInfrastructure.bound(to: root)
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
-    var plan = try store.readJSON(FlowRunPlan.self, from: planURL)
+    var plan = try await store.readJSON(FlowRunPlan.self, from: planURL)
     plan.stages.insert(
         FlowStageDefinition(stageID: "000-preflight", displayName: "Preflight"),
         at: 0
@@ -326,8 +278,8 @@ extension FlowRunLedgerSummaryTests {
     let data = try JSONEncoder().encode(plan)
     try data.write(to: planURL, options: .atomic)
 
-    #expect(throws: XcircuiteWorkspaceError.self) {
-        _ = try FlowRunLedgerLoader().loadRunLedger(runID: "run-1", projectRoot: root)
+    await #expect(throws: FlowRunLedgerPersistenceError.self) {
+        _ = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
     }
 }
 
@@ -336,7 +288,7 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -347,7 +299,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let approval = try #require(
-        try XcircuiteWorkspaceStore().loadApproval(
+        try await TestFlowInfrastructure.bound(to: root).loadApproval(
             runID: "run-1",
             stageID: "001-drc",
             inProjectAt: root
@@ -355,17 +307,17 @@ extension FlowRunLedgerSummaryTests {
     )
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
     let resultURL = root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
-    #expect(approval.planSHA256 == (try XcircuiteHasher().sha256(fileAt: planURL)))
-    #expect(approval.planByteCount == (try XcircuiteHasher().byteCount(fileAt: planURL)))
-    #expect(approval.stageResultSHA256 == (try XcircuiteHasher().sha256(fileAt: resultURL)))
-    #expect(approval.stageResultByteCount == (try XcircuiteHasher().byteCount(fileAt: resultURL)))
+    #expect(approval.evidence.plan.sha256 == (try TestContentDigester().sha256(fileAt: planURL)))
+    #expect(approval.evidence.plan.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: planURL)))
+    #expect(approval.evidence.stageResult.sha256 == (try TestContentDigester().sha256(fileAt: resultURL)))
+    #expect(approval.evidence.stageResult.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: resultURL)))
 }
 
 @Test func resumerRejectsTamperedPersistedPlan() async throws {
     let root = try makeTemporaryRoot("agent-resume-tampered-plan")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -374,7 +326,7 @@ extension FlowRunLedgerSummaryTests {
             reviewer: "reviewer-1"
         )
     )
-    try XcircuiteWorkspaceStore().writeJSON(
+    try await TestFlowInfrastructure.bound(to: root).writeJSON(
         FlowRunPlan(
             runID: "run-1",
             intent: "Tampered intent",
@@ -388,7 +340,7 @@ extension FlowRunLedgerSummaryTests {
 
     let descriptor = drcDescriptor()
     await #expect(throws: FlowRunResumeError.self) {
-        try await DefaultFlowRunResumer().resumeRun(
+        try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
             healthResults: [
@@ -409,7 +361,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-resume-stale-approval")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -422,7 +374,7 @@ extension FlowRunLedgerSummaryTests {
         .write(to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"), options: .atomic)
 
     let descriptor = drcDescriptor()
-    let resumed = try await DefaultFlowRunResumer().resumeRun(
+    let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
@@ -452,7 +404,7 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
     let descriptor = drcDescriptor()
-    let result = try await DefaultFlowOrchestrator().run(
+    let result = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -493,7 +445,7 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-resume-succeeded")
     defer { removeTemporaryRoot(root) }
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -510,7 +462,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     await #expect(throws: FlowRunResumeError.self) {
-        try await DefaultFlowRunResumer().resumeRun(
+        try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -531,7 +483,7 @@ extension FlowRunLedgerSummaryTests {
         FlowStageDefinition(stageID: "001-prepare", displayName: "Prepare"),
         FlowStageDefinition(stageID: "002-verify", displayName: "Verify"),
     ]
-    let failed = try await DefaultFlowOrchestrator().run(
+    let failed = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: "run-1",
@@ -549,7 +501,7 @@ extension FlowRunLedgerSummaryTests {
 
     // Retry resumes the SAME persisted plan with a repaired executor;
     // the failed stage result is superseded in place.
-    let resumed = try await DefaultFlowRunResumer().resumeRun(
+    let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
         toolRegistry: ToolRegistry(),
         healthResults: [:],
@@ -570,15 +522,11 @@ extension FlowRunLedgerSummaryTests {
     // Cancellation is an explicit human stop and must stay final even
     // though a blocked run would otherwise be resumable.
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    let store = XcircuiteWorkspaceStore()
-    _ = try store.transitionRun(
-        runID: "run-1",
-        transition: XcircuiteRunTransition(status: .cancelled),
-        inProjectAt: root
-    )
+    let store = await TestFlowInfrastructure.bound(to: root)
+    try await store.setRunStatus(.cancelled, runID: "run-1")
 
     await #expect(throws: FlowRunResumeError.self) {
-        try await DefaultFlowRunResumer().resumeRun(
+        try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -594,12 +542,12 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     let path = ".xcircuite/runs/run-1/reports/drc-summary.json"
     let oldPayload = Data(#"{"version":1}"#.utf8)
-    let reference = XcircuiteFileReference(
+    let reference = TestArtifactReference(
         artifactID: "drc-summary",
         path: path,
         kind: .report,
         format: .json,
-        producedByRunID: "run-1"
+        producerRunID: "run-1"
     )
     let request = FlowOperationRequest(
         projectRoot: root,
@@ -610,7 +558,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: request,
         toolRegistry: ToolRegistry(),
         healthResults: [:],
@@ -625,7 +573,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
     await #expect(throws: FlowExecutionError.self) {
-        try await DefaultFlowOrchestrator().run(
+        try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -654,7 +602,7 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: request,
         toolRegistry: ToolRegistry(),
         healthResults: [:],
@@ -675,7 +623,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     do {
-        _ = try await DefaultFlowOrchestrator().run(
+        _ = try await makeTestOrchestrator(projectRoot: root).run(
             request: mismatchedRequest,
             toolRegistry: ToolRegistry(),
             healthResults: [:],
@@ -702,13 +650,13 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-resume-artifacts")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    try XcircuiteWorkspaceStore().writeDesignDiff(
-        XcircuiteDesignDiff(
+    try await TestFlowInfrastructure.bound(to: root).writeDesignDiff(
+        DesignDiff(
             runID: "run-1",
             title: "DRC repair proposal",
             actor: "agent-1",
             changes: [
-                XcircuiteDesignDiffChange(
+                DesignDiffChange(
                     changeID: "change-1",
                     domain: .layout,
                     operation: .replace,
@@ -721,7 +669,7 @@ extension FlowRunLedgerSummaryTests {
         ),
         inProjectAt: root
     )
-    _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
         FlowGateApprovalRequest(
             projectRoot: root,
             runID: "run-1",
@@ -732,7 +680,7 @@ extension FlowRunLedgerSummaryTests {
     )
 
     let descriptor = drcDescriptor()
-    _ = try await DefaultFlowRunResumer().resumeRun(
+    _ = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
@@ -747,8 +695,8 @@ extension FlowRunLedgerSummaryTests {
         ]
     )
 
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
+    let manifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
+        FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
     #expect(manifest.artifacts.contains {
@@ -762,11 +710,14 @@ extension FlowRunLedgerSummaryTests {
 @Test func resumerRejectsRunsWithoutPersistedPlan() async throws {
     let root = try makeTemporaryRoot("agent-resume-missing-plan")
     defer { removeTemporaryRoot(root) }
-    try XcircuiteWorkspaceStore().createWorkspace(at: root)
-    try XcircuiteWorkspaceStore().createRunDirectory(for: "run-1", inProjectAt: root)
+    try await TestFlowInfrastructure.bound(to: root).createWorkspace(at: root)
+    _ = try await TestFlowInfrastructure.bound(to: root).createRunDirectory(
+        for: "run-1",
+        inProjectAt: root
+    )
 
     await #expect(throws: FlowRunResumeError.self) {
-        try await DefaultFlowRunResumer().resumeRun(
+        try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(projectRoot: root, runID: "run-1"),
             toolRegistry: ToolRegistry(),
             healthResults: [:],

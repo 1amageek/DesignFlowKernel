@@ -8,7 +8,17 @@ struct ApprovalDuringExecutionExecutor: FlowStageExecutor {
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        _ = try DefaultFlowGateApprovalRecorder().recordApproval(
+        let infrastructure = await TestFlowInfrastructure.bound(to: context.projectRoot)
+        _ = try await DefaultFlowGateApprovalRecorder(
+            loader: infrastructure,
+            inspector: DefaultFlowRunLedgerInspector(
+                reviewBundler: DefaultFlowRunReviewBundler(
+                    loader: infrastructure,
+                    persistence: infrastructure
+                )
+            ),
+            ledgerPersistence: infrastructure
+        ).recordApproval(
             FlowGateApprovalRequest(
                 projectRoot: context.projectRoot,
                 runID: context.runID,

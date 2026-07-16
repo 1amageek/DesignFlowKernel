@@ -1,5 +1,3 @@
-import DesignFlowKernel
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -14,7 +12,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -23,12 +21,26 @@ extension FlowRunLedgerSummaryTests {
         ],
         artifactPayloads: [summaryPath: Data(#"{"artifactID":"drc-summary"}"#.utf8)]
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    let store = await TestFlowInfrastructure.bound(to: root)
+    let reviewBundler = DefaultFlowRunReviewBundler(loader: store, persistence: store)
+    _ = try await DefaultFlowRunDecisionPacketBuilder(
+        reviewBundler: reviewBundler,
+        persistence: store
+    ).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let result = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+    let validator = DefaultFlowRunDecisionPacketValidator(
+        loader: store,
+        persistence: store,
+        reviewBundler: reviewBundler
+    )
+    let result = try await DefaultFlowRunReleaseEnvelopeBuilder(
+        decisionPacketValidator: validator,
+        loader: store,
+        persistence: store
+    ).buildReleaseEnvelope(
         runID: "run-1",
         projectRoot: root
     )
@@ -46,42 +58,31 @@ extension FlowRunLedgerSummaryTests {
         $0.code == "release-envelope-corpus-history-missing"
     })
 
-    let manifest = try XcircuiteWorkspaceStore().readJSON(
-        XcircuiteRunManifest.self,
-        from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
-    )
+    let manifest = try await store.loadRunLedger(runID: "run-1").runManifest
     #expect(manifest.artifacts.contains {
         $0.artifactID == "qualification-release-envelope"
             && $0.path == ".xcircuite/runs/run-1/qualification/release-envelope.json"
     })
 }
 
-@Test func buildReleaseEnvelopeProcessExitIsNonZeroWhenEnvelopeBlocks() async throws {
+@Test func releaseEnvelopeBuilderReportsBlockedStatus() async throws {
     let root = try makeTemporaryRoot("agent-release-envelope-process-exit")
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let result = try await DesignFlowCLICommand.runProcess(
-        arguments: [
-            "build-release-envelope",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let build = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(result.output.data(using: .utf8))
-    let build = try JSONDecoder().decode(FlowRunReleaseEnvelopeBuildResult.self, from: data)
 
     #expect(build.envelope.status == .blocked)
-    #expect(result.exitCode == 2)
 }
 
-@Test func buildReleaseEnvelopeCLIEmitsVerifiedReleaseEvidenceJSON() async throws {
+@Test func releaseEnvelopeBuilderEmitsVerifiedReleaseEvidence() async throws {
     let root = try makeTemporaryRoot("agent-release-envelope-cli")
     defer { removeTemporaryRoot(root) }
     let summaryPath = ".xcircuite/runs/run-1/stages/release.qualification/raw/drc-summary.json"
@@ -94,7 +95,7 @@ extension FlowRunLedgerSummaryTests {
     let historySourcePath = "retention/history.jsonl"
     let collectedAt = ISO8601DateFormatter().string(from: Date())
     try FileManager.default.createDirectory(at: root.appending(path: "retention"), withIntermediateDirectories: true)
-    try Data(#"{"runID":"run-1"}"#.utf8).write(
+    try Data(#"{"schemaVersion":1,"runID":"run-1","status":"passed","history":{"status":"passed"},"retainedSignoffSuite":{"status":"passed"}}"#.utf8).write(
         to: root.appending(path: dashboardSourcePath),
         options: .atomic
     )
@@ -113,12 +114,22 @@ extension FlowRunLedgerSummaryTests {
     var historyData = try encoder.encode(historyEntry)
     historyData.append(Data("\n".utf8))
     try historyData.write(to: root.appending(path: historySourcePath), options: .atomic)
-    let retentionIndex = try DefaultFlowRunReleaseRetentionIndexBuilder().build(
+    let sourceDashboard = try await makeTestInputArtifactReference(
+        at: root.appending(path: dashboardSourcePath),
+        artifactID: "retention-source-dashboard",
+        projectRoot: root
+    )
+    let history = try await makeTestInputArtifactReference(
+        at: root.appending(path: historySourcePath),
+        artifactID: "retention-source-history",
+        projectRoot: root
+    )
+    let retentionIndex = try await makeTestRetentionIndexBuilder(projectRoot: root).build(
         runID: "run-1",
         workflowRunID: "workflow-run-1",
         projectRoot: root,
-        sourceDashboardPath: dashboardSourcePath,
-        historyPath: historySourcePath,
+        sourceDashboard: sourceDashboard,
+        history: history,
         previousEntryCount: 0,
         retentionDays: 30,
         minimumRetentionDays: 30,
@@ -130,37 +141,37 @@ extension FlowRunLedgerSummaryTests {
         runID: "run-1",
         stageID: "release.qualification",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-corpus-history",
                 path: corpusPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-performance-envelope",
                 path: performancePath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-contract-audit",
                 path: contractPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "release-qualification-result",
                 path: releaseQualificationPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-retention-index",
                 path: retentionIndexPath,
                 kind: .report,
@@ -297,22 +308,15 @@ extension FlowRunLedgerSummaryTests {
             retentionIndexPath: retentionIndexData,
         ]
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "build-release-envelope",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-        ]
+    let result = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
+        runID: "run-1",
+        projectRoot: root
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowRunReleaseEnvelopeBuildResult.self, from: data)
     #expect(result.envelope.runID == "run-1")
     #expect(result.envelope.status == .needsReview)
     #expect(result.envelope.requirements.contains {
@@ -357,25 +361,25 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-corpus-history",
                 path: corpusPath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-performance-envelope",
                 path: performancePath,
                 kind: .report,
                 format: .json
             ),
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "qualification-contract-audit",
                 path: contractPath,
                 kind: .report,
@@ -478,12 +482,12 @@ extension FlowRunLedgerSummaryTests {
             """.utf8),
         ]
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
         projectRoot: root
     ).envelope
@@ -524,7 +528,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -597,21 +601,12 @@ extension FlowRunLedgerSummaryTests {
     }
     """.utf8).write(to: contractURL, options: .atomic)
 
-    let json = try DesignFlowCLICommand.run(
-        arguments: [
-            "collect-release-evidence",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            "run-1",
-            "--signoff-dashboard",
-            dashboardURL.path(percentEncoded: false),
-            "--contract-report",
-            contractURL.path(percentEncoded: false),
-        ]
+    let result = try await collectTestReleaseEvidence(
+        runID: "run-1",
+        projectRoot: root,
+        signoffDashboardURL: dashboardURL,
+        contractReportURL: contractURL
     )
-    let data = try #require(json.data(using: .utf8))
-    let result = try JSONDecoder().decode(FlowRunReleaseEvidenceCollectionResult.self, from: data)
 
     #expect(result.artifacts.map(\.artifactID).contains("qualification-corpus-history"))
     #expect(result.artifacts.map(\.artifactID).contains("qualification-performance-envelope"))
@@ -621,11 +616,11 @@ extension FlowRunLedgerSummaryTests {
     #expect(result.performanceEnvelope.domains.first?.durationRegressionRatio == 1.2)
     #expect(result.contractAudit.failedContractCount == 0)
 
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
-    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
         projectRoot: root
     ).envelope
@@ -652,7 +647,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -694,12 +689,12 @@ extension FlowRunLedgerSummaryTests {
     }
     """.utf8).write(to: contractURL, options: .atomic)
 
-    #expect(throws: FlowRunReleaseEvidenceCollectionError.self) {
-        _ = try DefaultFlowRunReleaseEvidenceCollector().collectReleaseEvidence(
+    await #expect(throws: FlowRunReleaseEvidenceCollectionError.self) {
+        _ = try await collectTestReleaseEvidence(
             runID: "run-1",
             projectRoot: root,
-            signoffDashboardPath: dashboardURL,
-            contractReportPath: contractURL
+            signoffDashboardURL: dashboardURL,
+            contractReportURL: contractURL
         )
     }
 }
@@ -712,7 +707,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -781,18 +776,18 @@ extension FlowRunLedgerSummaryTests {
     }
     """.utf8).write(to: contractURL, options: .atomic)
 
-    _ = try DefaultFlowRunReleaseEvidenceCollector().collectReleaseEvidence(
+    _ = try await collectTestReleaseEvidence(
         runID: "run-1",
         projectRoot: root,
-        signoffDashboardPath: dashboardURL,
-        contractReportPath: contractURL
+        signoffDashboardURL: dashboardURL,
+        contractReportURL: contractURL
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
-    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
         runID: "run-1",
         projectRoot: root
     ).envelope
@@ -819,7 +814,7 @@ extension FlowRunLedgerSummaryTests {
         root: root,
         runID: "run-1",
         artifacts: [
-            XcircuiteFileReference(
+            TestArtifactReference(
                 artifactID: "drc-summary",
                 path: summaryPath,
                 kind: .report,
@@ -856,19 +851,23 @@ extension FlowRunLedgerSummaryTests {
     """.utf8).write(to: contractURL, options: .atomic)
 
     let oldDate = Date(timeIntervalSince1970: 0)
-    _ = try DefaultFlowRunReleaseEvidenceCollector(currentDate: oldDate).collectReleaseEvidence(
+    _ = try await collectTestReleaseEvidence(
         runID: "run-1",
         projectRoot: root,
-        signoffDashboardPath: dashboardURL,
-        contractReportPath: contractURL
+        signoffDashboardURL: dashboardURL,
+        contractReportURL: contractURL,
+        currentDate: oldDate
     )
-    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
         runID: "run-1",
         projectRoot: root
     )
 
     let currentDate = oldDate.addingTimeInterval(31 * 24 * 60 * 60)
-    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder(currentDate: currentDate).buildReleaseEnvelope(
+    let envelope = try await makeTestReleaseEnvelopeBuilder(
+        projectRoot: root,
+        currentDate: currentDate
+    ).buildReleaseEnvelope(
         runID: "run-1",
         projectRoot: root,
         maxEvidenceAgeDays: 30
@@ -895,13 +894,13 @@ extension FlowRunLedgerSummaryTests {
 	        root: root,
 	        runID: "run-1",
 	        artifacts: [
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "drc-summary",
 	                path: summaryPath,
 	                kind: .report,
 	                format: .json
 	            ),
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "qualification-corpus-history",
 	                path: corpusPath,
 	                kind: .report,
@@ -915,6 +914,8 @@ extension FlowRunLedgerSummaryTests {
 	              "schemaVersion": 1,
 	              "runID": "run-1",
 	              "collectedAt": "\(futureDate)",
+	              "sourceDashboardPath": "signoff-dashboard.json",
+	              "sourceDashboardSHA256": "sha256",
 	              "dashboardStatus": "passed",
 	              "historyStatus": "passed",
 	              "previousEntryCount": 1,
@@ -924,9 +925,12 @@ extension FlowRunLedgerSummaryTests {
 	                {
 	                  "domain": "drc",
 	                  "status": "passed",
+	                  "previousQualifiedEntryCount": 1,
+	                  "currentStatus": "passed",
 	                  "qualified": true,
 	                  "caseCount": 1,
 	                  "passRate": 1.0,
+	                  "totalDurationSeconds": 1.0,
 	                  "coverageTagCount": 1,
 	                  "failureCount": 0
 	                }
@@ -936,12 +940,13 @@ extension FlowRunLedgerSummaryTests {
 	            """.utf8),
 	        ]
 	    )
-	    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
 	        projectRoot: root
 	    )
 
-	    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder(
+	    let envelope = try await makeTestReleaseEnvelopeBuilder(
+	        projectRoot: root,
 	        currentDate: Date(timeIntervalSince1970: 0)
 	    ).buildReleaseEnvelope(
 	        runID: "run-1",
@@ -967,13 +972,13 @@ extension FlowRunLedgerSummaryTests {
 	        root: root,
 	        runID: "run-1",
 	        artifacts: [
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "drc-summary",
 	                path: summaryPath,
 	                kind: .report,
 	                format: .json
 	            ),
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "wrong-corpus-history",
 	                path: corpusPath,
 	                kind: .report,
@@ -1008,12 +1013,12 @@ extension FlowRunLedgerSummaryTests {
 	            """.utf8),
 	        ]
 	    )
-	    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
 	        projectRoot: root
 	    )
 
-	    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+	    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
 	        runID: "run-1",
 	        projectRoot: root
 	    ).envelope
@@ -1040,25 +1045,25 @@ extension FlowRunLedgerSummaryTests {
 	        root: root,
 	        runID: "run-1",
 	        artifacts: [
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "drc-summary",
 	                path: summaryPath,
 	                kind: .report,
 	                format: .json
 	            ),
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "qualification-corpus-history",
 	                path: corpusPath,
 	                kind: .report,
 	                format: .json
 	            ),
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "qualification-performance-envelope",
 	                path: performancePath,
 	                kind: .report,
 	                format: .json
 	            ),
-	            XcircuiteFileReference(
+	            TestArtifactReference(
 	                artifactID: "qualification-contract-audit",
 	                path: contractPath,
 	                kind: .report,
@@ -1134,12 +1139,12 @@ extension FlowRunLedgerSummaryTests {
 	            """.utf8),
 	        ]
 	    )
-	    _ = try DefaultFlowRunDecisionPacketBuilder().buildDecisionPacket(
+	    _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
 	        runID: "run-1",
 	        projectRoot: root
 	    )
 
-	    let envelope = try DefaultFlowRunReleaseEnvelopeBuilder().buildReleaseEnvelope(
+	    let envelope = try await makeTestReleaseEnvelopeBuilder(projectRoot: root).buildReleaseEnvelope(
 	        runID: "run-1",
 	        projectRoot: root
 	    ).envelope

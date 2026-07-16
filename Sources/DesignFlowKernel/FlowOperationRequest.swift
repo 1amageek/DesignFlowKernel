@@ -4,7 +4,7 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
     public var projectRoot: URL
     public var runID: String
     public var intent: String
-    public var actor: XcircuiteRunActionActor
+    public var actor: FlowRunActor
     public var toolchainProfile: FlowToolchainProfileRecord?
     public var stages: [FlowStageDefinition]
     public var allowExistingRunDirectory: Bool
@@ -13,7 +13,7 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
         projectRoot: URL,
         runID: String,
         intent: String,
-        actor: XcircuiteRunActionActor = XcircuiteRunActionActor(
+        actor: FlowRunActor = FlowRunActor(
             kind: .system,
             identifier: "design-flow-kernel"
         ),

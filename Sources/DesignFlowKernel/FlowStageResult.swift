@@ -51,7 +51,7 @@ public struct FlowStageResult: Sendable, Hashable, Codable {
 
 }
 
-private extension XcircuiteFileKind {
+private extension ArtifactKind {
     var foundationRawValue: String {
         switch self {
         case .powerIntent: return "power-intent"
@@ -59,13 +59,13 @@ private extension XcircuiteFileKind {
         case .testPattern: return "test-pattern"
         case .ruleDeck: return "rule-deck"
         case .designDiff: return "design-diff"
-        case .parasitic: return "parasitics"
+        case .parasitics: return "parasitics"
         default: return rawValue
         }
     }
 }
 
-private extension XcircuiteFileFormat {
+private extension ArtifactFormat {
     var foundationRawValue: String {
         switch self {
         case .systemVerilog: return "system-verilog"

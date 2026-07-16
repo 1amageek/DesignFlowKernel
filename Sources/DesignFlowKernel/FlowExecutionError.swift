@@ -8,6 +8,7 @@ public enum FlowExecutionError: Error, LocalizedError, Equatable {
     case invalidRetryPolicy(stageID: String, maxAttempts: Int)
     case duplicateRunID(String)
     case existingRunPlanMismatch(String)
+    case missingArtifact(String)
 
     public var errorDescription: String? {
         switch self {
@@ -25,6 +26,8 @@ public enum FlowExecutionError: Error, LocalizedError, Equatable {
             "Run directory already exists for run ID: \(runID)"
         case .existingRunPlanMismatch(let runID):
             "Existing run plan does not match the requested run: \(runID)"
+        case .missingArtifact(let path):
+            "Required run artifact is missing: \(path)"
         }
     }
 }

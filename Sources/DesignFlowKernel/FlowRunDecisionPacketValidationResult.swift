@@ -13,7 +13,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
     public var validationArtifactPath: String?
     public var status: Status
     public var packetReadiness: FlowRunDecisionPacket.Readiness?
-    public var packetArtifactIntegrity: XcircuiteFileReferenceIntegrity?
+    public var packetArtifactIntegrity: FlowArtifactIntegrityRecord?
     public var requiredArtifactCount: Int
     public var satisfiedRequiredArtifactCount: Int
     public var missingRequiredArtifactCount: Int
@@ -30,7 +30,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
         validationArtifactPath: String? = nil,
         status: Status,
         packetReadiness: FlowRunDecisionPacket.Readiness? = nil,
-        packetArtifactIntegrity: XcircuiteFileReferenceIntegrity? = nil,
+        packetArtifactIntegrity: FlowArtifactIntegrityRecord? = nil,
         requiredArtifactCount: Int = 0,
         satisfiedRequiredArtifactCount: Int = 0,
         missingRequiredArtifactCount: Int = 0,

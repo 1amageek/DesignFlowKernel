@@ -3,16 +3,19 @@ import CircuiteFoundation
 import ToolQualification
 
 public struct DefaultFlowOrchestrator: Sendable {
-    private let storage: XcircuiteWorkspaceStore
+    private let infrastructure: any FlowRunInfrastructure
+    private let ledgerCoordinator: FlowRunLedgerCoordinator
     private let evaluator: ToolTrustEvaluator
     private let progressStore: FlowRunProgressStore
 
     public init(
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore(),
+        infrastructure: any FlowRunInfrastructure,
+        ledgerPersistence: any FlowRunLedgerPersisting,
         evaluator: ToolTrustEvaluator = ToolTrustEvaluator(),
-        progressStore: FlowRunProgressStore = FlowRunProgressStore()
+        progressStore: FlowRunProgressStore
     ) {
-        self.storage = storage
+        self.infrastructure = infrastructure
+        self.ledgerCoordinator = FlowRunLedgerCoordinator(persistence: ledgerPersistence)
         self.evaluator = evaluator
         self.progressStore = progressStore
     }
@@ -34,33 +37,49 @@ public struct DefaultFlowOrchestrator: Sendable {
         let executorsByStageID = try indexExecutors(executors)
         try validateExecutorCoverage(request: request, executorsByStageID: executorsByStageID)
 
-        try storage.createWorkspace(at: request.projectRoot)
-        try validateRunDirectoryAvailability(request)
-        let previousRunArtifacts: [XcircuiteFileReference]
+        let runDirectory = try await infrastructure.prepareRunWorkspace(
+            runID: request.runID,
+            requireNew: !request.allowExistingRunDirectory
+        )
+        let previousRunArtifacts: [ArtifactReference]
         if request.allowExistingRunDirectory {
-            previousRunArtifacts = try existingRunArtifacts(
-                runID: request.runID,
-                projectRoot: request.projectRoot
-            )
+            previousRunArtifacts = try await ledgerCoordinator.load(runID: request.runID).artifacts
         } else {
             previousRunArtifacts = []
+            let now = Date()
+            let manifest = try FlowRunManifest(
+                runID: request.runID,
+                status: .created,
+                actor: request.actor,
+                intent: request.intent,
+                createdAt: now,
+                updatedAt: now
+            )
+            try await ledgerCoordinator.save(
+                FlowRunLedger(
+                    runID: request.runID,
+                    runManifest: manifest,
+                    plan: FlowRunPlan(
+                        runID: request.runID,
+                        intent: request.intent,
+                        toolchainProfile: request.toolchainProfile,
+                        stages: request.stages
+                    ),
+                    stages: []
+                )
+            )
         }
-        let runDirectory = try runDirectory(for: request)
-        let planReference = try persistRunPlan(
+        let planReference = try await persistRunPlan(
             request: request,
-            runDirectory: runDirectory
+            projectRoot: request.projectRoot
         )
-        _ = try storage.transitionRun(
+        _ = try await ledgerCoordinator.transition(
             runID: request.runID,
-            transition: XcircuiteRunTransition(
-                status: .running,
-                artifacts: [planReference]
-            ),
-            inProjectAt: request.projectRoot
+            to: .running,
+            registering: [planReference]
         )
-        try progressStore.appendEvent(
+        try await progressStore.appendEvent(
             runID: request.runID,
-            projectRoot: request.projectRoot,
             kind: .runStarted,
             runStatus: .running,
             message: "Run \(request.runID) started."
@@ -70,7 +89,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             projectRoot: request.projectRoot,
             runID: request.runID,
             runDirectory: runDirectory,
-            storage: storage,
+            infrastructure: infrastructure,
             toolRegistry: toolRegistry,
             healthResults: healthResults
         )
@@ -78,9 +97,8 @@ public struct DefaultFlowOrchestrator: Sendable {
         var toolchainRecords: [FlowToolchainStageRecord] = []
 
         for stage in request.stages {
-            if let cancellation = try progressStore.loadCancellationRequest(
+            if let cancellation = try await progressStore.loadCancellationRequest(
                 runID: request.runID,
-                projectRoot: request.projectRoot
             ) {
                 let diagnostics = cancellationDiagnostics(cancellation)
                 let blocked = blockedStageResult(
@@ -88,15 +106,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                     diagnostics: diagnostics,
                     gateID: "cancellation"
                 )
-                try persistStageResult(
+                try await persistStageResult(
                     blocked,
-                    projectRoot: request.projectRoot,
-                    runDirectory: runDirectory
+                    runID: request.runID,
+                    projectRoot: request.projectRoot
                 )
                 stageResults.append(blocked)
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .cancellationObserved,
                     stageID: stage.stageID,
                     stageStatus: .blocked,
@@ -106,20 +123,17 @@ public struct DefaultFlowOrchestrator: Sendable {
                 let result = FlowRunResult(
                     runID: request.runID,
                     status: .cancelled,
-                    runDirectory: runDirectory,
                     stages: stageResults
                 )
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .runFinished,
                     runStatus: .cancelled,
                     message: "Run \(request.runID) cancelled."
                 )
-                try persistRunResult(
+                try await persistRunResult(
                     result,
                     projectRoot: request.projectRoot,
-                    runDirectory: runDirectory,
                     toolchainProfile: request.toolchainProfile,
                     toolchainRecords: toolchainRecords,
                     runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -129,14 +143,14 @@ public struct DefaultFlowOrchestrator: Sendable {
 
             if request.allowExistingRunDirectory,
                !stage.requiresApproval,
-               let persisted = try reusableStageResult(
+               let persisted = try await reusableStageResult(
                    for: stage,
-                   runDirectory: runDirectory
+                   runID: request.runID,
+                   projectRoot: request.projectRoot
                ) {
                 stageResults.append(persisted)
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: progressKind(for: persisted.status),
                     stageID: stage.stageID,
                     stageStatus: persisted.status,
@@ -147,10 +161,9 @@ public struct DefaultFlowOrchestrator: Sendable {
             }
 
             if stage.requiresApproval {
-                switch try persistedApprovalResolution(
+                switch try await persistedApprovalResolution(
                     for: stage,
                     request: request,
-                    runDirectory: runDirectory,
                     planReference: planReference,
                     executor: executorsByStageID[stage.stageID],
                     context: context
@@ -158,15 +171,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                 case .none:
                     break
                 case .approved(let result):
-                    try persistStageResult(
+                    try await persistStageResult(
                         result,
-                        projectRoot: request.projectRoot,
-                        runDirectory: runDirectory
+                        runID: request.runID,
+                        projectRoot: request.projectRoot
                     )
                     stageResults.append(result)
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: progressKind(for: result.status),
                         stageID: stage.stageID,
                         stageStatus: result.status,
@@ -175,15 +187,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                     )
                     continue
                 case .blocked(let result):
-                    try persistStageResult(
+                    try await persistStageResult(
                         result,
-                        projectRoot: request.projectRoot,
-                        runDirectory: runDirectory
+                        runID: request.runID,
+                        projectRoot: request.projectRoot
                     )
                     stageResults.append(result)
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .stageBlocked,
                         stageID: stage.stageID,
                         stageStatus: result.status,
@@ -193,35 +204,31 @@ public struct DefaultFlowOrchestrator: Sendable {
                     let runResult = FlowRunResult(
                         runID: request.runID,
                         status: .blocked,
-                        runDirectory: runDirectory,
                         stages: stageResults
                     )
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .runFinished,
                         runStatus: .blocked,
                         message: "Run \(request.runID) blocked."
                     )
-                    try persistRunResult(
+                    try await persistRunResult(
                         runResult,
                         projectRoot: request.projectRoot,
-                        runDirectory: runDirectory,
                         toolchainProfile: request.toolchainProfile,
                         toolchainRecords: toolchainRecords,
                         runLevelArtifacts: previousRunArtifacts + [planReference]
                     )
                     return runResult
                 case .rejected(let result):
-                    try persistStageResult(
+                    try await persistStageResult(
                         result,
-                        projectRoot: request.projectRoot,
-                        runDirectory: runDirectory
+                        runID: request.runID,
+                        projectRoot: request.projectRoot
                     )
                     stageResults.append(result)
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: progressKind(for: result.status),
                         stageID: stage.stageID,
                         stageStatus: result.status,
@@ -231,20 +238,17 @@ public struct DefaultFlowOrchestrator: Sendable {
                     let runResult = FlowRunResult(
                         runID: request.runID,
                         status: .failed,
-                        runDirectory: runDirectory,
                         stages: stageResults
                     )
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .runFinished,
                         runStatus: .failed,
                         message: "Run \(request.runID) failed."
                     )
-                    try persistRunResult(
+                    try await persistRunResult(
                         runResult,
                         projectRoot: request.projectRoot,
-                        runDirectory: runDirectory,
                         toolchainProfile: request.toolchainProfile,
                         toolchainRecords: toolchainRecords,
                         runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -264,7 +268,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
 
             if let requiredTool = stage.requiredTool {
-                let evaluatedTools = evaluatedToolDecisions(
+                let evaluatedTools = await evaluatedToolDecisions(
                     requirement: requiredTool,
                     toolRegistry: toolRegistry,
                     healthResults: healthResults
@@ -294,15 +298,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                         diagnostics: diagnostics,
                         gateID: "tool-trust"
                     )
-                    try persistStageResult(
+                    try await persistStageResult(
                         blocked,
-                        projectRoot: request.projectRoot,
-                        runDirectory: runDirectory
+                        runID: request.runID,
+                        projectRoot: request.projectRoot
                     )
                     stageResults.append(blocked)
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .stageBlocked,
                         stageID: stage.stageID,
                         stageStatus: .blocked,
@@ -312,20 +315,17 @@ public struct DefaultFlowOrchestrator: Sendable {
                     let result = FlowRunResult(
                         runID: request.runID,
                         status: .blocked,
-                        runDirectory: runDirectory,
                         stages: stageResults
                     )
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .runFinished,
                         runStatus: .blocked,
                         message: "Run \(request.runID) blocked."
                     )
-                    try persistRunResult(
+                    try await persistRunResult(
                         result,
                         projectRoot: request.projectRoot,
-                        runDirectory: runDirectory,
                         toolchainProfile: request.toolchainProfile,
                         toolchainRecords: toolchainRecords,
                         runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -351,15 +351,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                         diagnostics: diagnostics,
                         gateID: "tool-trust"
                     )
-                    try persistStageResult(
+                    try await persistStageResult(
                         blocked,
-                        projectRoot: request.projectRoot,
-                        runDirectory: runDirectory
+                        runID: request.runID,
+                        projectRoot: request.projectRoot
                     )
                     stageResults.append(blocked)
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .stageBlocked,
                         stageID: stage.stageID,
                         stageStatus: .blocked,
@@ -369,20 +368,17 @@ public struct DefaultFlowOrchestrator: Sendable {
                     let result = FlowRunResult(
                         runID: request.runID,
                         status: .blocked,
-                        runDirectory: runDirectory,
                         stages: stageResults
                     )
-                    try progressStore.appendEvent(
+                    try await progressStore.appendEvent(
                         runID: request.runID,
-                        projectRoot: request.projectRoot,
                         kind: .runFinished,
                         runStatus: .blocked,
                         message: "Run \(request.runID) blocked."
                     )
-                    try persistRunResult(
+                    try await persistRunResult(
                         result,
                         projectRoot: request.projectRoot,
-                        runDirectory: runDirectory,
                         toolchainProfile: request.toolchainProfile,
                         toolchainRecords: toolchainRecords,
                         runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -407,17 +403,16 @@ public struct DefaultFlowOrchestrator: Sendable {
                 preExecutionGates: preExecutionGates
             )
             let result = stageOutcome.result
-            try persistStageResult(
+            try await persistStageResult(
                 result,
-                projectRoot: request.projectRoot,
-                runDirectory: runDirectory
+                runID: request.runID,
+                projectRoot: request.projectRoot
             )
             stageResults.append(result)
 
             if stageOutcome.runStatusOverride == .cancelled {
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .cancellationObserved,
                     stageID: stage.stageID,
                     stageStatus: .blocked,
@@ -427,29 +422,25 @@ public struct DefaultFlowOrchestrator: Sendable {
                 let runResult = FlowRunResult(
                     runID: request.runID,
                     status: .cancelled,
-                    runDirectory: runDirectory,
                     stages: stageResults
                 )
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .runFinished,
                     runStatus: .cancelled,
                     message: "Run \(request.runID) cancelled."
                 )
-                try persistRunResult(
+                try await persistRunResult(
                     runResult,
                     projectRoot: request.projectRoot,
-                    runDirectory: runDirectory,
                     toolchainProfile: request.toolchainProfile,
                     toolchainRecords: toolchainRecords,
                     runLevelArtifacts: previousRunArtifacts + [planReference]
                 )
                 return runResult
             }
-            try progressStore.appendEvent(
+            try await progressStore.appendEvent(
                 runID: request.runID,
-                projectRoot: request.projectRoot,
                 kind: progressKind(for: result.status),
                 stageID: stage.stageID,
                 stageStatus: result.status,
@@ -462,20 +453,17 @@ public struct DefaultFlowOrchestrator: Sendable {
                 let runResult = FlowRunResult(
                     runID: request.runID,
                     status: runStatus,
-                    runDirectory: runDirectory,
                     stages: stageResults
                 )
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .runFinished,
                     runStatus: runStatus,
                     message: "Run \(request.runID) finished with status \(runStatus.rawValue)."
                 )
-                try persistRunResult(
+                try await persistRunResult(
                     runResult,
                     projectRoot: request.projectRoot,
-                    runDirectory: runDirectory,
                     toolchainProfile: request.toolchainProfile,
                     toolchainRecords: toolchainRecords,
                     runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -487,20 +475,17 @@ public struct DefaultFlowOrchestrator: Sendable {
         let runResult = FlowRunResult(
             runID: request.runID,
             status: aggregateStatus(stageResults),
-            runDirectory: runDirectory,
             stages: stageResults
         )
-        try progressStore.appendEvent(
+        try await progressStore.appendEvent(
             runID: request.runID,
-            projectRoot: request.projectRoot,
             kind: .runFinished,
             runStatus: runResult.status,
             message: "Run \(request.runID) finished with status \(runResult.status.rawValue)."
         )
-        try persistRunResult(
+        try await persistRunResult(
             runResult,
             projectRoot: request.projectRoot,
-            runDirectory: runDirectory,
             toolchainProfile: request.toolchainProfile,
             toolchainRecords: toolchainRecords,
             runLevelArtifacts: previousRunArtifacts + [planReference]
@@ -514,7 +499,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         context: FlowExecutionContext,
         request: FlowOperationRequest,
         runDirectory: URL,
-        planReference: XcircuiteFileReference,
+        planReference: ArtifactReference,
         preExecutionGates: [FlowGateResult]
     ) async throws -> FlowStageExecutionOutcome {
         var attempts: [FlowStageAttemptRecord] = []
@@ -523,9 +508,8 @@ public struct DefaultFlowOrchestrator: Sendable {
 
         while attemptIndex <= maxAttempts {
             let startedAt = Date()
-            try progressStore.appendEvent(
+            try await progressStore.appendEvent(
                 runID: request.runID,
-                projectRoot: request.projectRoot,
                 kind: .stageStarted,
                 stageID: stage.stageID,
                 stageStatus: .running,
@@ -555,7 +539,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             attemptResult.gates.insert(contentsOf: preExecutionGates, at: 0)
             attemptResult.diagnostics.append(contentsOf: preExecutionGates.flatMap(\.diagnostics))
             if stage.requiresApproval {
-                attemptResult = try applyApprovalGate(
+                attemptResult = try await applyApprovalGate(
                     to: attemptResult,
                     request: request,
                     planReference: planReference
@@ -583,9 +567,8 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
 
             if decision.shouldRetry {
-                try progressStore.appendEvent(
+                try await progressStore.appendEvent(
                     runID: request.runID,
-                    projectRoot: request.projectRoot,
                     kind: .stageRetryScheduled,
                     stageID: stage.stageID,
                     stageStatus: attemptResult.status,
@@ -596,7 +579,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 continue
             }
 
-            let finalResult = try attachAttemptRecordsIfNeeded(
+            let finalResult = try await attachAttemptRecordsIfNeeded(
                 attempts,
                 to: attemptResult,
                 stage: stage,
@@ -622,19 +605,18 @@ public struct DefaultFlowOrchestrator: Sendable {
         requirement: ToolTrustRequirement,
         toolRegistry: ToolRegistry,
         healthResults: [String: ToolHealthCheckResult]
-    ) -> [(descriptor: ToolDescriptor, decision: ToolTrustDecision)] {
-        toolRegistry.descriptors.values
-            .map { descriptor in
-                (
-                    descriptor,
-                    evaluator.evaluate(
-                        descriptor: descriptor,
-                        requirement: requirement,
-                        health: healthResults[descriptor.toolID]
-                    )
-                )
-            }
-            .sorted { lhs, rhs in
+    ) async -> [(descriptor: ToolDescriptor, decision: ToolTrustDecision)] {
+        var decisions: [(descriptor: ToolDescriptor, decision: ToolTrustDecision)] = []
+        for descriptor in toolRegistry.descriptors.values {
+            let decision = await evaluator.evaluate(
+                descriptor: descriptor,
+                requirement: requirement,
+                health: healthResults[descriptor.toolID],
+                artifactReader: infrastructure
+            )
+            decisions.append((descriptor, decision))
+        }
+        return decisions.sorted { lhs, rhs in
                 if lhs.decision.status != rhs.decision.status {
                     return lhs.decision.status == .eligible
                 }
@@ -705,15 +687,13 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func persistedApprovalResolution(
         for stage: FlowStageDefinition,
         request: FlowOperationRequest,
-        runDirectory: URL,
-        planReference: XcircuiteFileReference,
+        planReference: ArtifactReference,
         executor: (any FlowStageExecutor)?,
         context: FlowExecutionContext
-    ) throws -> PersistedApprovalResolution {
-        guard let record = try storage.loadApproval(
+    ) async throws -> PersistedApprovalResolution {
+        guard let record = try await infrastructure.loadApproval(
             runID: request.runID,
-            stageID: stage.stageID,
-            inProjectAt: request.projectRoot
+            stageID: stage.stageID
         ) else {
             return .none
         }
@@ -721,18 +701,34 @@ public struct DefaultFlowOrchestrator: Sendable {
         switch record.verdict {
         case .rejected:
             return .rejected(rejectedStageResult(stageID: stage.stageID, record: record))
-        case .approved:
-            let resultURL = runDirectory
-                .appending(path: "stages")
-                .appending(path: stage.stageID)
-                .appending(path: "result.json")
-            let reviewedResult = try storage.readJSON(FlowStageResult.self, from: resultURL)
-            if isApprovalApplied(to: reviewedResult) {
-                let approvalInputURL = approvalInputURL(
-                    stageID: stage.stageID,
-                    runDirectory: runDirectory
+        case .approved, .waived:
+            let resultPath = "runs/\(request.runID)/stages/\(stage.stageID)/result.json"
+            guard let reviewedResult: FlowStageResult = try await loadJSONArtifact(
+                FlowStageResult.self,
+                path: resultPath,
+                role: .output,
+                kind: .other,
+                format: .json,
+                projectRoot: request.projectRoot
+            ) else {
+                let diagnostic = FlowDiagnostic(
+                    severity: .error,
+                    code: "APPROVAL_REVIEW_INPUT_MISSING",
+                    message: "Approved stage \(stage.stageID) is missing its reviewed result."
                 )
-                guard FileManager.default.fileExists(atPath: approvalInputURL.path(percentEncoded: false)) else {
+                return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
+            }
+            if isApprovalApplied(to: reviewedResult) {
+                let approvalInputPath = "runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
+                let approvalInputLocator = try artifactLocator(
+                    path: approvalInputPath,
+                    role: .input,
+                    kind: .report,
+                    format: .json
+                )
+                guard let approvalInputContent = try await infrastructure.loadArtifactContent(
+                    at: approvalInputLocator
+                ) else {
                     let diagnostic = FlowDiagnostic(
                         severity: .error,
                         code: "APPROVAL_REVIEW_INPUT_MISSING",
@@ -743,7 +739,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 if let diagnostic = approvalBindingDiagnostic(
                     record: record,
                     planReference: planReference,
-                    resultURL: approvalInputURL
+                    resultContent: approvalInputContent
                 ) {
                     return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
                 }
@@ -752,7 +748,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             if let diagnostic = approvalBindingDiagnostic(
                 record: record,
                 planReference: planReference,
-                runDirectory: runDirectory
+                stageResult: reviewedResult
             ) {
                 return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
             }
@@ -793,66 +789,27 @@ public struct DefaultFlowOrchestrator: Sendable {
                     )
                 }
             }
-            let approvalInputURL = approvalInputURL(
-                stageID: stage.stageID,
-                runDirectory: runDirectory
-            )
-            try storage.writeJSON(
+            _ = try await persistJSONArtifact(
                 reviewedResult,
-                to: approvalInputURL,
-                forProjectAt: request.projectRoot
-            )
-            let relativeApprovalInputPath = "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
-            let approvalInputReference = try storage.fileReference(
-                forProjectRelativePath: relativeApprovalInputPath,
-                artifactID: "approval-review-\(stage.stageID.replacingOccurrences(of: ".", with: "-"))",
+                path: "runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json",
+                id: "approval-review-\(stage.stageID.replacingOccurrences(of: ".", with: "-"))",
+                role: .input,
                 kind: .report,
                 format: .json,
-                inProjectAt: request.projectRoot,
-                producedByRunID: request.runID
-            )
-            try storage.upsertRunArtifact(
-                approvalInputReference,
                 runID: request.runID,
-                inProjectAt: request.projectRoot
+                projectRoot: request.projectRoot,
+                mode: .immutable
             )
             return .approved(approvedStageResult(from: reviewedResult, record: record))
         }
     }
 
     private func approvalBindingDiagnostic(
-        record: XcircuiteApprovalRecord,
-        planReference: XcircuiteFileReference,
-        runDirectory: URL
+        record: FlowApprovalRecord,
+        planReference: ArtifactReference,
+        resultContent: Data
     ) -> FlowDiagnostic? {
-        let resultURL = runDirectory
-            .appending(path: "stages")
-            .appending(path: record.stageID)
-            .appending(path: "result.json")
-        return approvalBindingDiagnostic(
-            record: record,
-            planReference: planReference,
-            resultURL: resultURL
-        )
-    }
-
-    private func approvalBindingDiagnostic(
-        record: XcircuiteApprovalRecord,
-        planReference: XcircuiteFileReference,
-        resultURL: URL
-    ) -> FlowDiagnostic? {
-        guard let planSHA256 = record.planSHA256,
-              let planByteCount = record.planByteCount,
-              let stageResultSHA256 = record.stageResultSHA256,
-              let stageResultByteCount = record.stageResultByteCount else {
-            return FlowDiagnostic(
-                severity: .error,
-                code: "APPROVAL_BINDING_MISSING",
-                message: "Approval for \(record.stageID) does not record the reviewed plan and stage result hashes. Re-approval is required."
-            )
-        }
-        guard planReference.sha256 == planSHA256,
-              planReference.byteCount == planByteCount else {
+        guard planReference == record.evidence.plan else {
             return FlowDiagnostic(
                 severity: .error,
                 code: "APPROVAL_BINDING_MISMATCH",
@@ -860,19 +817,13 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
         }
 
-        guard FileManager.default.fileExists(atPath: resultURL.path(percentEncoded: false)) else {
-            return FlowDiagnostic(
-                severity: .error,
-                code: "APPROVAL_BINDING_MISMATCH",
-                message: "Approval for \(record.stageID) references a stage result that is no longer present. Re-approval is required."
-            )
-        }
-
         do {
-            let actualSHA256 = try XcircuiteHasher().sha256(fileAt: resultURL)
-            let actualByteCount = try XcircuiteHasher().byteCount(fileAt: resultURL)
-            guard actualSHA256 == stageResultSHA256,
-                  actualByteCount == stageResultByteCount else {
+            let actualSHA256 = try SHA256ContentDigester()
+                .digest(data: resultContent)
+                .hexadecimalValue
+            let actualByteCount = UInt64(resultContent.count)
+            guard actualSHA256 == record.evidence.stageResult.digest.hexadecimalValue,
+                  actualByteCount == record.evidence.stageResult.byteCount else {
                 return FlowDiagnostic(
                     severity: .error,
                     code: "APPROVAL_BINDING_MISMATCH",
@@ -889,16 +840,6 @@ public struct DefaultFlowOrchestrator: Sendable {
         }
     }
 
-    private func approvalInputURL(
-        stageID: String,
-        runDirectory: URL
-    ) -> URL {
-        runDirectory
-            .appending(path: "stages")
-            .appending(path: stageID)
-            .appending(path: "approval-input.json")
-    }
-
     private func isApprovalApplied(to result: FlowStageResult) -> Bool {
         result.status == .succeeded
             && result.gates.contains {
@@ -907,22 +848,11 @@ public struct DefaultFlowOrchestrator: Sendable {
     }
 
     private func approvalBindingDiagnostic(
-        record: XcircuiteApprovalRecord,
-        planReference: XcircuiteFileReference,
+        record: FlowApprovalRecord,
+        planReference: ArtifactReference,
         stageResult: FlowStageResult
     ) -> FlowDiagnostic? {
-        guard let planSHA256 = record.planSHA256,
-              let planByteCount = record.planByteCount,
-              let stageResultSHA256 = record.stageResultSHA256,
-              let stageResultByteCount = record.stageResultByteCount else {
-            return FlowDiagnostic(
-                severity: .error,
-                code: "APPROVAL_BINDING_MISSING",
-                message: "Approval for \(record.stageID) does not record the reviewed plan and stage result hashes. Re-approval is required."
-            )
-        }
-        guard planReference.sha256 == planSHA256,
-              planReference.byteCount == planByteCount else {
+        guard planReference == record.evidence.plan else {
             return FlowDiagnostic(
                 severity: .error,
                 code: "APPROVAL_BINDING_MISMATCH",
@@ -938,10 +868,12 @@ public struct DefaultFlowOrchestrator: Sendable {
         }
         do {
             let data = try encodedPackageJSON(stageResult)
-            let actualSHA256 = XcircuiteHasher().sha256(data: data)
-            let actualByteCount = Int64(data.count)
-            guard actualSHA256 == stageResultSHA256,
-                  actualByteCount == stageResultByteCount else {
+            let actualSHA256 = try SHA256ContentDigester()
+                .digest(data: data)
+                .hexadecimalValue
+            let actualByteCount = UInt64(data.count)
+            guard actualSHA256 == record.evidence.stageResult.digest.hexadecimalValue,
+                  actualByteCount == record.evidence.stageResult.byteCount else {
                 return FlowDiagnostic(
                     severity: .error,
                     code: "APPROVAL_BINDING_MISMATCH",
@@ -1002,13 +934,13 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func approvedStageResult(
         from result: FlowStageResult,
-        record: XcircuiteApprovalRecord
+        record: FlowApprovalRecord
     ) -> FlowStageResult {
         var updated = result
         updated.status = .succeeded
         updated.gates.removeAll { $0.gateID == "approval" }
         updated.diagnostics.removeAll { approvalGateDiagnosticCodes.contains($0.code) }
-        let diagnostic = approvedDiagnostic(record)
+        let diagnostic = acceptedApprovalDiagnostic(record)
         updated.gates.append(FlowGateResult(gateID: "approval", status: .passed, diagnostics: [diagnostic]))
         updated.diagnostics.append(diagnostic)
         return updated
@@ -1016,7 +948,7 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func rejectedStageResult(
         stageID: String,
-        record: XcircuiteApprovalRecord
+        record: FlowApprovalRecord
     ) -> FlowStageResult {
         let diagnostic = rejectedDiagnostic(record)
         return FlowStageResult(
@@ -1035,11 +967,12 @@ public struct DefaultFlowOrchestrator: Sendable {
             "APPROVAL_BINDING_MISSING",
             "APPROVAL_BINDING_MISMATCH",
             "STAGE_APPROVED",
+            "STAGE_WAIVED",
             "STAGE_REJECTED",
         ]
     }
 
-    private func approvedDiagnostic(_ record: XcircuiteApprovalRecord) -> FlowDiagnostic {
+    private func approvedDiagnostic(_ record: FlowApprovalRecord) -> FlowDiagnostic {
         FlowDiagnostic(
             severity: .info,
             code: "STAGE_APPROVED",
@@ -1047,7 +980,19 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
     }
 
-    private func rejectedDiagnostic(_ record: XcircuiteApprovalRecord) -> FlowDiagnostic {
+    private func waivedDiagnostic(_ record: FlowApprovalRecord) -> FlowDiagnostic {
+        FlowDiagnostic(
+            severity: .warning,
+            code: "STAGE_WAIVED",
+            message: "Waived by \(record.reviewer): \(record.note)."
+        )
+    }
+
+    private func acceptedApprovalDiagnostic(_ record: FlowApprovalRecord) -> FlowDiagnostic {
+        record.verdict == .waived ? waivedDiagnostic(record) : approvedDiagnostic(record)
+    }
+
+    private func rejectedDiagnostic(_ record: FlowApprovalRecord) -> FlowDiagnostic {
         FlowDiagnostic(
             severity: .error,
             code: "STAGE_REJECTED",
@@ -1064,15 +1009,14 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func applyApprovalGate(
         to result: FlowStageResult,
         request: FlowOperationRequest,
-        planReference: XcircuiteFileReference
-    ) throws -> FlowStageResult {
+        planReference: ArtifactReference
+    ) async throws -> FlowStageResult {
         var updated = result
         guard result.status == .succeeded else { return result }
 
-        let record = try storage.loadApproval(
+        let record = try await infrastructure.loadApproval(
             runID: request.runID,
-            stageID: result.stageID,
-            inProjectAt: request.projectRoot
+            stageID: result.stageID
         )
         guard let record else {
             let diagnostic = FlowDiagnostic(
@@ -1090,7 +1034,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             return updated
         }
         switch record.verdict {
-        case .approved:
+        case .approved, .waived:
             if let diagnostic = approvalBindingDiagnostic(
                 record: record,
                 planReference: planReference,
@@ -1105,7 +1049,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 updated.status = .blocked
                 return updated
             }
-            let diagnostic = approvedDiagnostic(record)
+            let diagnostic = acceptedApprovalDiagnostic(record)
             updated.gates.append(FlowGateResult(
                 gateID: "approval",
                 status: .passed,
@@ -1126,7 +1070,7 @@ public struct DefaultFlowOrchestrator: Sendable {
     }
 
     private func validate(request: FlowOperationRequest) throws {
-        let validator = XcircuiteIdentifierValidator()
+        let validator = FlowIdentifierValidator()
         try validator.validate(request.runID, kind: .runID)
 
         var stageIDs: Set<String> = []
@@ -1144,34 +1088,6 @@ public struct DefaultFlowOrchestrator: Sendable {
         }
     }
 
-    private func validateRunDirectoryAvailability(_ request: FlowOperationRequest) throws {
-        guard !request.allowExistingRunDirectory else { return }
-        let runDirectory = try XcircuiteWorkspace(projectRoot: request.projectRoot)
-            .runDirectoryURL(for: request.runID)
-        guard !FileManager.default.fileExists(atPath: runDirectory.path(percentEncoded: false)) else {
-            throw FlowExecutionError.duplicateRunID(request.runID)
-        }
-    }
-
-    private func runDirectory(for request: FlowOperationRequest) throws -> URL {
-        let descriptor = XcircuiteRunDescriptor(
-            actor: request.actor,
-            intent: request.intent
-        )
-        if request.allowExistingRunDirectory {
-            return try storage.ensureRunDirectory(
-                for: request.runID,
-                descriptor: descriptor,
-                inProjectAt: request.projectRoot
-            )
-        }
-        return try storage.createRunDirectory(
-            for: request.runID,
-            descriptor: descriptor,
-            inProjectAt: request.projectRoot
-        )
-    }
-
     private func validateExecutorCoverage(
         request: FlowOperationRequest,
         executorsByStageID: [String: any FlowStageExecutor]
@@ -1182,7 +1098,7 @@ public struct DefaultFlowOrchestrator: Sendable {
     }
 
     private func indexExecutors(_ executors: [any FlowStageExecutor]) throws -> [String: any FlowStageExecutor] {
-        let validator = XcircuiteIdentifierValidator()
+        let validator = FlowIdentifierValidator()
         var executorsByStageID: [String: any FlowStageExecutor] = [:]
         for executor in executors {
             try validator.validate(executor.stageID, kind: .stageID)
@@ -1279,19 +1195,18 @@ public struct DefaultFlowOrchestrator: Sendable {
         stage: FlowStageDefinition,
         request: FlowOperationRequest,
         runDirectory: URL
-    ) throws -> FlowStageResult {
+    ) async throws -> FlowStageResult {
         var updated = result
         updated.attempts = attempts
         guard stage.retryPolicy.isEnabled || attempts.count > 1 else {
             return updated
         }
 
-        let reference = try persistStageAttemptRecords(
+        let reference = try await persistStageAttemptRecords(
             attempts,
             stageID: stage.stageID,
             runID: request.runID,
-            projectRoot: request.projectRoot,
-            runDirectory: runDirectory
+            projectRoot: request.projectRoot
         )
         updated.artifacts = mergedFoundationArtifacts(updated.artifacts + [reference])
         return updated
@@ -1301,25 +1216,20 @@ public struct DefaultFlowOrchestrator: Sendable {
         _ attempts: [FlowStageAttemptRecord],
         stageID: String,
         runID: String,
-        projectRoot: URL,
-        runDirectory: URL
-    ) throws -> ArtifactReference {
-        let relativePath = "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/stages/\(stageID)/attempts.json"
-        let attemptsURL = runDirectory
-            .appending(path: "stages")
-            .appending(path: stageID)
-            .appending(path: "attempts.json")
-        try storage.ensureDirectory(at: attemptsURL.deletingLastPathComponent())
-        try storage.writeJSON(attempts, to: attemptsURL, forProjectAt: projectRoot)
-        let legacyReference = try storage.fileReference(
-            forProjectRelativePath: relativePath,
-            artifactID: "\(stageID)-attempts",
+        projectRoot: URL
+    ) async throws -> ArtifactReference {
+        let relativePath = "runs/\(runID)/stages/\(stageID)/attempts.json"
+        return try await persistJSONArtifact(
+            attempts,
+            path: relativePath,
+            id: "\(stageID)-attempts",
+            role: .output,
             kind: .other,
             format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID
+            runID: runID,
+            projectRoot: projectRoot,
+            mode: .replaceable
         )
-        return try legacyReference.foundationArtifactReference(role: .output)
     }
 
     private func diagnosticCodes(from result: FlowStageResult) -> [String] {
@@ -1328,30 +1238,35 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func persistStageResult(
         _ result: FlowStageResult,
-        projectRoot: URL,
-        runDirectory: URL
-    ) throws {
-        let stageDirectory = runDirectory.appending(path: "stages").appending(path: result.stageID)
-        try storage.ensureDirectory(at: stageDirectory)
-        try storage.writeJSON(
+        runID: String,
+        projectRoot: URL
+    ) async throws {
+        _ = try await persistJSONArtifact(
             result,
-            to: stageDirectory.appending(path: "result.json"),
-            forProjectAt: projectRoot
+            path: "runs/\(runID)/stages/\(result.stageID)/result.json",
+            id: "\(result.stageID)-result",
+            role: .output,
+            kind: .other,
+            format: .json,
+            runID: runID,
+            projectRoot: projectRoot,
+            mode: .replaceable
         )
     }
 
     private func reusableStageResult(
         for stage: FlowStageDefinition,
-        runDirectory: URL
-    ) throws -> FlowStageResult? {
-        let resultURL = runDirectory
-            .appending(path: "stages")
-            .appending(path: stage.stageID)
-            .appending(path: "result.json")
-        guard FileManager.default.fileExists(atPath: resultURL.path(percentEncoded: false)) else {
-            return nil
-        }
-        let result = try storage.readJSON(FlowStageResult.self, from: resultURL)
+        runID: String,
+        projectRoot: URL
+    ) async throws -> FlowStageResult? {
+        guard let result: FlowStageResult = try await loadJSONArtifact(
+            FlowStageResult.self,
+            path: "runs/\(runID)/stages/\(stage.stageID)/result.json",
+            role: .output,
+            kind: .other,
+            format: .json,
+            projectRoot: projectRoot
+        ) else { return nil }
         guard result.stageID == stage.stageID, result.status == .succeeded else {
             return nil
         }
@@ -1421,104 +1336,118 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func persistRunResult(
         _ result: FlowRunResult,
         projectRoot: URL,
-        runDirectory: URL,
         toolchainProfile: FlowToolchainProfileRecord?,
         toolchainRecords: [FlowToolchainStageRecord],
-        runLevelArtifacts: [XcircuiteFileReference]
-    ) throws {
-        let progressArtifacts = try progressStore.runLevelArtifacts(
+        runLevelArtifacts: [ArtifactReference]
+    ) async throws {
+        let progressArtifacts = try await progressStore.runLevelArtifacts(
             runID: result.runID,
-            projectRoot: projectRoot
         )
-        let stageResultArtifacts = try result.stages.map { stage in
-            try storage.fileReference(
-                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(result.runID)/stages/\(stage.stageID)/result.json",
-                artifactID: "\(stage.stageID)-result",
+        var stageResultArtifacts: [ArtifactReference] = []
+        for stage in result.stages {
+            let locator = try artifactLocator(
+                path: "runs/\(result.runID)/stages/\(stage.stageID)/result.json",
+                role: .output,
                 kind: .other,
-                format: .json,
-                inProjectAt: projectRoot,
-                producedByRunID: result.runID
+                format: .json
             )
+            guard let content = try await infrastructure.loadArtifactContent(
+                at: locator
+            ) else {
+                throw FlowExecutionError.missingArtifact(
+                    "runs/\(result.runID)/stages/\(stage.stageID)/result.json"
+                )
+            }
+            let reference = try await infrastructure.persistArtifact(
+                content: content,
+                id: ArtifactID(rawValue: "\(stage.stageID)-result"),
+                locator: locator,
+                runID: result.runID,
+                mode: .replaceable
+            )
+            stageResultArtifacts.append(reference)
         }
-        let toolchainReference = try persistToolchainManifest(
+        let toolchainReference = try await persistToolchainManifest(
             runID: result.runID,
             profile: toolchainProfile,
             records: toolchainRecords,
-            projectRoot: projectRoot,
-            runDirectory: runDirectory
+            projectRoot: projectRoot
         )
-        let stageArtifacts = try result.stages
+        let reportedStageArtifacts = result.stages
             .flatMap(\.artifacts)
-            .map { try $0.legacyXcircuiteReference() }
-        let artifacts = mergedArtifacts(
+            .map { $0 }
+        var retainedStageArtifacts: [ArtifactReference] = []
+        for artifact in reportedStageArtifacts {
+            let integrity = await infrastructure.verifyArtifact(artifact)
+            if integrity.isVerified {
+                retainedStageArtifacts.append(artifact)
+            }
+        }
+        let artifacts = mergedFoundationArtifacts(
             runLevelArtifacts
-                + stageArtifacts
+                + retainedStageArtifacts
                 + stageResultArtifacts
                 + progressArtifacts
                 + [toolchainReference]
         )
-        _ = try storage.transitionRun(
+        _ = try await ledgerCoordinator.update(
             runID: result.runID,
-            transition: XcircuiteRunTransition(
-                status: xcircuiteStatus(result.status),
-                artifacts: artifacts
-            ),
-            inProjectAt: projectRoot
+        ) { ledger in
+            ledger.stages = result.stages
+            ledger.toolchain = FlowToolchainManifest(
+                runID: result.runID,
+                profile: toolchainProfile,
+                stages: toolchainRecords
+            )
+            ledger.artifacts = artifacts
+            ledger.runManifest.artifacts = artifacts
+        }
+        _ = try await ledgerCoordinator.transition(
+            runID: result.runID,
+            to: result.status,
+            registering: artifacts
         )
     }
 
     private func persistRunPlan(
         request: FlowOperationRequest,
-        runDirectory: URL
-    ) throws -> XcircuiteFileReference {
+        projectRoot: URL
+    ) async throws -> ArtifactReference {
         let plan = FlowRunPlan(
             runID: request.runID,
             intent: request.intent,
             toolchainProfile: request.toolchainProfile,
             stages: request.stages
         )
-        let planURL = runDirectory.appending(path: "plan.json")
+        let path = "runs/\(request.runID)/plan.json"
         if request.allowExistingRunDirectory,
-           FileManager.default.fileExists(atPath: planURL.path(percentEncoded: false)) {
-            let existingPlan = try storage.readJSON(FlowRunPlan.self, from: planURL)
+           let existingPlan: FlowRunPlan = try await loadJSONArtifact(
+               FlowRunPlan.self,
+               path: path,
+               role: .input,
+               kind: .other,
+               format: .json,
+               projectRoot: projectRoot
+           ) {
             guard existingPlan == plan else {
                 throw FlowExecutionError.existingRunPlanMismatch(request.runID)
             }
-            return try storage.fileReference(
-                forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/plan.json",
-                kind: .other,
-                format: .json,
-                inProjectAt: request.projectRoot,
-                producedByRunID: request.runID
-            )
         }
-        try storage.writeJSON(plan, to: planURL, forProjectAt: request.projectRoot)
-        return try storage.fileReference(
-            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(request.runID)/plan.json",
+        return try await persistJSONArtifact(
+            plan,
+            path: path,
+            id: "run-plan",
+            role: .input,
             kind: .other,
             format: .json,
-            inProjectAt: request.projectRoot,
-            producedByRunID: request.runID
+            runID: request.runID,
+            projectRoot: projectRoot,
+            mode: .immutable
         )
     }
 
-    private func existingRunArtifacts(
-        runID: String,
-        projectRoot: URL
-    ) throws -> [XcircuiteFileReference] {
-        let runDirectory = try XcircuiteWorkspace(projectRoot: projectRoot).runDirectoryURL(for: runID)
-        let manifestURL = runDirectory.appending(path: "manifest.json")
-        guard FileManager.default.fileExists(atPath: manifestURL.path(percentEncoded: false)) else {
-            return []
-        }
-        return try storage.loadRunManifest(
-            runID: runID,
-            inProjectAt: projectRoot
-        ).artifacts
-    }
-
-    private func mergedArtifacts(_ artifacts: [XcircuiteFileReference]) -> [XcircuiteFileReference] {
-        var byPath: [String: XcircuiteFileReference] = [:]
+    private func mergedArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
+        var byPath: [String: ArtifactReference] = [:]
         for artifact in artifacts {
             byPath[artifact.path] = artifact
         }
@@ -1539,22 +1468,84 @@ public struct DefaultFlowOrchestrator: Sendable {
         runID: String,
         profile: FlowToolchainProfileRecord?,
         records: [FlowToolchainStageRecord],
-        projectRoot: URL,
-        runDirectory: URL
-    ) throws -> XcircuiteFileReference {
-        let toolchainURL = runDirectory.appending(path: "toolchain.json")
+        projectRoot: URL
+    ) async throws -> ArtifactReference {
         let manifest = FlowToolchainManifest(runID: runID, profile: profile, stages: records)
-        try storage.writeJSON(manifest, to: toolchainURL, forProjectAt: projectRoot)
-        return try storage.fileReference(
-            forProjectRelativePath: "\(XcircuiteWorkspace.directoryName)/runs/\(runID)/toolchain.json",
+        return try await persistJSONArtifact(
+            manifest,
+            path: "runs/\(runID)/toolchain.json",
+            id: "toolchain-manifest",
+            role: .output,
             kind: .other,
             format: .json,
-            inProjectAt: projectRoot,
-            producedByRunID: runID
+            runID: runID,
+            projectRoot: projectRoot,
+            mode: .replaceable
         )
     }
 
-    private func xcircuiteStatus(_ status: FlowRunStatus) -> XcircuiteRunStatus {
+    private func persistJSONArtifact<Value: Encodable>(
+        _ value: Value,
+        path: String,
+        id: String?,
+        role: ArtifactRole,
+        kind: ArtifactKind,
+        format: ArtifactFormat,
+        runID: String,
+        projectRoot: URL,
+        mode: FlowArtifactPersistenceMode
+    ) async throws -> ArtifactReference {
+        let content = try encodedPackageJSON(value)
+        let artifactID = try id.map(ArtifactID.init(rawValue:))
+        return try await infrastructure.persistArtifact(
+            content: content,
+            id: artifactID,
+            locator: try artifactLocator(
+                path: path,
+                role: role,
+                kind: kind,
+                format: format
+            ),
+            runID: runID,
+            mode: mode
+        )
+    }
+
+    private func loadJSONArtifact<Value: Decodable>(
+        _ type: Value.Type,
+        path: String,
+        role: ArtifactRole,
+        kind: ArtifactKind,
+        format: ArtifactFormat,
+        projectRoot: URL
+    ) async throws -> Value? {
+        let locator = try artifactLocator(
+            path: path,
+            role: role,
+            kind: kind,
+            format: format
+        )
+        guard let content = try await infrastructure.loadArtifactContent(
+            at: locator
+        ) else { return nil }
+        return try JSONDecoder().decode(type, from: content)
+    }
+
+    private func artifactLocator(
+        path: String,
+        role: ArtifactRole,
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactLocator {
+        ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: path),
+            role: role,
+            kind: kind,
+            format: format
+        )
+    }
+
+    private func xcircuiteStatus(_ status: FlowRunStatus) -> FlowRunStatus {
         switch status {
         case .created:
             .created

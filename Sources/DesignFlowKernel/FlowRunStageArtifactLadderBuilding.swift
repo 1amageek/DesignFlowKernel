@@ -4,10 +4,10 @@ public protocol FlowRunStageArtifactLadderBuilding: Sendable {
     func makeStageArtifactLadder(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunStageArtifactLadder
+    ) async throws -> FlowRunStageArtifactLadder
 
     func buildStageArtifactLadder(
         runID: String,
         projectRoot: URL
-    ) throws -> FlowRunStageArtifactLadderBuildResult
+    ) async throws -> FlowRunStageArtifactLadderBuildResult
 }

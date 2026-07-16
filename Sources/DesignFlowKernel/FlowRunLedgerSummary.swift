@@ -1,12 +1,11 @@
 import Foundation
 
 public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public let schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
-    public var runDirectoryPath: String
     public var stages: [FlowRunStageSummary]
     public var toolchain: FlowRunToolchainSummary?
     public var designDiff: FlowRunDesignDiffSummary?
@@ -17,12 +16,11 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
     public var approvalCount: Int
     public var diagnostics: [FlowDiagnostic]
     public var nextActions: [FlowRunNextAction]
-    public var suggestedCommandSelections: [XcircuiteSuggestedCommandSelection]
+    public var suggestedCommandSelections: [FlowSuggestedCommandSelection]
 
     public init(
         runID: String,
         status: FlowRunStatus,
-        runDirectoryPath: String,
         stages: [FlowRunStageSummary] = [],
         toolchain: FlowRunToolchainSummary? = nil,
         designDiff: FlowRunDesignDiffSummary? = nil,
@@ -33,12 +31,11 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         approvalCount: Int = 0,
         diagnostics: [FlowDiagnostic] = [],
         nextActions: [FlowRunNextAction] = [],
-        suggestedCommandSelections: [XcircuiteSuggestedCommandSelection] = []
+        suggestedCommandSelections: [FlowSuggestedCommandSelection] = []
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.status = status
-        self.runDirectoryPath = runDirectoryPath
         self.stages = stages
         self.toolchain = toolchain
         self.designDiff = designDiff
@@ -56,7 +53,6 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         case schemaVersion
         case runID
         case status
-        case runDirectoryPath
         case stages
         case toolchain
         case designDiff
@@ -82,7 +78,6 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         }
         self.runID = try container.decode(String.self, forKey: .runID)
         self.status = try container.decode(FlowRunStatus.self, forKey: .status)
-        self.runDirectoryPath = try container.decode(String.self, forKey: .runDirectoryPath)
         self.stages = try container.decode(
             [FlowRunStageSummary].self,
             forKey: .stages
@@ -115,7 +110,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
             forKey: .nextActions
         )
         self.suggestedCommandSelections = try container.decode(
-            [XcircuiteSuggestedCommandSelection].self,
+            [FlowSuggestedCommandSelection].self,
             forKey: .suggestedCommandSelections
         )
     }

@@ -1,17 +1,15 @@
+import CircuiteFoundation
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentionIndexBuilding {
-    private let storage: any FlowExecutionStorage
-    private let hasher: XcircuiteHasher
+    private let persistence: any FlowArtifactPersisting
     private let validator: any FlowRunReleaseRetentionIndexValidating
 
     public init(
-        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage(),
-        hasher: XcircuiteHasher = XcircuiteHasher(),
-        validator: any FlowRunReleaseRetentionIndexValidating = DefaultFlowRunReleaseRetentionIndexValidator()
+        persistence: any FlowArtifactPersisting,
+        validator: any FlowRunReleaseRetentionIndexValidating
     ) {
-        self.storage = storage
-        self.hasher = hasher
+        self.persistence = persistence
         self.validator = validator
     }
 
@@ -19,33 +17,25 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
         runID: String,
         workflowRunID: String,
         projectRoot: URL,
-        sourceDashboardPath: String,
-        historyPath: String,
+        sourceDashboard: ArtifactReference,
+        history: ArtifactReference,
         previousEntryCount: Int,
         retentionDays: Int,
         minimumRetentionDays: Int,
         recordedAt: Date
-    ) throws -> FlowRunReleaseRetentionIndex {
-        let dashboardURL = try storage.url(
-            forProjectRelativePath: sourceDashboardPath,
-            inProjectAt: projectRoot
-        )
-        let historyURL = try storage.url(
-            forProjectRelativePath: historyPath,
-            inProjectAt: projectRoot
-        )
-        let dashboardData = try Data(contentsOf: dashboardURL)
-        let historyData = try Data(contentsOf: historyURL)
+    ) async throws -> FlowRunReleaseRetentionIndex {
+        _ = try await persistence.loadArtifactContent(for: sourceDashboard)
+        let historyData = try await persistence.loadArtifactContent(for: history)
         let entries = try decodeEntries(historyData)
         let timestamp = Self.timestamp(recordedAt)
         let index = FlowRunReleaseRetentionIndex(
             runID: runID,
             workflowRunID: workflowRunID,
             recordedAt: timestamp,
-            sourceDashboardPath: sourceDashboardPath,
-            sourceDashboardSHA256: hasher.sha256(data: dashboardData),
-            historyPath: historyPath,
-            historySHA256: hasher.sha256(data: historyData),
+            sourceDashboardPath: sourceDashboard.locator.location.value,
+            sourceDashboardSHA256: sourceDashboard.digest.hexadecimalValue,
+            historyPath: history.locator.location.value,
+            historySHA256: history.digest.hexadecimalValue,
             historyByteCount: Int64(historyData.count),
             historyEntryCount: entries.count,
             historyHeadSHA256: entries.last?.entrySHA256 ?? String(repeating: "0", count: 64),
@@ -56,7 +46,7 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
             minimumRetentionDays: minimumRetentionDays,
             status: .passed
         )
-        let validation = try validator.validate(
+        let validation = try await validator.validate(
             index: index,
             runID: runID,
             projectRoot: projectRoot,
@@ -86,7 +76,7 @@ public struct DefaultFlowRunReleaseRetentionIndexBuilder: FlowRunReleaseRetentio
 
     private func decodeEntries(_ data: Data) throws -> [FlowRunReleaseHistoryEntry] {
         guard let string = String(data: data, encoding: .utf8) else {
-            throw XcircuiteWorkspaceError.decodeFailed("Retention history is not UTF-8 JSONL.")
+            throw FlowRunReleaseRetentionError.invalidHistoryEncoding
         }
         let decoder = JSONDecoder()
         return try string.split(whereSeparator: { $0.isNewline }).map { line in

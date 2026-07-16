@@ -1,4 +1,3 @@
-import DesignFlowCLISupport
 import DesignFlowKernel
 import CircuiteFoundation
 import Foundation
@@ -6,18 +5,18 @@ import Testing
 
 @Suite("Flow run loop guard", .timeLimit(.minutes(1)))
 struct FlowRunLoopGuardTests {
-    @Test func guardReportsMissingRequiredEvidence() throws {
+    @Test func guardReportsMissingRequiredEvidence() async throws {
         let root = try makeTemporaryRoot("missing-evidence")
         defer { removeTemporaryRoot(root) }
         let runID = "run-missing-evidence"
-        let store = XcircuiteWorkspaceStore()
-        try store.createWorkspace(at: root)
-        try store.ensureRunDirectory(for: runID, inProjectAt: root)
-        try store.appendRunAction(
-            XcircuiteRunActionRecord(
+        let store = await TestFlowInfrastructure.bound(to: root)
+        try await store.createWorkspace(at: root)
+        _ = try await store.ensureRunDirectory(for: runID, inProjectAt: root)
+        try await store.appendRunAction(
+            FlowRunActionRecord(
                 actionID: "action-1",
                 runID: runID,
-                actor: XcircuiteRunActionActor(kind: .agent, identifier: "external-agent"),
+                actor: FlowRunActor(kind: .agent, identifier: "external-agent"),
                 actionKind: "layout.edit",
                 status: .succeeded,
                 createdAt: Date(timeIntervalSince1970: 100)
@@ -25,17 +24,17 @@ struct FlowRunLoopGuardTests {
             inProjectAt: root
         )
 
-        let profile = XcircuiteAgentLoopProfile(
+        let profile = FlowAgentLoopProfile(
             profileID: "opamp-loop-profile",
-            budgets: XcircuiteAgentLoopProfile.Budgets(maxActions: 10),
+            budgets: FlowAgentLoopProfile.Budgets(maxActions: 10),
             requiredEvidence: [
-                XcircuiteAgentLoopProfile.RequiredEvidence(
+                FlowAgentLoopProfile.RequiredEvidence(
                     evidenceID: "required-simulation",
                     artifactRole: "simulation-summary"
                 ),
             ]
         )
-        let result = try DefaultFlowRunGuardEvaluator().evaluateRunGuard(
+        let result = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
             projectRoot: root,
             profile: profile,
@@ -49,44 +48,36 @@ struct FlowRunLoopGuardTests {
         #expect(fileExists(".xcircuite/runs/\(runID)/loop/iterations.jsonl", in: root))
     }
 
-    @Test func guardContinuesWhenRequiredEvidenceIsPresent() throws {
+    @Test func guardContinuesWhenRequiredEvidenceIsPresent() async throws {
         let root = try makeTemporaryRoot("present-evidence")
         defer { removeTemporaryRoot(root) }
         let runID = "run-present-evidence"
-        let store = XcircuiteWorkspaceStore()
-        try store.createWorkspace(at: root)
-        try store.ensureRunDirectory(for: runID, inProjectAt: root)
-        try store.appendRunAction(
-            XcircuiteRunActionRecord(
+        let store = await TestFlowInfrastructure.bound(to: root)
+        try await store.createWorkspace(at: root)
+        _ = try await store.ensureRunDirectory(for: runID, inProjectAt: root)
+        try await store.appendRunAction(
+            FlowRunActionRecord(
                 actionID: "action-1",
                 runID: runID,
-                actor: XcircuiteRunActionActor(kind: .agent, identifier: "external-agent"),
+                actor: FlowRunActor(kind: .agent, identifier: "external-agent"),
                 actionKind: "simulation.run",
                 status: .succeeded,
-                outputs: [
-                    XcircuiteFileReference(
-                        artifactID: "simulation-summary",
-                        path: ".xcircuite/runs/\(runID)/evidence/simulation-summary.json",
-                        kind: .report,
-                        format: .json
-                    ),
-                ],
                 createdAt: Date(timeIntervalSince1970: 100)
             ),
             inProjectAt: root
         )
-        try writeSimulationSummaryEnvelope(root: root, runID: runID)
+        try await writeSimulationSummaryEnvelope(root: root, runID: runID)
 
-        let profile = XcircuiteAgentLoopProfile(
+        let profile = FlowAgentLoopProfile(
             profileID: "opamp-loop-profile",
             requiredEvidence: [
-                XcircuiteAgentLoopProfile.RequiredEvidence(
+                FlowAgentLoopProfile.RequiredEvidence(
                     evidenceID: "required-simulation",
                     artifactRole: "simulation-summary"
                 ),
             ]
         )
-        let result = try DefaultFlowRunGuardEvaluator().evaluateRunGuard(
+        let result = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
             projectRoot: root,
             profile: profile,
@@ -98,139 +89,85 @@ struct FlowRunLoopGuardTests {
         #expect(result.snapshot.metricTrend.acceptedCount > 0)
     }
 
-    @Test func cliEvaluatesRunGuardAndPersistsArtifacts() throws {
-        let root = try makeTemporaryRoot("cli")
-        defer { removeTemporaryRoot(root) }
-        let runID = "run-cli-guard"
-        let store = XcircuiteWorkspaceStore()
-        try store.createWorkspace(at: root)
-        try store.ensureRunDirectory(for: runID, inProjectAt: root)
-        try store.appendRunAction(
-            XcircuiteRunActionRecord(
-                actionID: "action-1",
-                runID: runID,
-                actor: XcircuiteRunActionActor(kind: .agent, identifier: "external-agent"),
-                actionKind: "simulation.run",
-                status: .succeeded,
-                createdAt: Date(timeIntervalSince1970: 100)
-            ),
-            inProjectAt: root
-        )
-
-        let profile = XcircuiteAgentLoopProfile(
-            profileID: "cli-loop-profile",
-            budgets: XcircuiteAgentLoopProfile.Budgets(maxActions: 0)
-        )
-        let profileURL = root.appending(path: "agent-loop-profile.json")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(profile).write(to: profileURL, options: .atomic)
-
-        let output = try DesignFlowCLICommand.run(arguments: [
-            "evaluate-run-guard",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            runID,
-            "--profile",
-            profileURL.path(percentEncoded: false),
-            "--pretty",
-        ])
-        let data = try #require(output.data(using: .utf8))
-        let result = try JSONDecoder().decode(FlowRunGuardEvaluationResult.self, from: data)
-
-        #expect(result.verdict.status == .needsHumanReview)
-        #expect(result.verdict.triggeredDetectors.contains { $0.detectorID == "budgetExceeded" })
-        #expect(fileExists(".xcircuite/runs/\(runID)/loop/guard-verdict.json", in: root))
-    }
-
-    @Test func crossArtifactEvaluationPersistsAndFeedsReviewBundle() throws {
+    @Test func crossArtifactEvaluationPersistsAndFeedsReviewBundle() async throws {
         let root = try makeTemporaryRoot("cross-artifact-review")
         defer { removeTemporaryRoot(root) }
         let runID = "run-cross-artifact-review"
-        let store = XcircuiteWorkspaceStore()
-        try store.createWorkspace(at: root)
-        try store.ensureRunDirectory(for: runID, inProjectAt: root)
-        try store.appendRunAction(
-            XcircuiteRunActionRecord(
+        let store = await TestFlowInfrastructure.bound(to: root)
+        try await store.createWorkspace(at: root)
+        _ = try await store.ensureRunDirectory(for: runID, inProjectAt: root)
+        try await store.appendRunAction(
+            FlowRunActionRecord(
                 actionID: "action-1",
                 runID: runID,
-                actor: XcircuiteRunActionActor(kind: .agent, identifier: "external-agent"),
+                actor: FlowRunActor(kind: .agent, identifier: "external-agent"),
                 actionKind: "simulation.run",
                 status: .succeeded,
                 createdAt: Date(timeIntervalSince1970: 100)
             ),
             inProjectAt: root
         )
-        try writeSimulationSummaryEnvelope(root: root, runID: runID)
-        try writeRejectedDRCSummaryEnvelope(root: root, runID: runID)
+        try await writeSimulationSummaryEnvelope(root: root, runID: runID)
+        try await writeRejectedDRCSummaryEnvelope(root: root, runID: runID)
 
-        let loopProfile = XcircuiteAgentLoopProfile(
+        let loopProfile = FlowAgentLoopProfile(
             profileID: "loop-profile",
             requiredEvidence: [
-                XcircuiteAgentLoopProfile.RequiredEvidence(
+                FlowAgentLoopProfile.RequiredEvidence(
                     evidenceID: "required-simulation",
                     artifactRole: "simulation-summary"
                 ),
             ]
         )
-        _ = try DefaultFlowRunGuardEvaluator().evaluateRunGuard(
+        _ = try await makeGuardEvaluator(store: store).evaluateRunGuard(
             runID: runID,
             projectRoot: root,
             profile: loopProfile,
             generatedAt: Date(timeIntervalSince1970: 200)
         )
 
-        let evaluationProfile = XcircuiteEvaluationProfile(
+        let evaluationProfile = FlowEvaluationProfile(
             profileID: "evaluation-profile",
             domain: "analog",
             metricChannels: [
-                XcircuiteEvaluationProfile.MetricChannel(
+                FlowEvaluationProfile.MetricChannel(
                     channelID: "gain",
                     direction: .maximize
                 ),
-                XcircuiteEvaluationProfile.MetricChannel(
+                FlowEvaluationProfile.MetricChannel(
                     channelID: "drc.violationCount",
                     direction: .minimize
                 ),
             ],
             requiredAnalyses: [
-                XcircuiteEvaluationProfile.RequiredAnalysis(
+                FlowEvaluationProfile.RequiredAnalysis(
                     analysisID: "simulation",
                     domain: "simulation",
                     artifactRole: "simulation-summary"
                 ),
-                XcircuiteEvaluationProfile.RequiredAnalysis(
+                FlowEvaluationProfile.RequiredAnalysis(
                     analysisID: "drc",
                     domain: "layout",
                     artifactRole: "drc-summary"
                 ),
             ],
             artifactRoles: [
-                XcircuiteEvaluationProfile.ArtifactRole(role: "simulation-summary"),
-                XcircuiteEvaluationProfile.ArtifactRole(role: "drc-summary"),
+                FlowEvaluationProfile.ArtifactRole(role: "simulation-summary"),
+                FlowEvaluationProfile.ArtifactRole(role: "drc-summary"),
             ]
         )
-        let evaluationProfileURL = root.appending(path: "evaluation-profile.json")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(evaluationProfile).write(to: evaluationProfileURL, options: .atomic)
-        let output = try DesignFlowCLICommand.run(arguments: [
-            "compare-artifacts",
-            "--project-root",
-            root.path(percentEncoded: false),
-            "--run-id",
-            runID,
-            "--profile",
-            evaluationProfileURL.path(percentEncoded: false),
-            "--pretty",
-        ])
-        let data = try #require(output.data(using: .utf8))
-        let evaluationResult = try JSONDecoder().decode(
-            FlowRunCrossArtifactEvaluationResult.self,
-            from: data
+        let evaluationResult = try await DefaultFlowRunCrossArtifactEvaluator(
+            loader: store,
+            evidencePersistence: store
+        ).compareArtifacts(
+            runID: runID,
+            projectRoot: root,
+            profile: evaluationProfile
         )
-        let bundle = try DefaultFlowRunReviewBundler().makeReviewBundle(
+        let bundle = try await DefaultFlowRunReviewBundler(
+            loader: store,
+            persistence: store
+        ).makeReviewBundle(
             runID: runID,
             projectRoot: root
         )
@@ -249,8 +186,20 @@ struct FlowRunLoopGuardTests {
         #expect(bundle.artifacts.contains { $0.artifactID == "cross-artifact-evaluation" })
     }
 
-    private func writeSimulationSummaryEnvelope(root: URL, runID: String) throws {
-        let store = XcircuiteWorkspaceStore()
+    private func makeGuardEvaluator(
+        store: TestFlowInfrastructure
+    ) -> DefaultFlowRunGuardEvaluator {
+        DefaultFlowRunGuardEvaluator(
+            snapshotBuilder: DefaultFlowRunLoopSnapshotBuilder(
+                loader: store,
+                evidencePersistence: store
+            ),
+            persistence: store
+        )
+    }
+
+    private func writeSimulationSummaryEnvelope(root: URL, runID: String) async throws {
+        let store = await TestFlowInfrastructure.bound(to: root)
         let summaryPath = ".xcircuite/runs/\(runID)/evidence/simulation-summary.json"
         let summaryURL = root.appending(path: summaryPath)
         try FileManager.default.createDirectory(
@@ -263,29 +212,29 @@ struct FlowRunLoopGuardTests {
             artifactID: "simulation-summary",
             projectRoot: root
         )
-        let envelope = XcircuiteArtifactEnvelope(
+        let envelope = FlowArtifactEnvelope(
             artifactID: "simulation-summary",
             role: "simulation-summary",
             reference: reference,
-            evaluationResult: XcircuiteEvaluationResult(
+            evaluationResult: FlowEvaluationResult(
                 evaluationID: "simulation-evaluation",
                 specID: "opamp-spec",
                 status: .accepted,
                 channelResults: [
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         channelID: "gain",
                         status: .accepted,
-                        observedValue: .number(60)
+                        observedValue: FlowMetricValue.scalar(60)
                     ),
                 ],
                 summary: "Simulation summary accepted."
             )
         )
-        try store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
+        try await store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
     }
 
-    private func writeRejectedDRCSummaryEnvelope(root: URL, runID: String) throws {
-        let store = XcircuiteWorkspaceStore()
+    private func writeRejectedDRCSummaryEnvelope(root: URL, runID: String) async throws {
+        let store = await TestFlowInfrastructure.bound(to: root)
         let summaryPath = ".xcircuite/runs/\(runID)/evidence/drc-summary.json"
         let summaryURL = root.appending(path: summaryPath)
         try FileManager.default.createDirectory(
@@ -298,35 +247,35 @@ struct FlowRunLoopGuardTests {
             artifactID: "drc-summary",
             projectRoot: root
         )
-        let envelope = XcircuiteArtifactEnvelope(
+        let envelope = FlowArtifactEnvelope(
             artifactID: "drc-summary",
             role: "drc-summary",
             reference: reference,
-            observationSet: XcircuiteObservationSet(
+            observationSet: FlowObservationSet(
                 observationSetID: "drc-observations",
                 channels: [
-                    XcircuiteObservationChannel(
+                    FlowObservationChannel(
                         channelID: "drc.violationCount",
                         status: .observed,
-                        value: .number(2)
+                    value: FlowMetricValue.scalar(2)
                     ),
                 ]
             ),
-            evaluationResult: XcircuiteEvaluationResult(
+            evaluationResult: FlowEvaluationResult(
                 evaluationID: "drc-evaluation",
                 specID: "opamp-spec",
                 status: .rejected,
                 channelResults: [
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         channelID: "drc.violationCount",
                         status: .rejected,
-                        observedValue: .number(2)
+                        observedValue: FlowMetricValue.scalar(2)
                     ),
                 ],
                 summary: "DRC violations remain."
             )
         )
-        try store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
+        try await store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
     }
 
     private func foundationReference(

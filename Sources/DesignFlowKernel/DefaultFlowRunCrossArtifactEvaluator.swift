@@ -3,25 +3,27 @@ import Foundation
 
 public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     private let loader: any FlowRunLedgerLoading
-    private let storage: any FlowExecutionStorage
+    private let evidencePersistence: any FlowRunEvidencePersisting
 
     public init(
-        loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        storage: any FlowExecutionStorage = DesignFlowStorageDefaults.makeExecutionStorage()
+        loader: any FlowRunLedgerLoading,
+        evidencePersistence: any FlowRunEvidencePersisting
     ) {
         self.loader = loader
-        self.storage = storage
+        self.evidencePersistence = evidencePersistence
     }
 
     public func compareArtifacts(
         runID: String,
         projectRoot: URL,
-        profile: XcircuiteEvaluationProfile? = nil,
+        profile: FlowEvaluationProfile? = nil,
         generatedAt: Date = Date(),
         persist: Bool = true
-    ) throws -> FlowRunCrossArtifactEvaluationResult {
-        let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
-        let envelopes = try loadArtifactEnvelopes(from: ledger)
+    ) async throws -> FlowRunCrossArtifactEvaluationResult {
+        let ledger = try await loader.loadRunLedger(runID: runID)
+        let envelopes = try await evidencePersistence
+            .loadArtifactEnvelopeRecords(runID: runID)
+            .map(\.envelope)
         let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
         let channelResults = buildChannelResults(
             ledger: ledger,
@@ -35,7 +37,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             channelResults: channelResults,
             profile: profile
         )
-        let evaluation = XcircuiteCrossArtifactEvaluation(
+        let evaluation = FlowCrossArtifactEvaluation(
             evaluationID: "cross-artifact-evaluation-\(ledger.runID)",
             runID: ledger.runID,
             profileID: profile?.profileID,
@@ -44,20 +46,13 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             artifactIDs: stableUnique(artifactReferences.map { $0.id.rawValue } + envelopes.map(\.artifactID)),
             channelResults: channelResults,
             diagnostics: diagnostics,
-            summary: summary(from: channelResults, diagnostics: diagnostics),
-            metadata: [
-                "stageCount": .number(Double(ledger.stages.count)),
-                "artifactEnvelopeCount": .number(Double(envelopes.count)),
-                "artifactReferenceCount": .number(Double(artifactReferences.count)),
-                "designChangeCount": .number(Double(ledger.designDiff?.changes.count ?? 0)),
-            ]
+            summary: summary(from: channelResults, diagnostics: diagnostics)
         )
 
         var producedReferences: [ArtifactReference] = []
         if persist {
-            let reference = try storage.writeCrossArtifactEvaluation(
-                evaluation,
-                inProjectAt: projectRoot
+            let reference = try await evidencePersistence.persistCrossArtifactEvaluation(
+                evaluation
             )
             producedReferences.append(reference)
         }
@@ -71,11 +66,11 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
     private func buildChannelResults(
         ledger: FlowRunLedger,
-        envelopes: [XcircuiteArtifactEnvelope],
+        envelopes: [FlowArtifactEnvelope],
         artifactReferences: [ArtifactReference],
-        profile: XcircuiteEvaluationProfile?
-    ) -> [XcircuiteEvaluationChannelResult] {
-        var results: [XcircuiteEvaluationChannelResult] = []
+        profile: FlowEvaluationProfile?
+    ) -> [FlowEvaluationChannelResult] {
+        var results: [FlowEvaluationChannelResult] = []
         results.append(contentsOf: stageChannelResults(from: ledger))
         results.append(contentsOf: artifactEnvelopeChannelResults(from: envelopes))
         if let designDiff = ledger.designDiff {
@@ -92,31 +87,28 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         return stableUniqueChannelResults(results)
     }
 
-    private func stageChannelResults(from ledger: FlowRunLedger) -> [XcircuiteEvaluationChannelResult] {
+    private func stageChannelResults(from ledger: FlowRunLedger) -> [FlowEvaluationChannelResult] {
         ledger.stages.flatMap { stage in
             var results = [
-                XcircuiteEvaluationChannelResult(
+                FlowEvaluationChannelResult(
                     channelID: "stage.\(stage.stageID).status",
                     status: evaluationStatus(from: stage.status),
-                    observedValue: .string(stage.status.rawValue),
+                    observedValue: .text(stage.status.rawValue),
                     diagnostics: stage.diagnostics.map(runActionDiagnostic),
-                    metadata: [
-                        "stageID": .string(stage.stageID),
-                        "source": .string("stage-result"),
-                    ]
+                    context: FlowEvaluationContext(stageID: stage.stageID, source: "stage-result")
                 ),
             ]
             results.append(contentsOf: stage.gates.map { gate in
-                XcircuiteEvaluationChannelResult(
+                FlowEvaluationChannelResult(
                     channelID: "stage.\(stage.stageID).gate.\(gate.gateID)",
                     status: evaluationStatus(from: gate.status),
-                    observedValue: .string(gate.status.rawValue),
+                    observedValue: .text(gate.status.rawValue),
                     diagnostics: gate.diagnostics.map(runActionDiagnostic),
-                    metadata: [
-                        "stageID": .string(stage.stageID),
-                        "gateID": .string(gate.gateID),
-                        "source": .string("stage-gate"),
-                    ]
+                    context: FlowEvaluationContext(
+                        stageID: stage.stageID,
+                        gateID: gate.gateID,
+                        source: "stage-gate"
+                    )
                 )
             })
             return results
@@ -124,65 +116,63 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func artifactEnvelopeChannelResults(
-        from envelopes: [XcircuiteArtifactEnvelope]
-    ) -> [XcircuiteEvaluationChannelResult] {
+        from envelopes: [FlowArtifactEnvelope]
+    ) -> [FlowEvaluationChannelResult] {
         envelopes.flatMap { envelope in
-            var results: [XcircuiteEvaluationChannelResult] = []
+            var results: [FlowEvaluationChannelResult] = []
             if let evaluationResult = envelope.evaluationResult {
                 results.append(
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         channelID: "artifact.\(envelope.artifactID).status",
                         status: evaluationResult.status,
-                        observedValue: .string(evaluationResult.status.rawValue),
+                        observedValue: .text(evaluationResult.status.rawValue),
                         diagnostics: evaluationResult.feedbackSignals.map(feedbackDiagnostic),
-                        metadata: [
-                            "artifactID": .string(envelope.artifactID),
-                            "artifactRole": .string(envelope.role),
-                            "source": .string("artifact-evaluation"),
-                        ]
+                        context: FlowEvaluationContext(
+                            artifactID: envelope.artifactID,
+                            artifactRole: envelope.role,
+                            source: "artifact-evaluation"
+                        )
                     )
                 )
                 results.append(contentsOf: evaluationResult.channelResults.map { channel in
                     var updated = channel
-                    updated.metadata = mergeMetadata(
-                        channel.metadata,
-                        [
-                            "artifactID": .string(envelope.artifactID),
-                            "artifactRole": .string(envelope.role),
-                            "source": .string("artifact-evaluation-channel"),
-                        ]
+                    updated.context = merging(
+                        channel.context,
+                        artifactID: envelope.artifactID,
+                        artifactRole: envelope.role,
+                        source: "artifact-evaluation-channel"
                     )
                     return updated
                 })
             }
             if let observationSet = envelope.observationSet {
                 results.append(contentsOf: observationSet.channels.map { channel in
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         channelID: "observation.\(channel.channelID).availability",
                         status: evaluationStatus(from: channel.status),
-                        observedValue: channel.value ?? .string(channel.status.rawValue),
+                        observedValue: channel.value ?? .text(channel.status.rawValue),
                         confidence: channel.confidence,
-                        metadata: [
-                            "artifactID": .string(envelope.artifactID),
-                            "artifactRole": .string(envelope.role),
-                            "observationChannelID": .string(channel.channelID),
-                            "observationStatus": .string(channel.status.rawValue),
-                            "source": .string("observation-set"),
-                        ]
+                        context: FlowEvaluationContext(
+                            artifactID: envelope.artifactID,
+                            artifactRole: envelope.role,
+                            observationChannelID: channel.channelID,
+                            observationStatus: channel.status,
+                            source: "observation-set"
+                        )
                     )
                 })
             }
             if envelope.evaluationResult == nil && envelope.observationSet == nil {
                 results.append(
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         channelID: "artifact.\(envelope.artifactID).evidence",
                         status: .inconclusive,
-                        observedValue: .string("present_without_structured_evaluation"),
-                        metadata: [
-                            "artifactID": .string(envelope.artifactID),
-                            "artifactRole": .string(envelope.role),
-                            "source": .string("artifact-envelope"),
-                        ]
+                        observedValue: .text("present_without_structured_evaluation"),
+                        context: FlowEvaluationContext(
+                            artifactID: envelope.artifactID,
+                            artifactRole: envelope.role,
+                            source: "artifact-envelope"
+                        )
                     )
                 )
             }
@@ -191,34 +181,30 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func designDiffChannelResults(
-        from designDiff: XcircuiteDesignDiff
-    ) -> [XcircuiteEvaluationChannelResult] {
+        from designDiff: DesignDiff
+    ) -> [FlowEvaluationChannelResult] {
         [
-            XcircuiteEvaluationChannelResult(
+            FlowEvaluationChannelResult(
                 channelID: "designDiff.reviewState",
                 status: evaluationStatus(from: designDiff.reviewState),
-                observedValue: .string(designDiff.reviewState.rawValue),
-                metadata: [
-                    "source": .string("design-diff"),
-                ]
+                observedValue: .text(designDiff.reviewState.rawValue),
+                context: FlowEvaluationContext(source: "design-diff")
             ),
-            XcircuiteEvaluationChannelResult(
+            FlowEvaluationChannelResult(
                 channelID: "designDiff.changeCount",
                 status: designDiff.changes.isEmpty ? .inconclusive : evaluationStatus(from: designDiff.reviewState),
-                observedValue: .number(Double(designDiff.changes.count)),
-                metadata: [
-                    "source": .string("design-diff"),
-                ]
+                observedValue: .scalar(Double(designDiff.changes.count)),
+                context: FlowEvaluationContext(source: "design-diff")
             ),
         ]
     }
 
     private func profileCoverageChannelResults(
-        profile: XcircuiteEvaluationProfile,
-        envelopes: [XcircuiteArtifactEnvelope],
+        profile: FlowEvaluationProfile,
+        envelopes: [FlowArtifactEnvelope],
         artifactReferences: [ArtifactReference],
-        existingResults: [XcircuiteEvaluationChannelResult]
-    ) -> [XcircuiteEvaluationChannelResult] {
+        existingResults: [FlowEvaluationChannelResult]
+    ) -> [FlowEvaluationChannelResult] {
         let artifactRoles = Set(
             envelopes.map(\.role) + artifactReferences.map { $0.locator.role.rawValue }
         )
@@ -227,26 +213,26 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             (envelope.evaluationResult?.channelResults.map(\.channelID) ?? [])
                 + (envelope.observationSet?.channels.map(\.channelID) ?? [])
         })
-        var results: [XcircuiteEvaluationChannelResult] = []
+        var results: [FlowEvaluationChannelResult] = []
 
         for role in profile.artifactRoles where role.required && !artifactRoles.contains(role.role) {
             results.append(
-                XcircuiteEvaluationChannelResult(
+                FlowEvaluationChannelResult(
                     criterionID: role.role,
                     channelID: "artifactRole.\(role.role).coverage",
                     status: .needsHumanReview,
-                    observedValue: .string("missing"),
+                    observedValue: .text("missing"),
                     diagnostics: [
-                        XcircuiteRunActionDiagnostic(
+                        FlowRunDiagnostic(
                             severity: .warning,
                             code: "missing-required-artifact-role",
                             message: "Required artifact role '\(role.role)' is not present in this run."
                         ),
                     ],
-                    metadata: [
-                        "profileID": .string(profile.profileID),
-                        "artifactRole": .string(role.role),
-                    ]
+                    context: FlowEvaluationContext(
+                        artifactRole: role.role,
+                        profileID: profile.profileID
+                    )
                 )
             )
         }
@@ -256,23 +242,23 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
                 || resultChannelIDs.contains("requiredAnalysis.\(analysis.analysisID).coverage")
             if !present {
                 results.append(
-                    XcircuiteEvaluationChannelResult(
+                    FlowEvaluationChannelResult(
                         criterionID: analysis.analysisID,
                         channelID: "requiredAnalysis.\(analysis.analysisID).coverage",
                         status: .needsHumanReview,
-                        observedValue: .string("missing"),
+                        observedValue: .text("missing"),
                         diagnostics: [
-                            XcircuiteRunActionDiagnostic(
+                            FlowRunDiagnostic(
                                 severity: .warning,
                                 code: "missing-required-analysis",
                                 message: "Required analysis '\(analysis.analysisID)' did not produce artifact role '\(analysis.artifactRole)'."
                             ),
                         ],
-                        metadata: [
-                            "profileID": .string(profile.profileID),
-                            "domain": .string(analysis.domain),
-                            "artifactRole": .string(analysis.artifactRole),
-                        ]
+                        context: FlowEvaluationContext(
+                            artifactRole: analysis.artifactRole,
+                            profileID: profile.profileID,
+                            domain: analysis.domain
+                        )
                     )
                 )
             }
@@ -280,22 +266,22 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
         for metric in profile.metricChannels where metric.required && !observedChannelIDs.contains(metric.channelID) {
             results.append(
-                XcircuiteEvaluationChannelResult(
+                FlowEvaluationChannelResult(
                     criterionID: metric.channelID,
                     channelID: "metric.\(metric.channelID).coverage",
                     status: .inconclusive,
-                    observedValue: .string("missing"),
+                    observedValue: .text("missing"),
                     diagnostics: [
-                        XcircuiteRunActionDiagnostic(
+                        FlowRunDiagnostic(
                             severity: .warning,
                             code: "missing-required-metric-channel",
                             message: "Required metric channel '\(metric.channelID)' is not present in artifact evaluations or observations."
                         ),
                     ],
-                    metadata: [
-                        "profileID": .string(profile.profileID),
-                        "metricChannelID": .string(metric.channelID),
-                    ]
+                    context: FlowEvaluationContext(
+                        profileID: profile.profileID,
+                        metricChannelID: metric.channelID
+                    )
                 )
             )
         }
@@ -305,10 +291,10 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
     private func buildDiagnostics(
         ledger: FlowRunLedger,
-        envelopes: [XcircuiteArtifactEnvelope],
-        channelResults: [XcircuiteEvaluationChannelResult],
-        profile: XcircuiteEvaluationProfile?
-    ) -> [XcircuiteRunActionDiagnostic] {
+        envelopes: [FlowArtifactEnvelope],
+        channelResults: [FlowEvaluationChannelResult],
+        profile: FlowEvaluationProfile?
+    ) -> [FlowRunDiagnostic] {
         var diagnostics = ledger.actions.flatMap(\.diagnostics)
         diagnostics.append(contentsOf: ledger.stages.flatMap(\.diagnostics).map(runActionDiagnostic))
         diagnostics.append(contentsOf: ledger.stages.flatMap(\.gates).flatMap(\.diagnostics).map(runActionDiagnostic))
@@ -317,7 +303,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
         if envelopes.isEmpty {
             diagnostics.append(
-                XcircuiteRunActionDiagnostic(
+                FlowRunDiagnostic(
                     severity: .warning,
                     code: "no-artifact-envelopes",
                     message: "No artifact envelopes were found; cross-artifact evaluation is limited to ledger status."
@@ -326,7 +312,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         }
         if profile != nil && channelResults.contains(where: { $0.status == .needsHumanReview || $0.status == .inconclusive }) {
             diagnostics.append(
-                XcircuiteRunActionDiagnostic(
+                FlowRunDiagnostic(
                     severity: .warning,
                     code: "profile-coverage-incomplete",
                     message: "The evaluation profile has required analysis, artifact, or metric coverage that is not fully satisfied."
@@ -336,47 +322,20 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         return stableUniqueDiagnostics(diagnostics)
     }
 
-    private func loadArtifactEnvelopes(from ledger: FlowRunLedger) throws -> [XcircuiteArtifactEnvelope] {
-        let evidenceDirectory = ledger.runDirectory.appending(path: "evidence")
-        guard directoryExists(evidenceDirectory) else {
-            return []
-        }
-        let urls: [URL]
-        do {
-            urls = try FileManager.default.contentsOfDirectory(
-                at: evidenceDirectory,
-                includingPropertiesForKeys: nil
-            )
-        } catch {
-            throw FlowRunCrossArtifactEvaluationError.evidenceDirectoryReadFailed(
-                path: evidenceDirectory.path(percentEncoded: false),
-                reason: error.localizedDescription
-            )
-        }
-        var envelopes: [XcircuiteArtifactEnvelope] = []
-        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard url.lastPathComponent.hasSuffix("-envelope.json") else {
-                continue
-            }
-            envelopes.append(try storage.readJSON(XcircuiteArtifactEnvelope.self, from: url))
-        }
-        return envelopes
-    }
-
     private func availableArtifactReferences(
         from ledger: FlowRunLedger,
-        envelopes: [XcircuiteArtifactEnvelope]
+        envelopes: [FlowArtifactEnvelope]
     ) throws -> [ArtifactReference] {
         stableUniqueReferences(
-            (try ledger.runManifest.artifacts.map { try $0.foundationArtifactReference(role: .output) })
+            ledger.runManifest.artifacts
                 + ledger.stages.flatMap(\.artifacts)
                 + envelopes.map(\.reference)
         )
     }
 
     private func overallStatus(
-        from results: [XcircuiteEvaluationChannelResult]
-    ) -> XcircuiteEvaluationStatus {
+        from results: [FlowEvaluationChannelResult]
+    ) -> FlowEvaluationStatus {
         guard !results.isEmpty else {
             return .inconclusive
         }
@@ -397,7 +356,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
     private func evaluationStatus(
         from status: FlowStageStatus
-    ) -> XcircuiteEvaluationStatus {
+    ) -> FlowEvaluationStatus {
         switch status {
         case .succeeded:
             .accepted
@@ -412,7 +371,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
 
     private func evaluationStatus(
         from status: FlowGateStatus
-    ) -> XcircuiteEvaluationStatus {
+    ) -> FlowEvaluationStatus {
         switch status {
         case .passed, .waived:
             .accepted
@@ -426,8 +385,8 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func evaluationStatus(
-        from status: XcircuiteObservationChannelStatus
-    ) -> XcircuiteEvaluationStatus {
+        from status: FlowObservationChannelStatus
+    ) -> FlowEvaluationStatus {
         switch status {
         case .observed, .derived:
             .accepted
@@ -441,8 +400,8 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func evaluationStatus(
-        from state: XcircuiteDesignDiffReviewState
-    ) -> XcircuiteEvaluationStatus {
+        from state: DesignDiffReviewState
+    ) -> FlowEvaluationStatus {
         switch state {
         case .proposed:
             .needsHumanReview
@@ -456,8 +415,8 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func summary(
-        from results: [XcircuiteEvaluationChannelResult],
-        diagnostics: [XcircuiteRunActionDiagnostic]
+        from results: [FlowEvaluationChannelResult],
+        diagnostics: [FlowRunDiagnostic]
     ) -> String {
         let counts = Dictionary(grouping: results, by: \.status)
             .mapValues(\.count)
@@ -471,16 +430,16 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func feedbackDiagnostic(
-        _ signal: XcircuiteFeedbackSignal
-    ) -> XcircuiteRunActionDiagnostic {
-        XcircuiteRunActionDiagnostic(
+        _ signal: FlowFeedbackSignal
+    ) -> FlowRunDiagnostic {
+        FlowRunDiagnostic(
             severity: runActionSeverity(signal.severity),
             code: signal.signalID,
             message: signal.summary
         )
     }
 
-    private func runActionSeverity(_ severity: XcircuiteFeedbackSeverity) -> XcircuiteRunActionDiagnosticSeverity {
+    private func runActionSeverity(_ severity: FlowFeedbackSeverity) -> FlowRunDiagnosticSeverity {
         switch severity {
         case .info:
             .info
@@ -491,15 +450,15 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         }
     }
 
-    private func runActionDiagnostic(_ diagnostic: FlowDiagnostic) -> XcircuiteRunActionDiagnostic {
-        XcircuiteRunActionDiagnostic(
+    private func runActionDiagnostic(_ diagnostic: FlowDiagnostic) -> FlowRunDiagnostic {
+        FlowRunDiagnostic(
             severity: runActionSeverity(diagnostic.severity),
             code: diagnostic.code,
             message: diagnostic.message
         )
     }
 
-    private func runActionSeverity(_ severity: FlowDiagnosticSeverity) -> XcircuiteRunActionDiagnosticSeverity {
+    private func runActionSeverity(_ severity: FlowDiagnosticSeverity) -> FlowRunDiagnosticSeverity {
         switch severity {
         case .info:
             .info
@@ -537,16 +496,16 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func stableUniqueChannelResults(
-        _ results: [XcircuiteEvaluationChannelResult]
-    ) -> [XcircuiteEvaluationChannelResult] {
+        _ results: [FlowEvaluationChannelResult]
+    ) -> [FlowEvaluationChannelResult] {
         var seen: Set<String> = []
-        var unique: [XcircuiteEvaluationChannelResult] = []
+        var unique: [FlowEvaluationChannelResult] = []
         for result in results {
             let key = [
                 result.criterionID ?? "",
                 result.channelID,
-                result.metadata["artifactID"].map(jsonKey) ?? "",
-                result.metadata["stageID"].map(jsonKey) ?? "",
+                result.context?.artifactID ?? "",
+                result.context?.stageID ?? "",
             ].joined(separator: "|")
             guard !seen.contains(key) else {
                 continue
@@ -558,10 +517,10 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
     }
 
     private func stableUniqueDiagnostics(
-        _ diagnostics: [XcircuiteRunActionDiagnostic]
-    ) -> [XcircuiteRunActionDiagnostic] {
+        _ diagnostics: [FlowRunDiagnostic]
+    ) -> [FlowRunDiagnostic] {
         var seen: Set<String> = []
-        var unique: [XcircuiteRunActionDiagnostic] = []
+        var unique: [FlowRunDiagnostic] = []
         for diagnostic in diagnostics {
             let key = "\(diagnostic.severity.rawValue)|\(diagnostic.code)|\(diagnostic.message)"
             guard !seen.contains(key) else {
@@ -573,40 +532,17 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         return unique
     }
 
-    private func jsonKey(_ value: XcircuiteJSONValue) -> String {
-        switch value {
-        case .null:
-            "null"
-        case .bool(let raw):
-            raw ? "true" : "false"
-        case .number(let raw):
-            String(raw)
-        case .string(let raw):
-            raw
-        case .array(let raw):
-            raw.map(jsonKey).joined(separator: ",")
-        case .object(let raw):
-            raw.keys.sorted().map { "\($0)=\(jsonKey(raw[$0] ?? .null))" }.joined(separator: ",")
-        }
+    private func merging(
+        _ existing: FlowEvaluationContext?,
+        artifactID: String,
+        artifactRole: String,
+        source: String
+    ) -> FlowEvaluationContext {
+        var context = existing ?? FlowEvaluationContext()
+        context.artifactID = artifactID
+        context.artifactRole = artifactRole
+        context.source = source
+        return context
     }
 
-    private func mergeMetadata(
-        _ left: [String: XcircuiteJSONValue],
-        _ right: [String: XcircuiteJSONValue]
-    ) -> [String: XcircuiteJSONValue] {
-        var merged = left
-        for (key, value) in right {
-            merged[key] = value
-        }
-        return merged
-    }
-
-    private func directoryExists(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(
-            atPath: url.path(percentEncoded: false),
-            isDirectory: &isDirectory
-        )
-        return exists && isDirectory.boolValue
-    }
 }

@@ -3,26 +3,33 @@ import Foundation
 
 public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     private let loader: any FlowRunLedgerLoading
-    private let storage: XcircuiteWorkspaceStore
+    private let evidencePersistence: any FlowRunEvidencePersisting
 
     public init(
-        loader: any FlowRunLedgerLoading = FlowRunLedgerLoader(),
-        storage: XcircuiteWorkspaceStore = XcircuiteWorkspaceStore()
+        loader: any FlowRunLedgerLoading,
+        evidencePersistence: any FlowRunEvidencePersisting
     ) {
         self.loader = loader
-        self.storage = storage
+        self.evidencePersistence = evidencePersistence
     }
 
     public func summarizeLoop(
         runID: String,
         projectRoot: URL,
-        profile: XcircuiteAgentLoopProfile = .makeDefault(),
+        profile: FlowAgentLoopProfile = .makeDefault(),
         generatedAt: Date = Date(),
         persist: Bool = true
-    ) throws -> FlowRunLoopSummaryResult {
-        try XcircuiteAgentLoopProfileValidator().validate(profile)
-        let ledger = try loader.loadRunLedger(runID: runID, projectRoot: projectRoot)
-        let envelopes = try loadArtifactEnvelopes(from: ledger)
+    ) async throws -> FlowRunLoopSummaryResult {
+        try FlowAgentLoopProfileValidator().validate(profile)
+        let ledger = try await loader.loadRunLedger(runID: runID)
+        let envelopeRecords = try await evidencePersistence.loadArtifactEnvelopeRecords(
+            runID: runID
+        )
+        let envelopes = envelopeRecords.map(\.envelope)
+        let persistedAtByArtifactID = Dictionary(
+            envelopeRecords.map { ($0.envelope.reference.id.rawValue, $0.persistedAt) },
+            uniquingKeysWith: max
+        )
         let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
         let iterations = buildIterations(from: ledger, envelopes: envelopes)
         let snapshot = try buildSnapshot(
@@ -32,19 +39,18 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             artifactReferences: artifactReferences,
             envelopes: envelopes,
             generatedAt: generatedAt,
-            projectRoot: projectRoot
+            persistedAtByArtifactID: persistedAtByArtifactID
         )
 
         var producedReferences: [ArtifactReference] = []
         if persist {
-            let iterationsReference = try storage.writeLoopIterationSummaries(
+            let iterationsReference = try await evidencePersistence.persistLoopIterationSummaries(
                 iterations,
-                runID: runID,
-                inProjectAt: projectRoot
+                runID: runID
             )
-            producedReferences.append(try iterationsReference.foundationArtifactReference(role: .output))
-            let snapshotReference = try storage.writeAgentLoopSnapshot(snapshot, inProjectAt: projectRoot)
-            producedReferences.append(try snapshotReference.foundationArtifactReference(role: .output))
+            producedReferences.append(iterationsReference)
+            let snapshotReference = try await evidencePersistence.persistAgentLoopSnapshot(snapshot)
+            producedReferences.append(snapshotReference)
         }
 
         return FlowRunLoopSummaryResult(
@@ -58,16 +64,15 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
 
     private func buildIterations(
         from ledger: FlowRunLedger,
-        envelopes: [XcircuiteArtifactEnvelope]
-    ) -> [XcircuiteLoopIterationSummary] {
+        envelopes: [FlowArtifactEnvelope]
+    ) -> [FlowLoopIterationSummary] {
         guard !ledger.actions.isEmpty else {
             return []
         }
 
-        var grouped: [(iterationID: String, actions: [XcircuiteRunActionRecord])] = []
+        var grouped: [(iterationID: String, actions: [FlowRunActionRecord])] = []
         for (index, action) in ledger.actions.enumerated() {
-            let iterationID = stringMetadata("iterationID", in: action.metadata)
-                ?? "iteration-\(index + 1)"
+            let iterationID = action.context.iterationID ?? "iteration-\(index + 1)"
             if let existingIndex = grouped.firstIndex(where: { $0.iterationID == iterationID }) {
                 grouped[existingIndex].actions.append(action)
             } else {
@@ -83,7 +88,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             let outputArtifactIDs = stableUnique(
                 actions.flatMap { $0.outputs.compactMap(\.artifactID) }
             )
-            return XcircuiteLoopIterationSummary(
+            return FlowLoopIterationSummary(
                 iterationID: group.iterationID,
                 runID: ledger.runID,
                 ordinal: index + 1,
@@ -100,29 +105,26 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                     outputArtifactIDs: Set(outputArtifactIDs),
                     actions: actions
                 ),
-                riskSignals: actionRiskSignals(actions),
-                metadata: [
-                    "actionCount": .number(Double(actions.count)),
-                ]
+                riskSignals: actionRiskSignals(actions)
             )
         }
     }
 
     private func buildSnapshot(
         from ledger: FlowRunLedger,
-        profile: XcircuiteAgentLoopProfile,
-        iterations: [XcircuiteLoopIterationSummary],
-        artifactReferences: [XcircuiteFileReference],
-        envelopes: [XcircuiteArtifactEnvelope],
+        profile: FlowAgentLoopProfile,
+        iterations: [FlowLoopIterationSummary],
+        artifactReferences: [ArtifactReference],
+        envelopes: [FlowArtifactEnvelope],
         generatedAt: Date,
-        projectRoot: URL
-    ) throws -> XcircuiteAgentLoopSnapshot {
+        persistedAtByArtifactID: [String: Date]
+    ) throws -> FlowAgentLoopSnapshot {
         let evidenceCoverage = try evidenceCoverage(
             profile: profile,
             artifactReferences: artifactReferences,
             envelopes: envelopes,
             generatedAt: generatedAt,
-            projectRoot: projectRoot
+            persistedAtByArtifactID: persistedAtByArtifactID
         )
         let approvalState = approvalState(from: ledger)
         let budgetUsage = budgetUsage(from: ledger, profile: profile)
@@ -135,7 +137,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             approvalState: approvalState
         )
 
-        return XcircuiteAgentLoopSnapshot(
+        return FlowAgentLoopSnapshot(
             snapshotID: "snapshot-\(ledger.runID)",
             runID: ledger.runID,
             profileID: profile.profileID,
@@ -148,57 +150,27 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             metricTrend: metricTrend,
             diagnosticTrend: diagnosticTrend,
             approvalState: approvalState,
-            resumeReadiness: resumeReadiness,
-            metadata: [
-                "stageCount": .number(Double(ledger.stages.count)),
-                "evidenceEnvelopeCount": .number(Double(envelopes.count)),
-            ]
+            resumeReadiness: resumeReadiness
         )
-    }
-
-    private func loadArtifactEnvelopes(from ledger: FlowRunLedger) throws -> [XcircuiteArtifactEnvelope] {
-        let evidenceDirectory = ledger.runDirectory.appending(path: "evidence")
-        guard directoryExists(evidenceDirectory) else {
-            return []
-        }
-        let urls: [URL]
-        do {
-            urls = try FileManager.default.contentsOfDirectory(
-                at: evidenceDirectory,
-                includingPropertiesForKeys: nil
-            )
-        } catch {
-            throw XcircuiteWorkspaceError.readFailed(
-                "evidence: \(error.localizedDescription)"
-            )
-        }
-        var envelopes: [XcircuiteArtifactEnvelope] = []
-        for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard url.lastPathComponent.hasSuffix("-envelope.json") else {
-                continue
-            }
-            envelopes.append(try storage.readJSON(XcircuiteArtifactEnvelope.self, from: url))
-        }
-        return envelopes
     }
 
     private func availableArtifactReferences(
         from ledger: FlowRunLedger,
-        envelopes: [XcircuiteArtifactEnvelope]
-    ) throws -> [XcircuiteFileReference] {
-        var references: [XcircuiteFileReference] = []
+        envelopes: [FlowArtifactEnvelope]
+    ) throws -> [ArtifactReference] {
+        var references: [ArtifactReference] = []
         references.append(contentsOf: ledger.runManifest.artifacts)
-        references.append(contentsOf: try ledger.stages
+        references.append(contentsOf: ledger.stages
             .flatMap(\.artifacts)
-            .map { try $0.legacyXcircuiteReference() })
-        references.append(contentsOf: try envelopes.map { try $0.reference.legacyXcircuiteReference() })
+            .map { $0 })
+        references.append(contentsOf: envelopes.map(\.reference))
         return stableUniqueReferences(references)
     }
 
     private func budgetUsage(
         from ledger: FlowRunLedger,
-        profile: XcircuiteAgentLoopProfile
-    ) -> XcircuiteAgentLoopSnapshot.BudgetUsage {
+        profile: FlowAgentLoopProfile
+    ) -> FlowAgentLoopSnapshot.BudgetUsage {
         let actionCount = ledger.actions.count
         let elapsedSeconds = elapsedSeconds(from: ledger.actions)
         let toolInvocationCount = ledger.actions.count
@@ -210,7 +182,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         appendExceeded(&exceeded, id: "maxToolInvocations", value: toolInvocationCount, limit: profile.budgets.maxToolInvocations)
         appendExceeded(&exceeded, id: "maxChangedFiles", value: changedFileCount, limit: profile.budgets.maxChangedFiles)
         appendExceeded(&exceeded, id: "maxDesignChanges", value: designChangeCount, limit: profile.budgets.maxDesignChanges)
-        return XcircuiteAgentLoopSnapshot.BudgetUsage(
+        return FlowAgentLoopSnapshot.BudgetUsage(
             actionCount: actionCount,
             maxActions: profile.budgets.maxActions,
             elapsedSeconds: elapsedSeconds,
@@ -226,12 +198,12 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func evidenceCoverage(
-        profile: XcircuiteAgentLoopProfile,
-        artifactReferences: [XcircuiteFileReference],
-        envelopes: [XcircuiteArtifactEnvelope],
+        profile: FlowAgentLoopProfile,
+        artifactReferences: [ArtifactReference],
+        envelopes: [FlowArtifactEnvelope],
         generatedAt: Date,
-        projectRoot: URL
-    ) throws -> XcircuiteAgentLoopSnapshot.EvidenceCoverage {
+        persistedAtByArtifactID: [String: Date]
+    ) throws -> FlowAgentLoopSnapshot.EvidenceCoverage {
         let availableArtifactIDs = stableUnique(
             artifactReferences.compactMap(\.artifactID) + envelopes.map(\.artifactID)
         )
@@ -241,13 +213,13 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 artifactReferences: artifactReferences,
                 envelopes: envelopes,
                 generatedAt: generatedAt,
-                projectRoot: projectRoot
+                persistedAtByArtifactID: persistedAtByArtifactID
             )
         }
         let requiredItems = items.filter { item in
             item.status != .optionalMissing
         }
-        return XcircuiteAgentLoopSnapshot.EvidenceCoverage(
+        return FlowAgentLoopSnapshot.EvidenceCoverage(
             requiredCount: profile.requiredEvidence.filter(\.required).count,
             satisfiedCount: requiredItems.filter { $0.status == .satisfied }.count,
             missingCount: requiredItems.filter { $0.status == .missing }.count,
@@ -258,25 +230,23 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func evidenceCoverageItem(
-        _ requiredEvidence: XcircuiteAgentLoopProfile.RequiredEvidence,
-        artifactReferences: [XcircuiteFileReference],
-        envelopes: [XcircuiteArtifactEnvelope],
+        _ requiredEvidence: FlowAgentLoopProfile.RequiredEvidence,
+        artifactReferences: [ArtifactReference],
+        envelopes: [FlowArtifactEnvelope],
         generatedAt: Date,
-        projectRoot: URL
-    ) throws -> XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item {
+        persistedAtByArtifactID: [String: Date]
+    ) throws -> FlowAgentLoopSnapshot.EvidenceCoverage.Item {
         let matchingEnvelopes = envelopes.filter { envelope in
             evidenceMatches(requiredEvidence, envelope: envelope)
         }
         let matchingReferences = stableUniqueReferences(
-            (try matchingEnvelopes.map { try $0.reference.legacyXcircuiteReference() }) + artifactReferences.filter { reference in
+            matchingEnvelopes.map(\.reference) + artifactReferences.filter { reference in
                 evidenceMatches(requiredEvidence, reference: reference)
             }
         )
-        let foundationMatchingReferences = try matchingReferences.map {
-            try $0.foundationArtifactReference(role: .output)
-        }
+        let foundationMatchingReferences = matchingReferences
         guard !matchingReferences.isEmpty else {
-            return XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item(
+            return FlowAgentLoopSnapshot.EvidenceCoverage.Item(
                 evidenceID: requiredEvidence.evidenceID,
                 artifactRole: requiredEvidence.artifactRole,
                 artifactID: requiredEvidence.artifactID,
@@ -287,9 +257,14 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         }
         if let maximumAgeSeconds = requiredEvidence.maximumAgeSeconds,
            matchingReferences.contains(where: {
-               isStale($0, maximumAgeSeconds: maximumAgeSeconds, generatedAt: generatedAt, projectRoot: projectRoot)
+               isStale(
+                   $0,
+                   maximumAgeSeconds: maximumAgeSeconds,
+                   generatedAt: generatedAt,
+                   persistedAtByArtifactID: persistedAtByArtifactID
+               )
            }) {
-            return XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item(
+            return FlowAgentLoopSnapshot.EvidenceCoverage.Item(
                 evidenceID: requiredEvidence.evidenceID,
                 artifactRole: requiredEvidence.artifactRole,
                 artifactID: requiredEvidence.artifactID,
@@ -299,7 +274,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 reason: "evidence exceeded maximumAgeSeconds"
             )
         }
-        return XcircuiteAgentLoopSnapshot.EvidenceCoverage.Item(
+        return FlowAgentLoopSnapshot.EvidenceCoverage.Item(
             evidenceID: requiredEvidence.evidenceID,
             artifactRole: requiredEvidence.artifactRole,
             artifactID: requiredEvidence.artifactID,
@@ -310,8 +285,8 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func evidenceMatches(
-        _ requiredEvidence: XcircuiteAgentLoopProfile.RequiredEvidence,
-        envelope: XcircuiteArtifactEnvelope
+        _ requiredEvidence: FlowAgentLoopProfile.RequiredEvidence,
+        envelope: FlowArtifactEnvelope
     ) -> Bool {
         if let stageID = requiredEvidence.stageID, envelope.stageID != stageID {
             return false
@@ -325,8 +300,8 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func evidenceMatches(
-        _ requiredEvidence: XcircuiteAgentLoopProfile.RequiredEvidence,
-        reference: XcircuiteFileReference
+        _ requiredEvidence: FlowAgentLoopProfile.RequiredEvidence,
+        reference: ArtifactReference
     ) -> Bool {
         if let artifactID = requiredEvidence.artifactID {
             return reference.artifactID == artifactID
@@ -336,8 +311,8 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func metricTrend(
-        from envelopes: [XcircuiteArtifactEnvelope]
-    ) -> XcircuiteAgentLoopSnapshot.MetricTrend {
+        from envelopes: [FlowArtifactEnvelope]
+    ) -> FlowAgentLoopSnapshot.MetricTrend {
         var accepted = 0
         var rejected = 0
         var needsReview = 0
@@ -368,7 +343,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             }
             channelIDs.append(contentsOf: envelope.observationSet?.channels.map(\.channelID) ?? [])
         }
-        return XcircuiteAgentLoopSnapshot.MetricTrend(
+        return FlowAgentLoopSnapshot.MetricTrend(
             acceptedCount: accepted,
             rejectedCount: rejected,
             needsHumanReviewCount: needsReview,
@@ -378,13 +353,13 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         )
     }
 
-    private func diagnosticTrend(from ledger: FlowRunLedger) -> XcircuiteAgentLoopSnapshot.DiagnosticTrend {
+    private func diagnosticTrend(from ledger: FlowRunLedger) -> FlowAgentLoopSnapshot.DiagnosticTrend {
         let diagnostics = allDiagnostics(from: ledger)
         let failedCount = diagnostics.filter { $0.severity == .error }.count
         let counts = Dictionary(grouping: diagnostics.map(\.code), by: { $0 })
             .mapValues(\.count)
         let repeated = counts.filter { $0.value > 1 }
-        return XcircuiteAgentLoopSnapshot.DiagnosticTrend(
+        return FlowAgentLoopSnapshot.DiagnosticTrend(
             diagnosticCount: diagnostics.count,
             failedDiagnosticCount: failedCount,
             repeatedCodes: repeated,
@@ -392,18 +367,18 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         )
     }
 
-    private func approvalState(from ledger: FlowRunLedger) -> XcircuiteAgentLoopSnapshot.ApprovalState {
+    private func approvalState(from ledger: FlowRunLedger) -> FlowAgentLoopSnapshot.ApprovalState {
         let rejected = ledger.approvals
             .filter { $0.verdict == .rejected }
             .map(\.stageID)
         let approved = ledger.approvals
-            .filter { $0.verdict == .approved }
+            .filter { $0.verdict == .approved || $0.verdict == .waived }
             .map(\.stageID)
         let decided = Set(rejected + approved)
         let pending = ledger.stages
             .filter { $0.status == .blocked && !decided.contains($0.stageID) }
             .map(\.stageID)
-        let status: XcircuiteAgentLoopSnapshot.ApprovalState.Status
+        let status: FlowAgentLoopSnapshot.ApprovalState.Status
         if !rejected.isEmpty {
             status = .rejected
         } else if !pending.isEmpty {
@@ -413,7 +388,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         } else {
             status = .notRequired
         }
-        return XcircuiteAgentLoopSnapshot.ApprovalState(
+        return FlowAgentLoopSnapshot.ApprovalState(
             status: status,
             pendingStageIDs: stableUnique(pending),
             approvedStageIDs: stableUnique(approved),
@@ -422,14 +397,14 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func resumeReadiness(
-        runStatus: XcircuiteRunStatus,
-        evidenceCoverage: XcircuiteAgentLoopSnapshot.EvidenceCoverage,
-        budgetUsage: XcircuiteAgentLoopSnapshot.BudgetUsage,
-        approvalState: XcircuiteAgentLoopSnapshot.ApprovalState
-    ) -> XcircuiteAgentLoopSnapshot.ResumeReadiness {
+        runStatus: FlowRunStatus,
+        evidenceCoverage: FlowAgentLoopSnapshot.EvidenceCoverage,
+        budgetUsage: FlowAgentLoopSnapshot.BudgetUsage,
+        approvalState: FlowAgentLoopSnapshot.ApprovalState
+    ) -> FlowAgentLoopSnapshot.ResumeReadiness {
         var reasons: [String] = []
         if runStatus == .cancelled {
-            return XcircuiteAgentLoopSnapshot.ResumeReadiness(
+            return FlowAgentLoopSnapshot.ResumeReadiness(
                 status: .blocked,
                 reasons: ["run is cancelled"]
             )
@@ -450,19 +425,19 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             reasons.append("loop budget is exceeded")
         }
         if approvalState.status == .rejected {
-            return XcircuiteAgentLoopSnapshot.ResumeReadiness(status: .blocked, reasons: reasons)
+            return FlowAgentLoopSnapshot.ResumeReadiness(status: .blocked, reasons: reasons)
         }
         if !reasons.isEmpty {
-            return XcircuiteAgentLoopSnapshot.ResumeReadiness(status: .needsHumanReview, reasons: reasons)
+            return FlowAgentLoopSnapshot.ResumeReadiness(status: .needsHumanReview, reasons: reasons)
         }
-        return XcircuiteAgentLoopSnapshot.ResumeReadiness(status: .ready)
+        return FlowAgentLoopSnapshot.ResumeReadiness(status: .ready)
     }
 
     private func evaluationDelta(
-        envelopes: [XcircuiteArtifactEnvelope],
+        envelopes: [FlowArtifactEnvelope],
         outputArtifactIDs: Set<String>,
-        actions: [XcircuiteRunActionRecord]
-    ) -> XcircuiteLoopIterationSummary.EvaluationDelta {
+        actions: [FlowRunActionRecord]
+    ) -> FlowLoopIterationSummary.EvaluationDelta {
         let scopedEnvelopes = envelopes.filter { envelope in
             outputArtifactIDs.contains(envelope.artifactID)
                 || outputArtifactIDs.contains(envelope.reference.artifactID)
@@ -491,7 +466,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             channelIDs.append(contentsOf: envelope.observationSet?.channels.map(\.channelID) ?? [])
         }
         let failedDiagnostics = actions.flatMap(\.diagnostics).filter { $0.severity == .error }.count
-        return XcircuiteLoopIterationSummary.EvaluationDelta(
+        return FlowLoopIterationSummary.EvaluationDelta(
             acceptedCount: accepted,
             rejectedCount: rejected,
             needsHumanReviewCount: needsReview,
@@ -503,28 +478,28 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func actionRiskSignals(
-        _ actions: [XcircuiteRunActionRecord]
-    ) -> [XcircuiteLoopIterationSummary.RiskSignal] {
+        _ actions: [FlowRunActionRecord]
+    ) -> [FlowLoopIterationSummary.RiskSignal] {
         actions.flatMap { action in
             action.diagnostics.enumerated().compactMap { index, diagnostic in
                 let severity = guardSeverity(diagnostic.severity)
                 guard severity >= .warning else {
                     return nil
                 }
-                return XcircuiteLoopIterationSummary.RiskSignal(
+                return FlowLoopIterationSummary.RiskSignal(
                     signalID: "\(action.actionID)-diagnostic-\(index)",
                     detectorID: "actionDiagnostic",
                     severity: severity,
                     reason: diagnostic.message,
                     actionIDs: [action.actionID],
                     artifactIDs: action.outputs.compactMap(\.artifactID),
-                    metadata: ["diagnosticCode": .string(diagnostic.code)]
+                    diagnosticCode: diagnostic.code
                 )
             }
         }
     }
 
-    private func iterationStatus(_ statuses: [XcircuiteRunActionStatus]) -> XcircuiteLoopIterationSummary.Status {
+    private func iterationStatus(_ statuses: [FlowRunActionStatus]) -> FlowLoopIterationSummary.Status {
         if statuses.contains(.blocked) {
             return .blocked
         }
@@ -546,22 +521,22 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         return .unknown
     }
 
-    private func allDiagnostics(from ledger: FlowRunLedger) -> [XcircuiteRunActionDiagnostic] {
+    private func allDiagnostics(from ledger: FlowRunLedger) -> [FlowRunDiagnostic] {
         var diagnostics = ledger.actions.flatMap(\.diagnostics)
         diagnostics.append(contentsOf: ledger.stages.flatMap(\.diagnostics).map(runActionDiagnostic))
         diagnostics.append(contentsOf: ledger.stages.flatMap(\.gates).flatMap(\.diagnostics).map(runActionDiagnostic))
         return diagnostics
     }
 
-    private func runActionDiagnostic(_ diagnostic: FlowDiagnostic) -> XcircuiteRunActionDiagnostic {
-        XcircuiteRunActionDiagnostic(
+    private func runActionDiagnostic(_ diagnostic: FlowDiagnostic) -> FlowRunDiagnostic {
+        FlowRunDiagnostic(
             severity: runActionSeverity(diagnostic.severity),
             code: diagnostic.code,
             message: diagnostic.message
         )
     }
 
-    private func runActionSeverity(_ severity: FlowDiagnosticSeverity) -> XcircuiteRunActionDiagnosticSeverity {
+    private func runActionSeverity(_ severity: FlowDiagnosticSeverity) -> FlowRunDiagnosticSeverity {
         switch severity {
         case .info:
             .info
@@ -572,7 +547,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         }
     }
 
-    private func guardSeverity(_ severity: XcircuiteRunActionDiagnosticSeverity) -> XcircuiteRunGuardSeverity {
+    private func guardSeverity(_ severity: FlowRunDiagnosticSeverity) -> FlowRunGuardSeverity {
         switch severity {
         case .info:
             .info
@@ -584,7 +559,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func increment(
-        status: XcircuiteEvaluationStatus,
+        status: FlowEvaluationStatus,
         accepted: inout Int,
         rejected: inout Int,
         needsReview: inout Int,
@@ -612,7 +587,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         values.append(id)
     }
 
-    private func elapsedSeconds(from actions: [XcircuiteRunActionRecord]) -> Int? {
+    private func elapsedSeconds(from actions: [FlowRunActionRecord]) -> Int? {
         guard let first = actions.map(\.createdAt).min(),
               let last = actions.map(\.createdAt).max() else {
             return nil
@@ -621,30 +596,22 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     }
 
     private func isStale(
-        _ reference: XcircuiteFileReference,
+        _ reference: ArtifactReference,
         maximumAgeSeconds: Int,
         generatedAt: Date,
-        projectRoot: URL
+        persistedAtByArtifactID: [String: Date]
     ) -> Bool {
-        let url = projectRoot.appending(path: reference.path)
-        do {
-            let attributes = try FileManager.default.attributesOfItem(
-                atPath: url.path(percentEncoded: false)
-            )
-            guard let modifiedAt = attributes[.modificationDate] as? Date else {
-                return true
-            }
-            return generatedAt.timeIntervalSince(modifiedAt) > Double(maximumAgeSeconds)
-        } catch {
+        guard let persistedAt = persistedAtByArtifactID[reference.id.rawValue] else {
             return true
         }
+        return generatedAt.timeIntervalSince(persistedAt) > Double(maximumAgeSeconds)
     }
 
-    private func stableUniqueReferences(_ references: [XcircuiteFileReference]) -> [XcircuiteFileReference] {
+    private func stableUniqueReferences(_ references: [ArtifactReference]) -> [ArtifactReference] {
         var seen: Set<String> = []
-        var result: [XcircuiteFileReference] = []
+        var result: [ArtifactReference] = []
         for reference in references {
-            let key = reference.artifactID ?? reference.path
+            let key = reference.artifactID
             guard !seen.contains(key) else {
                 continue
             }
@@ -652,7 +619,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             result.append(reference)
         }
         return result.sorted { left, right in
-            (left.artifactID ?? left.path) < (right.artifactID ?? right.path)
+            left.artifactID < right.artifactID
         }
     }
 
@@ -666,19 +633,4 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         return result
     }
 
-    private func stringMetadata(_ key: String, in metadata: [String: XcircuiteJSONValue]) -> String? {
-        guard case .string(let value)? = metadata[key], !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-
-    private func directoryExists(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(
-            atPath: url.path(percentEncoded: false),
-            isDirectory: &isDirectory
-        )
-        return exists && isDirectory.boolValue
-    }
 }

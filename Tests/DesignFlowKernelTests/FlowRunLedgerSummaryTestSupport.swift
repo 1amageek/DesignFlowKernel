@@ -1,6 +1,5 @@
 import DesignFlowKernel
 import CircuiteFoundation
-import DesignFlowCLISupport
 import Foundation
 import Testing
 import ToolQualification
@@ -11,7 +10,7 @@ func drcRequirement(requiredEvidenceKinds: [ToolEvidenceKind] = []) -> ToolTrust
     ToolTrustRequirement(
         kind: .drc,
         operationID: "run-drc",
-        minimumLevel: .corpusChecked,
+        minimumLevel: .smokeChecked,
         requiredInputFormats: [.oasis],
         requiredOutputFormats: [.json],
         requiredEvidenceKinds: requiredEvidenceKinds
@@ -31,7 +30,7 @@ func drcDescriptor() -> ToolDescriptor {
                 outputFormats: [.json]
             ),
         ],
-        trustProfile: ToolTrustProfile(level: .corpusChecked),
+        trustProfile: ToolTrustProfile(level: .smokeChecked),
         environment: ToolEnvironment(platform: "macOS")
     )
 }
@@ -39,20 +38,14 @@ func drcDescriptor() -> ToolDescriptor {
 func qualifiedCorpusEvidence(_ evidenceID: String = "corpus-1") -> ToolEvidence {
     ToolEvidence(
         evidenceID: evidenceID,
-        kind: .corpus,
-        qualification: ToolEvidenceQualificationSummary(
-            qualified: true,
-            policyID: "unit-test-policy",
-            observedMetrics: ["passRate": 1],
-            observedCounts: ["caseCount": 1]
-        )
+        kind: .corpus
     )
 }
 
 func createArtifactCoverageFailureRun(root: URL, runID: String) async throws {
     let summaryPath = ".xcircuite/runs/\(runID)/stages/001-drc/raw/drc-summary.json"
     let payload = Data(#"{"artifactID":"drc-summary"}"#.utf8)
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: runID,
@@ -82,7 +75,7 @@ func createArtifactCoverageFailureRun(root: URL, runID: String) async throws {
                     ),
                 ],
                 artifacts: [
-                    XcircuiteFileReference(
+                    TestArtifactReference(
                         artifactID: "drc-summary",
                         path: summaryPath,
                         kind: .report,
@@ -119,11 +112,11 @@ func createBlockedApprovalRun(
     root: URL,
     runID: String,
     stageID: String = "001-drc",
-    artifacts: [XcircuiteFileReference] = [],
+    artifacts: [TestArtifactReference] = [],
     artifactPayloads: [String: Data] = [:]
 ) async throws {
     let descriptor = drcDescriptor()
-    _ = try await DefaultFlowOrchestrator().run(
+    _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             projectRoot: root,
             runID: runID,
@@ -163,21 +156,21 @@ func writeRunArtifact(
     artifactID: String,
     root: URL,
     runID: String
-) throws {
+) async throws {
     try FileManager.default.createDirectory(
         at: root.appending(path: path).deletingLastPathComponent(),
         withIntermediateDirectories: true
     )
     try payload.write(to: root.appending(path: path), options: .atomic)
-    let reference = try XcircuiteWorkspaceStore().fileReference(
+    let reference = try await TestFlowInfrastructure.bound(to: root).fileReference(
         forProjectRelativePath: path,
         artifactID: artifactID,
         kind: .other,
         format: .json,
         inProjectAt: root,
-        producedByRunID: runID
+        producerRunID: runID
     )
-    try XcircuiteWorkspaceStore().upsertRunArtifact(reference, runID: runID, inProjectAt: root)
+    try await TestFlowInfrastructure.bound(to: root).upsertRunArtifact(reference, runID: runID, inProjectAt: root)
 }
 }
 
@@ -186,7 +179,7 @@ struct SummaryStageExecutor: FlowStageExecutor {
     let toolID: String
     let status: FlowStageStatus
     var gates: [FlowGateResult] = []
-    var artifacts: [XcircuiteFileReference] = []
+    var artifacts: [TestArtifactReference] = []
     var artifactPayloads: [String: Data] = [:]
 
     func execute(
@@ -205,7 +198,7 @@ struct SummaryStageExecutor: FlowStageExecutor {
                 withIntermediateDirectories: true
             )
             try payload.write(to: url, options: .atomic)
-            resolvedArtifacts[index].sha256 = XcircuiteHasher().sha256(data: payload)
+            resolvedArtifacts[index].sha256 = try TestContentDigester().sha256(data: payload)
             resolvedArtifacts[index].byteCount = Int64(payload.count)
         }
 
@@ -218,7 +211,7 @@ struct SummaryStageExecutor: FlowStageExecutor {
     }
 
     private func foundationReference(
-        from legacy: XcircuiteFileReference
+        from legacy: TestArtifactReference
     ) throws -> ArtifactReference {
         ArtifactReference(
             id: try legacy.artifactID.map { try ArtifactID(rawValue: $0) },
