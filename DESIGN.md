@@ -31,11 +31,12 @@ flowchart TD
 - `FlowRunLedgerPersisting` is the asynchronous storage seam for run recovery.
   Implementations own durable writes and integrity checks; the kernel does not
   choose a filesystem layout.
-- `FlowExecutionStorage` is Foundation-first for new artifact operations:
-  `makeArtifactReference` returns `CircuiteFoundation.ArtifactReference` and
-  `registerArtifact` accepts that canonical value. Legacy `fileReference` and
-  run-artifact registration is performed through the canonical workspace storage
-  boundary and is not exposed as a compatibility entry point.
+- `FlowArtifactPersisting` is the canonical artifact seam. It persists, loads,
+  and verifies `CircuiteFoundation.ArtifactReference` values while leaving the
+  concrete namespace and filesystem boundary to the injected implementation.
+- `FlowRunInfrastructure` composes artifact, run-control, workspace-preparation,
+  progress, evidence, and ToolQualification artifact-reading capabilities for
+  orchestration without introducing a storage facade.
 - `FlowOperationRequest`, stage results, and the run ledger remain domain and
   persistence models owned by this package.
 
@@ -59,5 +60,4 @@ flowchart TD
 - No universal result envelope is introduced.
 - No project lifecycle or UI state is moved into Foundation.
 - No domain-specific artifact formats are interpreted by the kernel.
-- The former `Xcircuite workspace` storage API is frozen during migration and is
-  not part of the new kernel contract.
+- Concrete Xcircuite workspace storage is not part of the kernel contract.

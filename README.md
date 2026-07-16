@@ -41,10 +41,10 @@ flowchart LR
     Result --> Review["Human + Agent review"]
 ```
 
-The filesystem manifest is an external storage boundary; flow APIs must use
-`FlowExecutionStorage.makeArtifactReference` and `registerArtifact` instead of
-constructing a filesystem-specific file record. Unsupported record shapes are
-rejected at the decode boundary.
+The filesystem manifest is an external storage boundary. Flow code persists and
+loads canonical `ArtifactReference` values through `FlowArtifactPersisting`;
+the injected implementation owns path resolution, atomic writes, and storage
+integrity. Unsupported record shapes are rejected at the decode boundary.
 
 Persistence is injected through `FlowRunLedgerPersisting`; the kernel does not
 select a filesystem format or create a `.xcircuite` directory. `Xcircuite`
@@ -110,17 +110,9 @@ can follow a long-running flow without tailing files or scraping tool logs. The
 subscriber stops when a terminal `runFinished` event is observed unless the caller
 opts into terminal history reads.
 
-CLI:
-
-```bash
-design-flow progress-run --project-root <path> --run-id <id> --pretty
-design-flow progress-run --project-root <path> --run-id <id> --since-sequence <n> --wait --timeout-milliseconds 30000
-design-flow progress-run --project-root <path> --run-id <id> --since-sequence <n> --follow --timeout-milliseconds 30000
-```
-
-`--follow` emits compact `FlowRunProgressEvent` JSONL, one event per line. Bounded
-timeouts keep the command suitable for Agent loops, CI probes, and cockpit
-polling workers.
+The kernel publishes this as a library API. A composing runtime may expose the
+cursor and bounded polling operations through its own CLI without moving
+filesystem ownership into this package.
 
 ## Approval gate and resume
 
@@ -150,26 +142,13 @@ lanes. The retention index binds a source dashboard and JSONL history by SHA-256
 byte count, entry count, and head digest; every history entry is hash-chained and the
 index records the minimum retention window and append-only advancement.
 
-Developer and Agent callers can create and revalidate the same artifact contract:
-
-```bash
-design-flow build-retention-index --project-root <path> --run-id <id> --workflow-run-id <id> --source-dashboard <path> --history <path> --previous-entry-count <n> --retention-days <n> --minimum-retention-days <n>
-design-flow validate-retention-index --project-root <path> --run-id <id>
-design-flow build-release-envelope --project-root <path> --run-id <id>
-```
-
-`build-retention-index` writes
-`.xcircuite/runs/<run-id>/qualification/retention-index.json`, registers
-`qualification-retention-index` in the run manifest, and returns a structured
-non-zero result when the evidence is blocked. `build-release-envelope` then
-content-validates the qualification result and retention index instead of relying
-
-The repository-owned `.github/workflows/retention.yml` builds the CLI, runs the
-retention regression suite, generates a hash-chained retained history through
-`Fixtures/Retention/generate-retention-fixture.py`, executes both retention CLI
-commands, and uploads the run artifacts with a 90-day retention setting.
-`build-retention-index` initializes a missing run directory so the same contract
-is directly reproducible from a clean CI workspace.
+Developer and Agent callers use `FlowRunReleaseRetentionIndexBuilding`,
+`FlowRunReleaseRetentionIndexValidating`, and `FlowRunReleaseEnvelopeBuilding`
+with injected artifact persistence. The kernel validates the retained evidence;
+it does not choose a `.xcircuite` path or expose a package-owned executable.
+Tool qualification and release policy decisions remain inputs from
+ToolQualification and the composing flow, rather than claims made by a domain
+engine.
 
 ## Review contract
 
@@ -220,14 +199,9 @@ readiness, executable, arguments, and reason as typed continuation input.
 | `artifactIntegrity` | One or more stage artifacts cannot be verified from the ledger path, digest, and byte count |
 | `artifactCoverage` | A domain artifact manifest gate reports outputs that are missing from the flow ledger |
 
-CLI:
-
-```bash
-design-flow inspect-run --project-root <path> --run-id <id> --pretty
-design-flow review-run --project-root <path> --run-id <id> --pretty
-design-flow progress-run --project-root <path> --run-id <id> --pretty
-design-flow approve-gate --project-root <path> --run-id <id> --stage-id <id> --verdict <approved|rejected> --reviewer <id> --pretty
-```
+Inspection, review, progress, and approval are library contracts. Xcircuite or
+another composing application may project them into a CLI or UI while supplying
+the concrete storage implementation.
 
 ## Dependencies
 
