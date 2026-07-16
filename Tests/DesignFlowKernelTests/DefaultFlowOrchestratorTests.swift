@@ -107,7 +107,8 @@ struct DefaultFlowOrchestratorTests {
             projectRoot: root
         )
         #expect(bundle.artifacts.contains {
-            $0.role == "run-progress" && $0.path == ".xcircuite/runs/run-progress/progress.jsonl"
+            $0.purpose == .runProgress
+                && $0.reference.path == ".xcircuite/runs/run-progress/progress.jsonl"
         })
     }
 
@@ -491,8 +492,8 @@ struct DefaultFlowOrchestratorTests {
             $0.kind == .cancellation && $0.status == .informational
         })
         #expect(bundle.artifacts.contains {
-            $0.role == "run-cancellation-request"
-                && $0.path == ".xcircuite/runs/run-cancel/cancellation.json"
+            $0.purpose == .runCancellationRequest
+                && $0.reference.path == ".xcircuite/runs/run-cancel/cancellation.json"
         })
     }
 
@@ -546,7 +547,7 @@ struct DefaultFlowOrchestratorTests {
             runID: "run-cooperative-cancel",
             projectRoot: root
         )
-        #expect(bundle.artifacts.contains { $0.role == "run-cancellation-request" })
+        #expect(bundle.artifacts.contains { $0.purpose == .runCancellationRequest })
         #expect(bundle.reviewItems.contains { $0.kind == .cancellation })
     }
 
@@ -1210,7 +1211,7 @@ struct DefaultFlowOrchestratorTests {
             runID: "run-retry-success",
             projectRoot: root
         )
-        #expect(bundle.artifacts.contains { $0.role == "stage-attempts" })
+        #expect(bundle.artifacts.contains { $0.purpose == .stageAttempts })
     }
 
     @Test func retryPolicyDoesNotRetryNonRetryableFailure() async throws {

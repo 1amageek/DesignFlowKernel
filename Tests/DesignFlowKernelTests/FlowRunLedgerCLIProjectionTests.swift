@@ -218,7 +218,7 @@ extension FlowRunLedgerSummaryTests {
         $0.kind == .approvalGate && $0.status == .needsReview
     })
     #expect(bundle.artifacts.contains {
-        $0.role == "run-manifest"
+        $0.purpose == .runManifest
     })
 }
 

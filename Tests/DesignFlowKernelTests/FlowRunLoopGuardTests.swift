@@ -183,7 +183,7 @@ struct FlowRunLoopGuardTests {
         #expect(bundle.runGuardVerdict != nil)
         #expect(bundle.crossArtifactEvaluation?.status == .rejected)
         #expect(bundle.reviewItems.contains { $0.kind == .crossArtifactEvaluation && $0.status == .needsRepair })
-        #expect(bundle.artifacts.contains { $0.artifactID == "cross-artifact-evaluation" })
+        #expect(bundle.artifacts.contains { $0.reference.artifactID == "cross-artifact-evaluation" })
     }
 
     private func makeGuardEvaluator(

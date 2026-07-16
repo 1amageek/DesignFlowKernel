@@ -29,7 +29,8 @@ extension FlowRunLedgerSummaryTests {
             expectedSHA256: String(repeating: "a", count: 64),
             actualSHA256: String(repeating: "a", count: 64),
             expectedByteCount: 42,
-            actualByteCount: 42
+            actualByteCount: 42,
+            message: "Verified test artifact."
         )
     )
 
