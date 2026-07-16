@@ -923,7 +923,8 @@ public struct DefaultFlowOrchestrator: Sendable {
         updated.gates.removeAll { $0.gateID == "approval" }
         updated.diagnostics.removeAll { approvalGateDiagnosticCodes.contains($0.code) }
         let diagnostic = acceptedApprovalDiagnostic(record)
-        updated.gates.append(FlowGateResult(gateID: "approval", status: .passed, diagnostics: [diagnostic]))
+        let gateStatus: FlowGateStatus = record.verdict == .waived ? .waived : .passed
+        updated.gates.append(FlowGateResult(gateID: "approval", status: gateStatus, diagnostics: [diagnostic]))
         updated.diagnostics.append(diagnostic)
         return updated
     }
@@ -1032,9 +1033,10 @@ public struct DefaultFlowOrchestrator: Sendable {
                 return updated
             }
             let diagnostic = acceptedApprovalDiagnostic(record)
+            let gateStatus: FlowGateStatus = record.verdict == .waived ? .waived : .passed
             updated.gates.append(FlowGateResult(
                 gateID: "approval",
-                status: .passed,
+                status: gateStatus,
                 diagnostics: [diagnostic]
             ))
             updated.diagnostics.append(diagnostic)
