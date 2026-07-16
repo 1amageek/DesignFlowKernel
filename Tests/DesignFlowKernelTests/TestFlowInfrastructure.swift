@@ -449,6 +449,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
     func fileReference(
         forProjectRelativePath path: String,
         artifactID: String? = nil,
+        role: ArtifactRole = .output,
         kind: ArtifactKind,
         format: ArtifactFormat,
         inProjectAt projectRoot: URL,
@@ -459,7 +460,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
             id: try artifactID.map(ArtifactID.init(rawValue:)),
             locator: ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .output,
+                role: role,
                 kind: kind,
                 format: format
             ),
@@ -1064,6 +1065,7 @@ func makeTestInputArtifactReference(
     return try await TestFlowInfrastructure.bound(to: projectRoot).fileReference(
         forProjectRelativePath: relativePath,
         artifactID: artifactID,
+        role: .input,
         kind: .report,
         format: .json,
         inProjectAt: projectRoot
@@ -1109,6 +1111,7 @@ func makeTestRetentionIndexBuilder(projectRoot: URL) async -> DefaultFlowRunRele
 struct TestArtifactReference: Sendable, Hashable {
     var artifactID: String?
     var path: String
+    var role: ArtifactRole
     var kind: ArtifactKind
     var format: ArtifactFormat
     var sha256: String?
@@ -1118,6 +1121,7 @@ struct TestArtifactReference: Sendable, Hashable {
     init(
         artifactID: String? = nil,
         path: String,
+        role: ArtifactRole = .output,
         kind: ArtifactKind,
         format: ArtifactFormat,
         sha256: String? = nil,
@@ -1126,6 +1130,7 @@ struct TestArtifactReference: Sendable, Hashable {
     ) {
         self.artifactID = artifactID
         self.path = path
+        self.role = role
         self.kind = kind
         self.format = format
         self.sha256 = sha256

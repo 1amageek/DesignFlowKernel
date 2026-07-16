@@ -629,7 +629,11 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
         let request = FlowOperationRequest(
             workspaceID: try testWorkspaceID(for: root),
             runID: "run-1",
@@ -646,13 +650,7 @@ struct DefaultFlowOrchestratorTests {
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-            ],
+            healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
             ]
@@ -666,7 +664,11 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool-gate")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -681,13 +683,7 @@ struct DefaultFlowOrchestratorTests {
                 ]
             ),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-            ],
+            healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
             ]
@@ -729,7 +725,16 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool-evidence-missing")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
+        let health = ToolHealthCheckResult(
+            toolID: descriptor.toolID,
+            status: .passed,
+            evidence: qualification.health.evidence.filter { $0.kind != .corpus }
+        )
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -744,13 +749,7 @@ struct DefaultFlowOrchestratorTests {
                 ]
             ),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [ToolEvidence(evidenceID: "smoke-1", kind: .smoke)]
-                ),
-            ],
+            healthResults: [descriptor.toolID: health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
             ]
@@ -773,9 +772,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(evaluation.descriptor.toolID == "native-drc")
         #expect(evaluation.decision.status == .rejected)
         #expect(evaluation.decision.diagnostics.contains { $0.code == "MISSING_REQUIRED_EVIDENCE" })
-        #expect(evaluation.health?.evidence.contains {
-            $0.evidenceID == "smoke-1" && $0.kind == .smoke
-        } == true)
+        #expect(evaluation.health?.evidence.contains { $0.kind == .healthCheck } == true)
         _ = try await assertToolchainArtifact(in: root, runID: "run-1")
     }
 
@@ -783,7 +780,12 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool-qualified-evidence-failed")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
+        let healthEvidence = qualification.health.evidence.filter { $0.kind != .corpus }
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -802,7 +804,7 @@ struct DefaultFlowOrchestratorTests {
                 descriptor.toolID: ToolHealthCheckResult(
                     toolID: descriptor.toolID,
                     status: .passed,
-                    evidence: [
+                    evidence: healthEvidence + [
                         ToolEvidence(
                             evidenceID: "corpus-1",
                             kind: .corpus
@@ -839,7 +841,12 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool-evidence-stale")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
+        let healthEvidence = qualification.health.evidence.filter { $0.kind != .corpus }
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -861,7 +868,7 @@ struct DefaultFlowOrchestratorTests {
                 descriptor.toolID: ToolHealthCheckResult(
                     toolID: descriptor.toolID,
                     status: .passed,
-                    evidence: [
+                    evidence: healthEvidence + [
                         ToolEvidence(
                             evidenceID: "corpus-1",
                             kind: .corpus,
@@ -896,7 +903,11 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("run-ledger-loader")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -912,13 +923,7 @@ struct DefaultFlowOrchestratorTests {
                 ]
             ),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-            ],
+            healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
             ]
@@ -1057,7 +1062,11 @@ struct DefaultFlowOrchestratorTests {
         let root = try makeTemporaryRoot("tool-mismatch")
         defer { removeTemporaryRoot(root) }
 
-        let descriptor = drcDescriptor()
+        let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: drcDescriptor(),
+            projectRoot: root
+        )
+        let descriptor = qualification.descriptor
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
                 workspaceID: try testWorkspaceID(for: root),
@@ -1072,13 +1081,7 @@ struct DefaultFlowOrchestratorTests {
                 ]
             ),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-            ],
+            healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "other-drc", status: .succeeded),
             ]
@@ -1101,6 +1104,15 @@ struct DefaultFlowOrchestratorTests {
         var executorOwned = drcDescriptor()
         executorOwned.toolID = "zeta-drc"
         executorOwned.displayName = "Zeta DRC"
+        let competingQualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: competing,
+            projectRoot: root
+        )
+        let executorQualification = try await TestToolQualificationFixtures.qualificationRecord(
+            for: executorOwned,
+            projectRoot: root,
+            corpusEvidenceID: "corpus-2"
+        )
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: FlowOperationRequest(
@@ -1115,18 +1127,13 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [competing, executorOwned]),
+            toolRegistry: ToolRegistry(descriptors: [
+                competingQualification.descriptor,
+                executorQualification.descriptor,
+            ]),
             healthResults: [
-                competing.toolID: ToolHealthCheckResult(
-                    toolID: competing.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-                executorOwned.toolID: ToolHealthCheckResult(
-                    toolID: executorOwned.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence("corpus-2")]
-                ),
+                competing.toolID: competingQualification.health,
+                executorOwned.toolID: executorQualification.health,
             ],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: executorOwned.toolID, status: .succeeded),
@@ -1491,13 +1498,6 @@ struct DefaultFlowOrchestratorTests {
             ],
             trustProfile: ToolTrustProfile(level: .smokeChecked),
             environment: ToolEnvironment(platform: "macOS")
-        )
-    }
-
-    private func qualifiedCorpusEvidence(_ evidenceID: String = "corpus-1") -> ToolEvidence {
-        ToolEvidence(
-            evidenceID: evidenceID,
-            kind: .corpus
         )
     }
 

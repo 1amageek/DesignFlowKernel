@@ -1063,7 +1063,16 @@ extension FlowRunLedgerSummaryTests {
     let root = try makeTemporaryRoot("agent-summary-toolchain")
     defer { removeTemporaryRoot(root) }
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
+    let health = ToolHealthCheckResult(
+        toolID: descriptor.toolID,
+        status: .passed,
+        evidence: qualification.health.evidence.filter { $0.kind != .corpus }
+    )
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             workspaceID: try testWorkspaceID(for: root),
@@ -1078,13 +1087,7 @@ extension FlowRunLedgerSummaryTests {
             ]
         ),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
-        healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [ToolEvidence(evidenceID: "smoke-1", kind: .smoke)]
-            ),
-        ],
+        healthResults: [descriptor.toolID: health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         ]

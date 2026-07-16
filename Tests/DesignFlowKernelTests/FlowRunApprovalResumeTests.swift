@@ -165,17 +165,15 @@ extension FlowRunLedgerSummaryTests {
         )
     )
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
-        healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [qualifiedCorpusEvidence()]
-            ),
-        ],
+        healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         ]
@@ -197,14 +195,12 @@ extension FlowRunLedgerSummaryTests {
     // Approval gate on the FIRST of two stages: the orchestrator blocks
     // before the second stage ever runs, so the ledger legitimately
     // holds a one-stage prefix of the two-stage plan.
-    let descriptor = drcDescriptor()
-    let health = [
-        descriptor.toolID: ToolHealthCheckResult(
-            toolID: descriptor.toolID,
-            status: .passed,
-            evidence: [qualifiedCorpusEvidence()]
-        ),
-    ]
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
+    let health = [descriptor.toolID: qualification.health]
     let executors: [any FlowStageExecutor] = [
         SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         SummaryStageExecutor(stageID: "002-drc", toolID: "native-drc", status: .succeeded),
@@ -339,18 +335,16 @@ extension FlowRunLedgerSummaryTests {
         forProjectAt: root
     )
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
             toolRegistry: ToolRegistry(descriptors: [descriptor]),
-            healthResults: [
-                descriptor.toolID: ToolHealthCheckResult(
-                    toolID: descriptor.toolID,
-                    status: .passed,
-                    evidence: [qualifiedCorpusEvidence()]
-                ),
-            ],
+            healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
             ]
@@ -374,17 +368,15 @@ extension FlowRunLedgerSummaryTests {
     try Data(#"{"stageID":"001-drc","status":"blocked","diagnostics":[{"severity":"warning","code":"TAMPERED","message":"tampered"}],"gates":[],"artifacts":[],"attempts":[]}"#.utf8)
         .write(to: root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json"), options: .atomic)
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
-        healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [qualifiedCorpusEvidence()]
-            ),
-        ],
+        healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         ]
@@ -404,7 +396,11 @@ extension FlowRunLedgerSummaryTests {
     defer { removeTemporaryRoot(root) }
     try await createBlockedApprovalRun(root: root, runID: "run-1")
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     let result = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             workspaceID: try testWorkspaceID(for: root),
@@ -421,13 +417,7 @@ extension FlowRunLedgerSummaryTests {
             allowExistingRun: true
         ),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
-        healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [qualifiedCorpusEvidence()]
-            ),
-        ],
+        healthResults: [descriptor.toolID: qualification.health],
         executors: [
             ApprovalDuringExecutionExecutor(
                 stageID: "001-drc",
@@ -684,17 +674,15 @@ extension FlowRunLedgerSummaryTests {
         )
     )
 
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     _ = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
-        healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [qualifiedCorpusEvidence()]
-            ),
-        ],
+        healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
         ]

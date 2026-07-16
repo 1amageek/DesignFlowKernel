@@ -35,13 +35,6 @@ func drcDescriptor() -> ToolDescriptor {
     )
 }
 
-func qualifiedCorpusEvidence(_ evidenceID: String = "corpus-1") -> ToolEvidence {
-    ToolEvidence(
-        evidenceID: evidenceID,
-        kind: .corpus
-    )
-}
-
 func createArtifactCoverageFailureRun(root: URL, runID: String) async throws {
     let summaryPath = ".xcircuite/runs/\(runID)/stages/001-drc/raw/drc-summary.json"
     let payload = Data(#"{"artifactID":"drc-summary"}"#.utf8)
@@ -115,7 +108,11 @@ func createBlockedApprovalRun(
     artifacts: [TestArtifactReference] = [],
     artifactPayloads: [String: Data] = [:]
 ) async throws {
-    let descriptor = drcDescriptor()
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
     _ = try await makeTestOrchestrator(projectRoot: root).run(
         request: FlowOperationRequest(
             workspaceID: try testWorkspaceID(for: root),
@@ -132,11 +129,7 @@ func createBlockedApprovalRun(
         ),
         toolRegistry: ToolRegistry(descriptors: [descriptor]),
         healthResults: [
-            descriptor.toolID: ToolHealthCheckResult(
-                toolID: descriptor.toolID,
-                status: .passed,
-                evidence: [qualifiedCorpusEvidence()]
-            ),
+            descriptor.toolID: qualification.health,
         ],
         executors: [
             SummaryStageExecutor(
@@ -213,21 +206,21 @@ struct SummaryStageExecutor: FlowStageExecutor {
     }
 
     private func foundationReference(
-        from legacy: TestArtifactReference
+        from fixture: TestArtifactReference
     ) throws -> ArtifactReference {
         ArtifactReference(
-            id: try legacy.artifactID.map { try ArtifactID(rawValue: $0) },
+            id: try fixture.artifactID.map { try ArtifactID(rawValue: $0) },
             locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: legacy.path),
-                role: .output,
-                kind: try ArtifactKind(rawValue: legacy.kind.rawValue),
-                format: try ArtifactFormat(rawValue: legacy.format.rawValue.lowercased())
+                location: try ArtifactLocation(workspaceRelativePath: fixture.path),
+                role: fixture.role,
+                kind: try ArtifactKind(rawValue: fixture.kind.rawValue),
+                format: try ArtifactFormat(rawValue: fixture.format.rawValue.lowercased())
             ),
             digest: try ContentDigest(
                 algorithm: .sha256,
-                hexadecimalValue: legacy.sha256 ?? String(repeating: "0", count: 64)
+                hexadecimalValue: fixture.sha256 ?? String(repeating: "0", count: 64)
             ),
-            byteCount: UInt64(legacy.byteCount ?? 0)
+            byteCount: UInt64(fixture.byteCount ?? 0)
         )
     }
 }
