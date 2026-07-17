@@ -24,7 +24,7 @@ let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileMana
     ? .package(path: "../ToolQualification")
     : .package(
         url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "81305bc9e603e0fbd6a9bda9084e13d3f59814f0"
+        revision: "f6cacdbf64038a35ab62d70f575a8dd8349e5604"
     )
 
 let package = Package(
