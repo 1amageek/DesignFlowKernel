@@ -20,7 +20,7 @@ public struct DefaultFlowRunLedgerSummarizer: FlowRunLedgerSummarizing {
             approvalCount: ledger.approvals.count,
             diagnostics: ledger.stages.flatMap { $0.diagnostics + $0.gates.flatMap(\.diagnostics) },
             nextActions: nextActions(from: ledger),
-            suggestedCommandSelections: ledger.suggestedCommandSelections
+            suggestedActionSelections: ledger.suggestedActionSelections
         )
     }
 

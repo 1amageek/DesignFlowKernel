@@ -380,8 +380,8 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: action.runID)
         }
         ledger.actions.append(action)
-        if let selection = try FlowSuggestedCommandSelection(record: action) {
-            ledger.suggestedCommandSelections.append(selection)
+        if let selection = try FlowRunSuggestedActionSelection(record: action) {
+            ledger.suggestedActionSelections.append(selection)
         }
         ledger.runManifest.revision += 1
         ledger.runManifest.updatedAt = Date()

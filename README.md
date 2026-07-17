@@ -76,7 +76,7 @@ and owns lifecycle, gates, approvals, retries, and resume.
 | `FlowRunResult` / `FlowRunStatus` | Run status, stage results, canonical evidence, provenance, and diagnostics |
 | `FlowDiagnostic` / `FlowDiagnosticSeverity` | Structured diagnostics (never opaque strings) |
 | `FlowExecutionContext` / `FlowExecutionError` | Execution environment and typed failures |
-| `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected suggested-command state |
+| `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected semantic-action state |
 | `FlowRunReviewLedgerLoading` | Structurally validated metadata load for per-artifact human review; missing or corrupted evidence remains visible in the review bundle |
 | `FlowRunReviewBundle` | Human / Agent review contract with checklist items, approval records, canonical Foundation artifact references, flow-review purposes, and artifact integrity status for cockpit consumption |
 | `FlowRunProgressSnapshot` | Cursor-based progress event view over `progress.jsonl` |
@@ -169,8 +169,8 @@ applies the filesystem boundary before the kernel receives a ledger.
 An expected artifact without a canonical ledger reference is reported as a
 missing requirement or review item; the kernel does not manufacture a synthetic
 artifact reference with placeholder digest or byte-count claims.
-Because a decision packet embeds the review bundle, its schema version is also
-2 and validation rejects packets carrying any other review-bundle schema.
+Because a decision packet embeds the review bundle, both schemas are version 3
+and validation rejects packets carrying any other review-bundle schema.
 Failed or incomplete `*-artifacts` gates are surfaced separately as artifact
 coverage repair work, which lets agents distinguish "the engine found a design
 problem" from "the engine produced evidence that the flow ledger did not index."
@@ -180,18 +180,21 @@ review bundle also projects non-passing planning correctness gates as
 design signoff failures from planning-translation, action-domain, replay,
 post-execution, or feedback-closure gaps. The same gates also appear in
 `inspect-run` summaries as `verifyPlanningCorrectness` or
-`repairPlanningCorrectness` next actions with `suggestedCommands`. Commands that
+`repairPlanningCorrectness` next actions with `suggestedActions`. Actions that
 can run immediately are marked `ready`; follow-ups that first need a planning
 artifact edit are marked `requiresInput`, so lightweight Agent polling does not
-have to open the full review bundle before choosing the next command. When a
+have to open the full review bundle before choosing the next operation. When a
 run has a `planning/problem.json` artifact and non-empty `planning/rejected-plans.jsonl`
 feedback, the review bundle exposes a `planning-rejected-feedback` diagnostic
 review item and `inspect-run` emits a ready `regenerateCandidatePlanWithFeedback`
-suggested command for feedback-aware candidate-plan generation. When a
-human or cockpit records a `review.selectSuggestedCommand` action in
+semantic action for feedback-aware candidate-plan generation. The action carries
+the operation, run ID, readiness, and typed associated values without naming an
+executable or encoding CLI arguments. When a human or cockpit records a
+`review.selectSuggestedAction` action in
 `actions.jsonl`, `inspect-run` also emits it through
-`suggestedCommandSelections`, preserving the reviewer, next action ID, command ID,
-readiness, executable, arguments, and reason as typed continuation input.
+`suggestedActionSelections`, preserving the reviewer, next action ID, semantic
+operation, readiness, associated values, and reason as typed continuation input. Xcircuite
+may project that action into its current CLI using the concrete project root.
 
 | Review item | Meaning |
 |---|---|

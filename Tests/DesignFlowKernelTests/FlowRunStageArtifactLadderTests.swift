@@ -226,8 +226,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(reviewStage.reviewItems.contains {
         $0.kind == .approvalGate && $0.status == .needsReview
     })
-    #expect(result.ladder.replayCommands.contains {
-        $0.commandID == "build-stage-artifact-ladder" && $0.readiness == .ready
+    #expect(result.ladder.replayActions.contains {
+        $0.operation == .buildStageArtifactLadder && $0.readiness == .ready && $0.runID == runID
     })
 
     let stored = try await TestFlowInfrastructure.bound(to: root).readJSON(
@@ -306,8 +306,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(result.ladder.stages.first?.artifacts.contains {
         $0.domain == "drc" && $0.role == "stage-summary"
     } == true)
-    #expect(result.ladder.replayCommands.contains {
-        $0.commandID == "review-run"
+    #expect(result.ladder.replayActions.contains {
+        $0.operation == .reviewRun
     })
 }
 

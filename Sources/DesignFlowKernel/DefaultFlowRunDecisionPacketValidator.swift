@@ -172,12 +172,12 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         expectedRunID: String
     ) -> [FlowDiagnostic] {
         var diagnostics: [FlowDiagnostic] = []
-        if packet.schemaVersion != 2 {
+        if packet.schemaVersion != 3 {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-schema-version-unsupported",
-                    message: "Decision packet schemaVersion must be 2."
+                    message: "Decision packet schemaVersion must be 3."
                 )
             )
         }
@@ -199,23 +199,23 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                 )
             )
         }
-        if packet.reviewBundle.schemaVersion != 2 {
+        if packet.reviewBundle.schemaVersion != 3 {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-review-bundle-schema-version-unsupported",
-                    message: "Decision packet review bundle schemaVersion must be 2."
+                    message: "Decision packet review bundle schemaVersion must be 3."
                 )
             )
         }
         diagnostics.append(contentsOf: artifactRequirementDiagnostics(packet.requiredArtifacts))
         diagnostics.append(contentsOf: completionIssueDiagnostics(packet.completionIssues))
-        if !packet.replayCommands.contains(where: { $0.commandID == "review-run" && $0.readiness == .ready }) {
+        if !packet.replayActions.contains(where: { $0.operation == .reviewRun && $0.readiness == .ready }) {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
-                    code: "decision-packet-review-replay-command-missing",
-                    message: "Decision packet must include a ready review-run replay command."
+                    code: "decision-packet-review-replay-action-missing",
+                    message: "Decision packet must include a ready review-run replay action."
                 )
             )
         }
@@ -313,10 +313,10 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                 message: "Decision packet completion issues no longer match the current run ledger."
             ))
         }
-        if packet.replayCommands != currentPacket.replayCommands {
+        if packet.replayActions != currentPacket.replayActions {
             diagnostics.append(staleDiagnostic(
-                code: "decision-packet-stale-replay-commands",
-                message: "Decision packet replay commands no longer match the current run ledger."
+                code: "decision-packet-stale-replay-actions",
+                message: "Decision packet replay actions no longer match the current run ledger."
             ))
         }
         return diagnostics
@@ -406,7 +406,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             invalidRequiredArtifactCount: requiredArtifacts.filter { $0.status == .invalid }.count,
             unresolvedReviewItemCount: packet.unresolvedReviewItems.count,
             completionIssueCount: packet.completionIssues.count,
-            replayCommandCount: packet.replayCommands.count,
+            replayActionCount: packet.replayActions.count,
             diagnostics: diagnostics
         )
     }

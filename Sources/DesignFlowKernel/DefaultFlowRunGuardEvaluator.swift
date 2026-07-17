@@ -259,8 +259,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         }
 
         let status = verdictStatus(snapshot: snapshot, detectors: detectors)
-        let suggestedCommands = suggestedCommands(
-            workspaceID: workspaceID,
+        let suggestedActions = suggestedActions(
             runID: runID,
             profile: profile,
             status: status
@@ -274,7 +273,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             generatedAt: generatedAt,
             triggeredDetectors: detectors,
             requiredActions: stableUniqueRequiredActions(requiredActions),
-            suggestedCommands: suggestedCommands,
+            suggestedActions: suggestedActions,
             artifactReferences: artifactReferences
         )
     }
@@ -295,72 +294,50 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
         return .continue
     }
 
-    private func suggestedCommands(
-        workspaceID: FlowWorkspaceID,
+    private func suggestedActions(
         runID: String,
         profile: FlowAgentLoopProfile,
         status: FlowRunGuardVerdict.Status
-    ) -> [FlowRunGuardVerdict.SuggestedCommand] {
-        let projectPath = workspaceID.rawValue
-        var commands = [
-            FlowRunGuardVerdict.SuggestedCommand(
-                commandID: "design-flow.summarize-loop",
-                executable: "design-flow",
-                arguments: [
-                    "summarize-loop",
-                    "--workspace-id",
-                    projectPath,
-                    "--run-id",
-                    runID,
-                ],
+    ) -> [FlowRunSuggestedAction] {
+        var actions = [
+            FlowRunSuggestedAction(
+                id: "summarize-run-loop",
+                readiness: .ready,
+                operation: .summarizeRunLoop,
+                runID: runID,
                 reason: "refresh loop snapshot"
             ),
-            FlowRunGuardVerdict.SuggestedCommand(
-                commandID: "design-flow.inspect-run",
-                executable: "design-flow",
-                arguments: [
-                    "inspect-run",
-                    "--workspace-id",
-                    projectPath,
-                    "--run-id",
-                    runID,
-                ],
+            FlowRunSuggestedAction(
+                id: "inspect-run",
+                readiness: .ready,
+                operation: .inspectRun,
+                runID: runID,
                 reason: "inspect run ledger"
             ),
         ]
         if status != .continue {
-            commands.append(
-                FlowRunGuardVerdict.SuggestedCommand(
-                    commandID: "design-flow.review-run",
-                    executable: "design-flow",
-                    arguments: [
-                        "review-run",
-                        "--workspace-id",
-                        projectPath,
-                        "--run-id",
-                        runID,
-                    ],
+            actions.append(
+                FlowRunSuggestedAction(
+                    id: "review-run",
+                    readiness: .ready,
+                    operation: .reviewRun,
+                    runID: runID,
                     reason: "open human or Agent review bundle"
                 )
             )
         }
         if !profile.requiredEvidence.isEmpty {
-            commands.append(
-                FlowRunGuardVerdict.SuggestedCommand(
-                    commandID: "design-flow.evaluate-run-guard",
-                    executable: "design-flow",
-                    arguments: [
-                        "evaluate-run-guard",
-                        "--workspace-id",
-                        projectPath,
-                        "--run-id",
-                        runID,
-                    ],
+            actions.append(
+                FlowRunSuggestedAction(
+                    id: "evaluate-run-guard",
+                    readiness: .ready,
+                    operation: .evaluateRunGuard,
+                    runID: runID,
                     reason: "recompute guard verdict after evidence changes"
                 )
             )
         }
-        return commands
+        return actions
     }
 
     private func detector(

@@ -41,24 +41,24 @@ public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
         }
     }
 
-    @FlowSchemaVersion1 public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var envelopeID: String
     public var runID: String
     public var status: Status
     public var decisionPacketValidation: FlowRunDecisionPacketValidationResult
     public var requirements: [Requirement]
     public var diagnostics: [FlowDiagnostic]
-    public var replayCommands: [FlowRunSuggestedCommand]
+    public var replayActions: [FlowRunSuggestedAction]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         envelopeID: String,
         runID: String,
         status: Status,
         decisionPacketValidation: FlowRunDecisionPacketValidationResult,
         requirements: [Requirement],
         diagnostics: [FlowDiagnostic] = [],
-        replayCommands: [FlowRunSuggestedCommand] = []
+        replayActions: [FlowRunSuggestedAction] = []
     ) {
         self.schemaVersion = schemaVersion
         self.envelopeID = envelopeID
@@ -67,6 +67,6 @@ public struct FlowRunReleaseEnvelope: Sendable, Hashable, Codable {
         self.decisionPacketValidation = decisionPacketValidation
         self.requirements = requirements
         self.diagnostics = diagnostics
-        self.replayCommands = replayCommands
+        self.replayActions = replayActions
     }
 }

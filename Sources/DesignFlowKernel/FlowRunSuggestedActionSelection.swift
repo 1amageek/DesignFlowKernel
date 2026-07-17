@@ -1,7 +1,7 @@
 import Foundation
 
-public struct FlowSuggestedCommandSelection: Sendable, Hashable, Codable {
-    public static let actionKind = "review.selectSuggestedCommand"
+public struct FlowRunSuggestedActionSelection: Sendable, Hashable, Codable {
+    public static let actionKind = "review.selectSuggestedAction"
 
     public var actionRecordID: String
     public var runID: String
@@ -10,11 +10,7 @@ public struct FlowSuggestedCommandSelection: Sendable, Hashable, Codable {
     public var selectedAt: Date
     public var nextActionID: String
     public var nextActionKind: String
-    public var commandID: String
-    public var readiness: String
-    public var executable: String
-    public var arguments: [String]
-    public var reason: String
+    public var action: FlowRunSuggestedAction
 
     public init(
         actionRecordID: String,
@@ -24,11 +20,7 @@ public struct FlowSuggestedCommandSelection: Sendable, Hashable, Codable {
         selectedAt: Date,
         nextActionID: String,
         nextActionKind: String,
-        commandID: String,
-        readiness: String,
-        executable: String,
-        arguments: [String],
-        reason: String
+        action: FlowRunSuggestedAction
     ) {
         self.actionRecordID = actionRecordID
         self.runID = runID
@@ -37,21 +29,17 @@ public struct FlowSuggestedCommandSelection: Sendable, Hashable, Codable {
         self.selectedAt = selectedAt
         self.nextActionID = nextActionID
         self.nextActionKind = nextActionKind
-        self.commandID = commandID
-        self.readiness = readiness
-        self.executable = executable
-        self.arguments = arguments
-        self.reason = reason
+        self.action = action
     }
 
     public init?(record: FlowRunActionRecord) throws {
         guard record.actionKind == Self.actionKind else {
             return nil
         }
-        guard let details = record.context.suggestedCommand else {
+        guard let details = record.context.suggestedAction else {
             throw FlowRunActionProjectionError.missingSelectionMetadata(
                 actionID: record.actionID,
-                key: "suggestedCommand"
+                key: "suggestedAction"
             )
         }
         self.init(
@@ -62,11 +50,7 @@ public struct FlowSuggestedCommandSelection: Sendable, Hashable, Codable {
             selectedAt: record.createdAt,
             nextActionID: details.nextActionID,
             nextActionKind: details.nextActionKind,
-            commandID: details.commandID,
-            readiness: details.readiness,
-            executable: details.executable,
-            arguments: details.arguments,
-            reason: details.reason
+            action: details.action
         )
     }
 }

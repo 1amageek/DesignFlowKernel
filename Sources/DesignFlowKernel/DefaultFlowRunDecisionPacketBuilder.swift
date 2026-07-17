@@ -62,7 +62,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             requiredArtifacts: requirements,
             unresolvedReviewItems: unresolvedItems,
             completionIssues: issues,
-            replayCommands: replayCommands(from: bundle, workspaceID: workspaceID)
+            replayActions: replayActions(from: bundle)
         )
     }
 
@@ -216,26 +216,19 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
         return .needsReview
     }
 
-    private func replayCommands(
-        from bundle: FlowRunReviewBundle,
-        workspaceID: FlowWorkspaceID
-    ) -> [FlowRunSuggestedCommand] {
-        let reviewCommand = FlowRunSuggestedCommand(
-            commandID: "review-run",
+    private func replayActions(
+        from bundle: FlowRunReviewBundle
+    ) -> [FlowRunSuggestedAction] {
+        let reviewAction = FlowRunSuggestedAction(
+            id: "review-run",
             readiness: .ready,
-            executable: "design-flow",
-            arguments: [
-                "review-run",
-                "--workspace-id",
-                workspaceID.rawValue,
-                "--run-id",
-                bundle.runID,
-            ],
+            operation: .reviewRun,
+            runID: bundle.runID,
             reason: "Rebuild the review bundle used by this decision packet."
         )
-        let suggestedCommands = bundle.summary.nextActions.flatMap(\.suggestedCommands)
-        return ([reviewCommand] + suggestedCommands).sorted { left, right in
-            left.commandID < right.commandID
+        let suggestedActions = bundle.summary.nextActions.flatMap(\.suggestedActions)
+        return ([reviewAction] + suggestedActions).sorted { left, right in
+            left.id < right.id
         }
     }
 

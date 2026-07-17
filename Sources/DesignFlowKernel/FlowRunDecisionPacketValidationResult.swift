@@ -7,7 +7,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
         case blocked
     }
 
-    @FlowSchemaVersion1 public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var runID: String
     public var packetPath: String
     public var validationArtifactPath: String?
@@ -20,11 +20,11 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
     public var invalidRequiredArtifactCount: Int
     public var unresolvedReviewItemCount: Int
     public var completionIssueCount: Int
-    public var replayCommandCount: Int
+    public var replayActionCount: Int
     public var diagnostics: [FlowDiagnostic]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         runID: String,
         packetPath: String,
         validationArtifactPath: String? = nil,
@@ -37,7 +37,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
         invalidRequiredArtifactCount: Int = 0,
         unresolvedReviewItemCount: Int = 0,
         completionIssueCount: Int = 0,
-        replayCommandCount: Int = 0,
+        replayActionCount: Int = 0,
         diagnostics: [FlowDiagnostic] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -53,7 +53,7 @@ public struct FlowRunDecisionPacketValidationResult: Sendable, Hashable, Codable
         self.invalidRequiredArtifactCount = invalidRequiredArtifactCount
         self.unresolvedReviewItemCount = unresolvedReviewItemCount
         self.completionIssueCount = completionIssueCount
-        self.replayCommandCount = replayCommandCount
+        self.replayActionCount = replayActionCount
         self.diagnostics = diagnostics
     }
 }

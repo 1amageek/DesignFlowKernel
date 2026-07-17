@@ -38,7 +38,7 @@ struct FlowRunResultConformanceTests {
         let provenance = try ExecutionProvenance(
             producer: try ProducerIdentity(
                 kind: .engine,
-                identifier: "design-flow",
+                identifier: "design-flow-kernel",
                 version: "1"
             ),
             startedAt: timestamp,
@@ -88,7 +88,7 @@ struct FlowRunResultConformanceTests {
         let provenance = try ExecutionProvenance(
             producer: try ProducerIdentity(
                 kind: .engine,
-                identifier: "design-flow",
+                identifier: "design-flow-kernel",
                 version: "1"
             ),
             startedAt: timestamp,
@@ -126,7 +126,7 @@ struct FlowRunResultConformanceTests {
         let provenance = try ExecutionProvenance(
             producer: try ProducerIdentity(
                 kind: .engine,
-                identifier: "design-flow",
+                identifier: "design-flow-kernel",
                 version: "1"
             ),
             startedAt: timestamp,

@@ -35,8 +35,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(summary.nextActions.map(\.kind) == ["archiveOrContinue"])
 }
 
-@Test func inspectorEmitsSelectedSuggestedCommand() async throws {
-    let root = try makeTemporaryRoot("agent-summary-selected-command-cli")
+@Test func inspectorEmitsSelectedSuggestedAction() async throws {
+    let root = try makeTemporaryRoot("agent-summary-selected-action")
     defer { removeTemporaryRoot(root) }
 
     _ = try await makeTestOrchestrator(projectRoot: root).run(
@@ -59,17 +59,19 @@ extension FlowRunLedgerSummaryTests {
             actionID: "selection-1",
             runID: "run-1",
             actor: FlowRunActor(kind: .human, identifier: "reviewer-1"),
-            actionKind: FlowSuggestedCommandSelection.actionKind,
+            actionKind: FlowRunSuggestedActionSelection.actionKind,
             status: .succeeded,
             context: FlowRunActionContext(
-                suggestedCommand: FlowRunActionContext.SuggestedCommand(
+                suggestedAction: FlowRunActionContext.SuggestedAction(
                     nextActionID: "verify-candidate-plan:post-execution",
                     nextActionKind: "verifyPlanningCorrectness",
-                    commandID: "xcircuite-flow.verify-candidate-plan.post-execution",
-                    readiness: "ready",
-                    executable: "xcircuite-flow",
-                    arguments: ["verify-candidate-plan", "--mode", "post-execution"],
-                    reason: "Run post-execution candidate-plan verification."
+                    action: FlowRunSuggestedAction(
+                        id: "verify-candidate-plan.post-execution",
+                        readiness: .ready,
+                        operation: .verifyCandidatePlan(scope: .postExecution),
+                        runID: "run-1",
+                        reason: "Run post-execution candidate-plan verification."
+                    )
                 )
             )
         ),
@@ -80,15 +82,14 @@ extension FlowRunLedgerSummaryTests {
         runID: "run-1",
         workspaceID: try testWorkspaceID(for: root)
     )
-    let selection = try #require(summary.suggestedCommandSelections.first)
+    let selection = try #require(summary.suggestedActionSelections.first)
 
-    #expect(summary.suggestedCommandSelections.count == 1)
+    #expect(summary.suggestedActionSelections.count == 1)
     #expect(selection.actionRecordID == "selection-1")
     #expect(selection.actor.identifier == "reviewer-1")
     #expect(selection.nextActionID == "verify-candidate-plan:post-execution")
-    #expect(selection.commandID == "xcircuite-flow.verify-candidate-plan.post-execution")
-    #expect(selection.executable == "xcircuite-flow")
-    #expect(selection.arguments == ["verify-candidate-plan", "--mode", "post-execution"])
+    #expect(selection.action.operation == .verifyCandidatePlan(scope: .postExecution))
+    #expect(selection.action.runID == "run-1")
 }
 
 @Test func inspectorEmitsPlanningCorrectnessNextAction() async throws {
@@ -126,18 +127,11 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(action.severity == .warning)
     #expect(action.diagnosticCodes == ["missing-goal-atoms"])
-    let command = try #require(action.suggestedCommands.first)
-    #expect(command.commandID == "xcircuite-flow.validate-planning-problem.after-goal-edit")
-    #expect(command.readiness == .requiresInput)
-    #expect(command.executable == "xcircuite-flow")
-    #expect(command.arguments == [
-        "validate-planning-problem",
-        "--workspace-id",
-        try testWorkspaceID(for: root).rawValue,
-        "--run-id",
-        "run-1",
-        "--pretty",
-    ])
+    let suggestedAction = try #require(action.suggestedActions.first)
+    #expect(suggestedAction.id == "validate-planning-problem.after-goal-edit")
+    #expect(suggestedAction.readiness == .requiresInput)
+    #expect(suggestedAction.operation == .validatePlanningProblem)
+    #expect(suggestedAction.runID == "run-1")
 }
 
 @Test func inspectorEmitsProblemTranslationAuditNextAction() async throws {
@@ -169,21 +163,14 @@ extension FlowRunLedgerSummaryTests {
     #expect(action.severity == .error)
     #expect(action.reason == "Objective objective-1 has no valid source ref.")
     #expect(action.diagnosticCodes == ["orphan-objective"])
-    let command = try #require(action.suggestedCommands.first)
-    #expect(command.commandID == "xcircuite-flow.audit-problem-translation.after-translation-repair")
-    #expect(command.readiness == .requiresInput)
-    #expect(command.executable == "xcircuite-flow")
-    #expect(command.arguments == [
-        "audit-problem-translation",
-        "--workspace-id",
-        try testWorkspaceID(for: root).rawValue,
-        "--run-id",
-        "run-1",
-        "--pretty",
-    ])
+    let suggestedAction = try #require(action.suggestedActions.first)
+    #expect(suggestedAction.id == "audit-problem-translation.after-translation-repair")
+    #expect(suggestedAction.readiness == .requiresInput)
+    #expect(suggestedAction.operation == .auditProblemTranslation)
+    #expect(suggestedAction.runID == "run-1")
 }
 
-@Test func flowRunNextActionRejectsMissingSuggestedCommands() throws {
+@Test func flowRunNextActionRejectsMissingSuggestedActions() throws {
     let payload = Data("""
     {"actionID":"incomplete-action","kind":"inspectFailure","severity":"warning","reason":"Incomplete next action.","diagnosticCodes":["incomplete-code"]}
     """.utf8)

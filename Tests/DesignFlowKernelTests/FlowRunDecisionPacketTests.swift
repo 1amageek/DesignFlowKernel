@@ -50,8 +50,8 @@ extension FlowRunLedgerSummaryTests {
 
     #expect(result.artifact.artifactID == "review-decision-packet")
     #expect(result.artifact.path == ".xcircuite/runs/run-1/review/decision-packet.json")
-    #expect(result.packet.schemaVersion == 2)
-    #expect(result.packet.reviewBundle.schemaVersion == 2)
+    #expect(result.packet.schemaVersion == 3)
+    #expect(result.packet.reviewBundle.schemaVersion == 3)
     #expect(result.packet.readiness == .needsReview)
     #expect(result.packet.requiredArtifacts.contains {
         $0.role == "stage-summary" && $0.status == .satisfied
@@ -59,8 +59,8 @@ extension FlowRunLedgerSummaryTests {
     #expect(result.packet.unresolvedReviewItems.contains {
         $0.kind == .approvalGate && $0.status == .needsReview
     })
-    #expect(result.packet.replayCommands.contains {
-        $0.commandID == "review-run" && $0.readiness == .ready
+    #expect(result.packet.replayActions.contains {
+        $0.operation == .reviewRun && $0.readiness == .ready && $0.runID == "run-1"
     })
 
     let storedPacket = try await TestFlowInfrastructure.bound(to: root).readJSON(

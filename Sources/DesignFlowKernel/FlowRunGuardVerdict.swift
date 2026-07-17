@@ -59,29 +59,7 @@ public struct FlowRunGuardVerdict: Sendable, Hashable, Codable {
         }
     }
 
-    public struct SuggestedCommand: Sendable, Hashable, Codable {
-        public var commandID: String
-        public var executable: String
-        public var arguments: [String]
-        public var reason: String
-        public var readiness: String
-
-        public init(
-            commandID: String,
-            executable: String,
-            arguments: [String],
-            reason: String,
-            readiness: String = "ready"
-        ) {
-            self.commandID = commandID
-            self.executable = executable
-            self.arguments = arguments
-            self.reason = reason
-            self.readiness = readiness
-        }
-    }
-
-    @FlowSchemaVersion1 public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var verdictID: String
     public var runID: String
     public var profileID: String
@@ -90,12 +68,12 @@ public struct FlowRunGuardVerdict: Sendable, Hashable, Codable {
     public var generatedAt: Date
     public var triggeredDetectors: [DetectorResult]
     public var requiredActions: [RequiredAction]
-    public var suggestedCommands: [SuggestedCommand]
+    public var suggestedActions: [FlowRunSuggestedAction]
     /// Canonical artifacts used as evidence for this verdict.
     public var artifactReferences: [ArtifactReference]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         verdictID: String,
         runID: String,
         profileID: String,
@@ -104,7 +82,7 @@ public struct FlowRunGuardVerdict: Sendable, Hashable, Codable {
         generatedAt: Date = Date(),
         triggeredDetectors: [DetectorResult] = [],
         requiredActions: [RequiredAction] = [],
-        suggestedCommands: [SuggestedCommand] = [],
+        suggestedActions: [FlowRunSuggestedAction] = [],
         artifactReferences: [ArtifactReference] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -116,7 +94,7 @@ public struct FlowRunGuardVerdict: Sendable, Hashable, Codable {
         self.generatedAt = generatedAt
         self.triggeredDetectors = triggeredDetectors
         self.requiredActions = requiredActions
-        self.suggestedCommands = suggestedCommands
+        self.suggestedActions = suggestedActions
         self.artifactReferences = artifactReferences
     }
 }

@@ -67,7 +67,7 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         }
     }
 
-    @FlowSchemaVersion2 public var schemaVersion: Int
+    @FlowSchemaVersion3 public var schemaVersion: Int
     public var packetID: String
     public var runID: String
     public var status: FlowRunStatus
@@ -76,10 +76,10 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
     public var requiredArtifacts: [ArtifactRequirement]
     public var unresolvedReviewItems: [FlowRunReviewItem]
     public var completionIssues: [CompletionIssue]
-    public var replayCommands: [FlowRunSuggestedCommand]
+    public var replayActions: [FlowRunSuggestedAction]
 
     public init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         packetID: String,
         runID: String,
         status: FlowRunStatus,
@@ -88,7 +88,7 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         requiredArtifacts: [ArtifactRequirement],
         unresolvedReviewItems: [FlowRunReviewItem],
         completionIssues: [CompletionIssue],
-        replayCommands: [FlowRunSuggestedCommand]
+        replayActions: [FlowRunSuggestedAction]
     ) {
         self.schemaVersion = schemaVersion
         self.packetID = packetID
@@ -99,6 +99,6 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         self.requiredArtifacts = requiredArtifacts
         self.unresolvedReviewItems = unresolvedReviewItems
         self.completionIssues = completionIssues
-        self.replayCommands = replayCommands
+        self.replayActions = replayActions
     }
 }

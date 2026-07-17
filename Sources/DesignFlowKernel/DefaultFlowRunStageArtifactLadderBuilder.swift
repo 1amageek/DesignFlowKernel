@@ -162,7 +162,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             stages: stages,
             runReviewItems: runReviewItems,
             nextActions: bundle.summary.nextActions.sorted(by: nextActionSort),
-            replayCommands: replayCommands(from: bundle, workspaceID: workspaceID),
+            replayActions: replayActions(from: bundle),
             signoffManifestCoverage: signoffManifestCoverage(from: artifacts)
         )
     }
@@ -597,42 +597,29 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         return left.actionID < right.actionID
     }
 
-    private func replayCommands(
-        from bundle: FlowRunReviewBundle,
-        workspaceID: FlowWorkspaceID
-    ) -> [FlowRunSuggestedCommand] {
+    private func replayActions(
+        from bundle: FlowRunReviewBundle
+    ) -> [FlowRunSuggestedAction] {
         let runIDIsValid = identifierPolicy.isValidRunID(bundle.runID)
-        let runIDArgument = runIDIsValid ? bundle.runID : "<invalid-run-id>"
-        let readiness: FlowRunSuggestedCommandReadiness = runIDIsValid ? .ready : .requiresInput
-        let reviewCommand = FlowRunSuggestedCommand(
-            commandID: "review-run",
+        let runID = runIDIsValid ? bundle.runID : nil
+        let readiness: FlowRunSuggestedActionReadiness = runIDIsValid ? .ready : .requiresInput
+        let reviewAction = FlowRunSuggestedAction(
+            id: "review-run",
             readiness: readiness,
-            executable: "design-flow",
-            arguments: [
-                "review-run",
-                "--workspace-id",
-                workspaceID.rawValue,
-                "--run-id",
-                runIDArgument,
-            ],
+            operation: .reviewRun,
+            runID: runID,
             reason: "Rebuild the review bundle used by this stage artifact ladder."
         )
-        let ladderCommand = FlowRunSuggestedCommand(
-            commandID: "build-stage-artifact-ladder",
+        let ladderAction = FlowRunSuggestedAction(
+            id: "build-stage-artifact-ladder",
             readiness: readiness,
-            executable: "design-flow",
-            arguments: [
-                "build-stage-artifact-ladder",
-                "--workspace-id",
-                workspaceID.rawValue,
-                "--run-id",
-                runIDArgument,
-            ],
+            operation: .buildStageArtifactLadder,
+            runID: runID,
             reason: "Rebuild and persist the stage-ordered artifact ladder for this run."
         )
-        let suggestedCommands = bundle.summary.nextActions.flatMap(\.suggestedCommands)
-        return ([reviewCommand, ladderCommand] + suggestedCommands).sorted { left, right in
-            left.commandID < right.commandID
+        let suggestedActions = bundle.summary.nextActions.flatMap(\.suggestedActions)
+        return ([reviewAction, ladderAction] + suggestedActions).sorted { left, right in
+            left.id < right.id
         }
     }
 

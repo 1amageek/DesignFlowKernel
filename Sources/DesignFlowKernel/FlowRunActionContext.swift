@@ -23,45 +23,33 @@ public struct FlowRunActionContext: Sendable, Hashable, Codable {
         }
     }
 
-    public struct SuggestedCommand: Sendable, Hashable, Codable {
+    public struct SuggestedAction: Sendable, Hashable, Codable {
         public var nextActionID: String
         public var nextActionKind: String
-        public var commandID: String
-        public var readiness: String
-        public var executable: String
-        public var arguments: [String]
-        public var reason: String
+        public var action: FlowRunSuggestedAction
 
         public init(
             nextActionID: String,
             nextActionKind: String,
-            commandID: String,
-            readiness: String,
-            executable: String,
-            arguments: [String],
-            reason: String
+            action: FlowRunSuggestedAction
         ) {
             self.nextActionID = nextActionID
             self.nextActionKind = nextActionKind
-            self.commandID = commandID
-            self.readiness = readiness
-            self.executable = executable
-            self.arguments = arguments
-            self.reason = reason
+            self.action = action
         }
     }
 
     public var iterationID: String?
     public var reviewDecision: ReviewDecision?
-    public var suggestedCommand: SuggestedCommand?
+    public var suggestedAction: SuggestedAction?
 
     public init(
         iterationID: String? = nil,
         reviewDecision: ReviewDecision? = nil,
-        suggestedCommand: SuggestedCommand? = nil
+        suggestedAction: SuggestedAction? = nil
     ) {
         self.iterationID = iterationID
         self.reviewDecision = reviewDecision
-        self.suggestedCommand = suggestedCommand
+        self.suggestedAction = suggestedAction
     }
 }

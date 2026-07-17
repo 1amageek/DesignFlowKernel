@@ -99,7 +99,7 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(bundle.schemaVersion == 2)
+    #expect(bundle.schemaVersion == 3)
     #expect(bundle.runID == "run-1")
     #expect(bundle.status == .blocked)
     #expect(bundle.summary.nextActions.map(\.kind).contains("reviewDesignDiff"))
@@ -437,38 +437,22 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(planningCorrectnessNextAction.severity == .warning)
     #expect(planningCorrectnessNextAction.diagnosticCodes == ["post-execution-verification-required"])
-    let verifyCommand = try #require(planningCorrectnessNextAction.suggestedCommands.first)
-    #expect(verifyCommand.commandID == "xcircuite-flow.verify-candidate-plan.post-execution")
-    #expect(verifyCommand.readiness == .ready)
-    #expect(verifyCommand.executable == "xcircuite-flow")
-    #expect(verifyCommand.arguments == [
-        "verify-candidate-plan",
-        "--workspace-id",
-        try testWorkspaceID(for: root).rawValue,
-        "--run-id",
-        "run-1",
-        "--mode",
-        "post-execution",
-        "--pretty",
-    ])
+    let verifyAction = try #require(planningCorrectnessNextAction.suggestedActions.first)
+    #expect(verifyAction.id == "verify-candidate-plan.post-execution")
+    #expect(verifyAction.readiness == .ready)
+    #expect(verifyAction.operation == .verifyCandidatePlan(scope: .postExecution))
+    #expect(verifyAction.runID == "run-1")
     let translationAuditNextAction = try #require(bundle.summary.nextActions.first {
         $0.kind == "repairPlanningCorrectness"
             && $0.actionID == "audit-problem-translation"
     })
     #expect(translationAuditNextAction.severity == .warning)
     #expect(translationAuditNextAction.diagnosticCodes == ["problem-translation-audit-required"])
-    let auditCommand = try #require(translationAuditNextAction.suggestedCommands.first)
-    #expect(auditCommand.commandID == "xcircuite-flow.audit-problem-translation")
-    #expect(auditCommand.readiness == .ready)
-    #expect(auditCommand.executable == "xcircuite-flow")
-    #expect(auditCommand.arguments == [
-        "audit-problem-translation",
-        "--workspace-id",
-        try testWorkspaceID(for: root).rawValue,
-        "--run-id",
-        "run-1",
-        "--pretty",
-    ])
+    let auditAction = try #require(translationAuditNextAction.suggestedActions.first)
+    #expect(auditAction.id == "audit-problem-translation")
+    #expect(auditAction.readiness == .ready)
+    #expect(auditAction.operation == .auditProblemTranslation)
+    #expect(auditAction.runID == "run-1")
     let rejectedPlansArtifact = try #require(bundle.artifacts.first {
         $0.purpose == .planningRejectedPlans
             && $0.reference.artifactID == "planning-rejected-plans"
@@ -494,20 +478,13 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(feedbackNextAction.severity == .warning)
     #expect(feedbackNextAction.diagnosticCodes == ["planning-rejected-feedback-available"])
-    let feedbackCommand = try #require(feedbackNextAction.suggestedCommands.first)
-    #expect(feedbackCommand.commandID == "xcircuite-flow.generate-candidate-plan.with-rejected-feedback")
-    #expect(feedbackCommand.readiness == .ready)
-    #expect(feedbackCommand.executable == "xcircuite-flow")
-    #expect(feedbackCommand.arguments == [
-        "generate-candidate-plan",
-        "--workspace-id",
-        try testWorkspaceID(for: root).rawValue,
-        "--run-id",
-        "run-1",
-        "--rejected-plans-artifact-id",
-        "planning-rejected-plans",
-        "--pretty",
-    ])
+    let feedbackAction = try #require(feedbackNextAction.suggestedActions.first)
+    #expect(feedbackAction.id == "generate-candidate-plan.with-rejected-feedback")
+    #expect(feedbackAction.readiness == .ready)
+    #expect(feedbackAction.operation == .generateCandidatePlan(
+        rejectedPlansArtifactID: try ArtifactID(rawValue: "planning-rejected-plans")
+    ))
+    #expect(feedbackAction.runID == "run-1")
     let planExecutionArtifact = try #require(bundle.artifacts.first {
         $0.purpose == .planningPlanExecution
             && $0.reference.artifactID == "planning-plan-execution"

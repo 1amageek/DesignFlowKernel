@@ -2,7 +2,7 @@ import Foundation
 import CircuiteFoundation
 
 public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public enum Readiness: String, Sendable, Hashable, Codable {
         case ready
@@ -277,7 +277,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
     public var stages: [Stage]
     public var runReviewItems: [FlowRunReviewItem]
     public var nextActions: [FlowRunNextAction]
-    public var replayCommands: [FlowRunSuggestedCommand]
+    public var replayActions: [FlowRunSuggestedAction]
     public var signoffManifestCoverage: SignoffManifestCoverage?
 
     public init(
@@ -289,7 +289,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         stages: [Stage] = [],
         runReviewItems: [FlowRunReviewItem] = [],
         nextActions: [FlowRunNextAction] = [],
-        replayCommands: [FlowRunSuggestedCommand] = [],
+        replayActions: [FlowRunSuggestedAction] = [],
         signoffManifestCoverage: SignoffManifestCoverage? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -301,7 +301,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         self.stages = stages
         self.runReviewItems = runReviewItems
         self.nextActions = nextActions
-        self.replayCommands = replayCommands
+        self.replayActions = replayActions
         self.signoffManifestCoverage = signoffManifestCoverage
     }
 
@@ -315,7 +315,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         case stages
         case runReviewItems
         case nextActions
-        case replayCommands
+        case replayActions
         case signoffManifestCoverage
     }
 
@@ -337,7 +337,7 @@ public struct FlowRunStageArtifactLadder: Sendable, Hashable, Codable {
         stages = try container.decode([Stage].self, forKey: .stages)
         runReviewItems = try container.decode([FlowRunReviewItem].self, forKey: .runReviewItems)
         nextActions = try container.decode([FlowRunNextAction].self, forKey: .nextActions)
-        replayCommands = try container.decode([FlowRunSuggestedCommand].self, forKey: .replayCommands)
+        replayActions = try container.decode([FlowRunSuggestedAction].self, forKey: .replayActions)
         signoffManifestCoverage = try container.decodeIfPresent(
             SignoffManifestCoverage.self,
             forKey: .signoffManifestCoverage

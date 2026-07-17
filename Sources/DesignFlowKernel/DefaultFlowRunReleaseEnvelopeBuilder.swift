@@ -51,7 +51,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             decisionPacketValidation: validation,
             requirements: requirements,
             diagnostics: diagnostics,
-            replayCommands: replayCommands(runID: runID, workspaceID: workspaceID)
+            replayActions: replayActions(runID: runID)
         )
         let artifact = try await persist(envelope, runID: runID, workspaceID: workspaceID)
         return FlowRunReleaseEnvelopeBuildResult(envelope: envelope, artifact: artifact)
@@ -858,35 +858,22 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
     }
 
-    private func replayCommands(
-        runID: String,
-        workspaceID: FlowWorkspaceID
-    ) -> [FlowRunSuggestedCommand] {
+    private func replayActions(
+        runID: String
+    ) -> [FlowRunSuggestedAction] {
         [
-            FlowRunSuggestedCommand(
-                commandID: "validate-decision-packet",
+            FlowRunSuggestedAction(
+                id: "validate-decision-packet",
                 readiness: .ready,
-                executable: "design-flow",
-                arguments: [
-                    "validate-decision-packet",
-                    "--workspace-id",
-                    workspaceID.rawValue,
-                    "--run-id",
-                    runID,
-                ],
+                operation: .validateDecisionPacket,
+                runID: runID,
                 reason: "Rebuild the decision packet validation used by this release envelope."
             ),
-            FlowRunSuggestedCommand(
-                commandID: "build-release-envelope",
+            FlowRunSuggestedAction(
+                id: "build-release-envelope",
                 readiness: .ready,
-                executable: "design-flow",
-                arguments: [
-                    "build-release-envelope",
-                    "--workspace-id",
-                    workspaceID.rawValue,
-                    "--run-id",
-                    runID,
-                ],
+                operation: .buildReleaseEnvelope,
+                runID: runID,
                 reason: "Rebuild the release qualification envelope from current run artifacts."
             ),
         ]

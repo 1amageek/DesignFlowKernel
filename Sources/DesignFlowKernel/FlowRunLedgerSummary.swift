@@ -1,7 +1,7 @@
 import Foundation
 
 public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public let schemaVersion: Int
     public var runID: String
@@ -16,7 +16,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
     public var approvalCount: Int
     public var diagnostics: [FlowDiagnostic]
     public var nextActions: [FlowRunNextAction]
-    public var suggestedCommandSelections: [FlowSuggestedCommandSelection]
+    public var suggestedActionSelections: [FlowRunSuggestedActionSelection]
 
     public init(
         runID: String,
@@ -31,7 +31,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         approvalCount: Int = 0,
         diagnostics: [FlowDiagnostic] = [],
         nextActions: [FlowRunNextAction] = [],
-        suggestedCommandSelections: [FlowSuggestedCommandSelection] = []
+        suggestedActionSelections: [FlowRunSuggestedActionSelection] = []
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
@@ -46,7 +46,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         self.approvalCount = approvalCount
         self.diagnostics = diagnostics
         self.nextActions = nextActions
-        self.suggestedCommandSelections = suggestedCommandSelections
+        self.suggestedActionSelections = suggestedActionSelections
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -63,7 +63,7 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
         case approvalCount
         case diagnostics
         case nextActions
-        case suggestedCommandSelections
+        case suggestedActionSelections
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,9 +109,9 @@ public struct FlowRunLedgerSummary: Sendable, Hashable, Codable {
             [FlowRunNextAction].self,
             forKey: .nextActions
         )
-        self.suggestedCommandSelections = try container.decode(
-            [FlowSuggestedCommandSelection].self,
-            forKey: .suggestedCommandSelections
+        self.suggestedActionSelections = try container.decode(
+            [FlowRunSuggestedActionSelection].self,
+            forKey: .suggestedActionSelections
         )
     }
 }

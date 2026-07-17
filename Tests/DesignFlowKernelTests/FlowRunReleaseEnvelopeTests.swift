@@ -345,8 +345,8 @@ extension FlowRunLedgerSummaryTests {
             && $0.status == .passed
             && $0.artifactIntegrity.first?.status == .verified
     })
-    #expect(result.envelope.replayCommands.contains {
-        $0.commandID == "build-release-envelope" && $0.readiness == .ready
+    #expect(result.envelope.replayActions.contains {
+        $0.operation == .buildReleaseEnvelope && $0.readiness == .ready && $0.runID == "run-1"
     })
 }
 

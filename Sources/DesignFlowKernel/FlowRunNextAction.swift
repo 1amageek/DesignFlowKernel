@@ -7,7 +7,7 @@ public struct FlowRunNextAction: Sendable, Hashable, Codable {
     public var severity: FlowDiagnosticSeverity
     public var reason: String
     public var diagnosticCodes: [String]
-    public var suggestedCommands: [FlowRunSuggestedCommand]
+    public var suggestedActions: [FlowRunSuggestedAction]
 
     public init(
         actionID: String,
@@ -16,7 +16,7 @@ public struct FlowRunNextAction: Sendable, Hashable, Codable {
         severity: FlowDiagnosticSeverity,
         reason: String,
         diagnosticCodes: [String] = [],
-        suggestedCommands: [FlowRunSuggestedCommand] = []
+        suggestedActions: [FlowRunSuggestedAction] = []
     ) {
         self.actionID = actionID
         self.kind = kind
@@ -24,7 +24,7 @@ public struct FlowRunNextAction: Sendable, Hashable, Codable {
         self.severity = severity
         self.reason = reason
         self.diagnosticCodes = diagnosticCodes
-        self.suggestedCommands = suggestedCommands
+        self.suggestedActions = suggestedActions
     }
 
 }
