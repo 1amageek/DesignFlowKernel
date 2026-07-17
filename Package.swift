@@ -5,8 +5,11 @@ import Foundation
 let workspaceRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+let isLSIWorkspace = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("docs/workspace-packages.json").path
+)
 
-let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
+let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
@@ -15,7 +18,7 @@ let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileE
         revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac"
     )
 
-let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
+let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
