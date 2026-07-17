@@ -8,7 +8,7 @@ func testWorkspaceID(for root: URL) throws -> FlowWorkspaceID {
     )
 }
 
-actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
+actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, FlowRunReviewLedgerLoading {
     private static let registry = TestFlowInfrastructureRegistry()
 
     static func bound(to projectRoot: URL) async -> TestFlowInfrastructure {
@@ -90,6 +90,10 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting {
         }
         ledgers[key] = ledger
         return ledger
+    }
+
+    func loadRunLedgerForReview(runID: String) async throws -> FlowRunLedger {
+        try await loadRunLedger(runID: runID)
     }
 
     func saveRunLedger(_ proposed: FlowRunLedger) async throws {

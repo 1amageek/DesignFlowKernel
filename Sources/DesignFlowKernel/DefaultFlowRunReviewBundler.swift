@@ -9,13 +9,13 @@ private struct RetainedHistoryReviewSignal {
 }
 
 public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
-    private let loader: any FlowRunLedgerLoading
+    private let loader: any FlowRunReviewLedgerLoading
     private let summarizer: any FlowRunLedgerSummarizing
     private let persistence: any FlowArtifactPersisting
     private let identifierPolicy = FlowRunReviewIdentifierPolicy()
 
     public init(
-        loader: any FlowRunLedgerLoading,
+        loader: any FlowRunReviewLedgerLoading,
         summarizer: any FlowRunLedgerSummarizing = DefaultFlowRunLedgerSummarizer(),
         persistence: any FlowArtifactPersisting
     ) {
@@ -25,7 +25,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     public func makeReviewBundle(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunReviewBundle {
-        let ledger = try await loader.loadRunLedger(runID: runID)
+        let ledger = try await loader.loadRunLedgerForReview(runID: runID)
         var summary = summarizer.summarize(ledger)
         let integrityByPath = await artifactIntegrityByPath(from: ledger)
         let contentsByPath = try await loadArtifactContents(from: ledger)

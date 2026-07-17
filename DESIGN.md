@@ -29,6 +29,10 @@ flowchart TD
 - `FlowRunLedgerPersisting` is the asynchronous storage seam for run recovery.
   Implementations own durable writes and integrity checks; the kernel does not
   choose a filesystem layout.
+- `FlowRunReviewLedgerLoading` loads structurally validated ledger metadata for
+  review. Review then verifies every artifact independently, while resume,
+  approval, and release continue to use an attested `FlowRunLedgerLoading`
+  implementation.
 - `FlowArtifactPersisting` is the canonical artifact seam. It persists, loads,
   and verifies `CircuiteFoundation.ArtifactReference` values while leaving the
   concrete namespace and filesystem boundary to the injected implementation.
