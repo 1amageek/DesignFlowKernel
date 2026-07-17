@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import DesignFlowKernel
 
-@Test func flowRunNextActionRequiresSuggestedCommandsInCurrentSchema() throws {
+@Test func flowRunNextActionRequiresSuggestedActionsInCurrentSchema() throws {
     let payload = Data("""
     {"actionID":"repair","kind":"repair","severity":"error","reason":"Repair is required.","diagnosticCodes":[]}
     """.utf8)
