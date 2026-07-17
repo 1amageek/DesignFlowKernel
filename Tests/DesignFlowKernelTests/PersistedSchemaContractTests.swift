@@ -15,8 +15,8 @@ struct PersistedSchemaContractTests {
         try expectCurrentSchema(value)
     }
 
-    @Test("schema version 2 records reject missing and unsupported versions")
-    func version2RecordsFailClosed() throws {
+    @Test("schema version 3 records reject missing and unsupported versions")
+    func version3RecordsFailClosed() throws {
         let value = FlowRunReviewBundle(
             runID: "run-schema-v2",
             status: .created,

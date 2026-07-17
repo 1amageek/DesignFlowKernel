@@ -1,6 +1,8 @@
 import Foundation
 
 public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
+    public static let currentSchemaVersion = 3
+
     public struct CoverageRef: Sendable, Hashable, Codable {
         public var domain: String
         public var role: String
@@ -32,7 +34,7 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         }
     }
 
-    @FlowSchemaVersion3 public var schemaVersion: Int
+    public let schemaVersion: Int
     public var runID: String
     public var status: FlowRunStatus
     public var summary: FlowRunLedgerSummary
@@ -46,7 +48,6 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
     public var crossArtifactEvaluation: FlowCrossArtifactEvaluation?
 
     public init(
-        schemaVersion: Int = 3,
         runID: String,
         status: FlowRunStatus,
         summary: FlowRunLedgerSummary,
@@ -59,7 +60,7 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         runGuardVerdict: FlowRunGuardVerdict? = nil,
         crossArtifactEvaluation: FlowCrossArtifactEvaluation? = nil
     ) {
-        self.schemaVersion = schemaVersion
+        self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.status = status
         self.summary = summary
@@ -71,5 +72,46 @@ public struct FlowRunReviewBundle: Sendable, Hashable, Codable {
         self.agentLoopSnapshot = agentLoopSnapshot
         self.runGuardVerdict = runGuardVerdict
         self.crossArtifactEvaluation = crossArtifactEvaluation
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case runID
+        case status
+        case summary
+        case reviewItems
+        case artifacts
+        case approvals
+        case decisionActions
+        case coverageRefs
+        case agentLoopSnapshot
+        case runGuardVerdict
+        case crossArtifactEvaluation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Expected review bundle schema version \(Self.currentSchemaVersion)."
+            )
+        }
+        runID = try container.decode(String.self, forKey: .runID)
+        status = try container.decode(FlowRunStatus.self, forKey: .status)
+        summary = try container.decode(FlowRunLedgerSummary.self, forKey: .summary)
+        reviewItems = try container.decode([FlowRunReviewItem].self, forKey: .reviewItems)
+        artifacts = try container.decode([FlowRunReviewArtifact].self, forKey: .artifacts)
+        approvals = try container.decode([FlowApprovalRecord].self, forKey: .approvals)
+        decisionActions = try container.decodeIfPresent([FlowRunReviewDecision].self, forKey: .decisionActions)
+        coverageRefs = try container.decodeIfPresent([CoverageRef].self, forKey: .coverageRefs)
+        agentLoopSnapshot = try container.decodeIfPresent(FlowAgentLoopSnapshot.self, forKey: .agentLoopSnapshot)
+        runGuardVerdict = try container.decodeIfPresent(FlowRunGuardVerdict.self, forKey: .runGuardVerdict)
+        crossArtifactEvaluation = try container.decodeIfPresent(
+            FlowCrossArtifactEvaluation.self,
+            forKey: .crossArtifactEvaluation
+        )
     }
 }

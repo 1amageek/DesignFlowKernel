@@ -1,6 +1,8 @@
 import Foundation
 
 public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
+    public static let currentSchemaVersion = 3
+
     public enum Readiness: String, Sendable, Hashable, Codable {
         case ready
         case needsReview
@@ -67,7 +69,7 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         }
     }
 
-    @FlowSchemaVersion3 public var schemaVersion: Int
+    public let schemaVersion: Int
     public var packetID: String
     public var runID: String
     public var status: FlowRunStatus
@@ -79,7 +81,6 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
     public var replayActions: [FlowRunSuggestedAction]
 
     public init(
-        schemaVersion: Int = 3,
         packetID: String,
         runID: String,
         status: FlowRunStatus,
@@ -90,7 +91,7 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         completionIssues: [CompletionIssue],
         replayActions: [FlowRunSuggestedAction]
     ) {
-        self.schemaVersion = schemaVersion
+        self.schemaVersion = Self.currentSchemaVersion
         self.packetID = packetID
         self.runID = runID
         self.status = status
@@ -100,5 +101,39 @@ public struct FlowRunDecisionPacket: Sendable, Hashable, Codable {
         self.unresolvedReviewItems = unresolvedReviewItems
         self.completionIssues = completionIssues
         self.replayActions = replayActions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case packetID
+        case runID
+        case status
+        case readiness
+        case reviewBundle
+        case requiredArtifacts
+        case unresolvedReviewItems
+        case completionIssues
+        case replayActions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: container,
+                debugDescription: "Expected decision packet schema version \(Self.currentSchemaVersion)."
+            )
+        }
+        packetID = try container.decode(String.self, forKey: .packetID)
+        runID = try container.decode(String.self, forKey: .runID)
+        status = try container.decode(FlowRunStatus.self, forKey: .status)
+        readiness = try container.decode(Readiness.self, forKey: .readiness)
+        reviewBundle = try container.decode(FlowRunReviewBundle.self, forKey: .reviewBundle)
+        requiredArtifacts = try container.decode([ArtifactRequirement].self, forKey: .requiredArtifacts)
+        unresolvedReviewItems = try container.decode([FlowRunReviewItem].self, forKey: .unresolvedReviewItems)
+        completionIssues = try container.decode([CompletionIssue].self, forKey: .completionIssues)
+        replayActions = try container.decode([FlowRunSuggestedAction].self, forKey: .replayActions)
     }
 }
