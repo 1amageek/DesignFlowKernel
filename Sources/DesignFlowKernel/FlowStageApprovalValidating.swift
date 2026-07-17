@@ -7,5 +7,5 @@ public protocol FlowStageApprovalValidating: Sendable {
         _ approval: FlowApprovalRecord,
         reviewedResult: FlowStageResult,
         context: FlowExecutionContext
-    ) throws -> [FlowDiagnostic]
+    ) async throws -> [FlowDiagnostic]
 }

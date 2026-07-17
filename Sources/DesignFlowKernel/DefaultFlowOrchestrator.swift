@@ -744,7 +744,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             }
             if let validator = executor as? any FlowStageApprovalValidating {
                 do {
-                    let diagnostics = try validator.validateApproval(
+                    let diagnostics = try await validator.validateApproval(
                         record,
                         reviewedResult: reviewedResult,
                         context: context
