@@ -28,7 +28,7 @@ extension FlowRunLedgerSummaryTests {
                 ),
             ]
         ),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [
             descriptor.toolID: qualification.health,
         ],

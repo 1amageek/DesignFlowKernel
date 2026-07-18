@@ -172,7 +172,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = qualification.descriptor
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -224,7 +224,7 @@ extension FlowRunLedgerSummaryTests {
                 ),
             ]
         ),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: health,
         executors: executors
     )
@@ -249,7 +249,7 @@ extension FlowRunLedgerSummaryTests {
 
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: health,
         executors: executors
     )
@@ -343,7 +343,7 @@ extension FlowRunLedgerSummaryTests {
     await #expect(throws: FlowRunResumeError.self) {
         try await makeTestRunResumer(projectRoot: root).resumeRun(
             request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -375,7 +375,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = qualification.descriptor
     let resumed = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -416,7 +416,7 @@ extension FlowRunLedgerSummaryTests {
             ],
             allowExistingRun: true
         ),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [descriptor.toolID: qualification.health],
         executors: [
             ApprovalDuringExecutionExecutor(
@@ -681,7 +681,7 @@ extension FlowRunLedgerSummaryTests {
     let descriptor = qualification.descriptor
     _ = try await makeTestRunResumer(projectRoot: root).resumeRun(
         request: FlowRunResumeRequest(workspaceID: try testWorkspaceID(for: root), runID: "run-1"),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [descriptor.toolID: qualification.health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),

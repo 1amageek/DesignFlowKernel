@@ -649,7 +649,7 @@ struct DefaultFlowOrchestratorTests {
 
         let result = try await makeTestOrchestrator(projectRoot: root).run(
             request: request,
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -682,7 +682,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -748,7 +748,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -799,7 +799,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [
                 descriptor.toolID: ToolHealthCheckResult(
                     toolID: descriptor.toolID,
@@ -863,7 +863,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [
                 descriptor.toolID: ToolHealthCheckResult(
                     toolID: descriptor.toolID,
@@ -922,7 +922,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
@@ -1080,7 +1080,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [descriptor]),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
             healthResults: [descriptor.toolID: qualification.health],
             executors: [
                 StubStageExecutor(stageID: "001-drc", toolID: "other-drc", status: .succeeded),
@@ -1127,7 +1127,7 @@ struct DefaultFlowOrchestratorTests {
                     ),
                 ]
             ),
-            toolRegistry: ToolRegistry(descriptors: [
+            toolRegistry: try ToolRegistry(descriptors: [
                 competingQualification.descriptor,
                 executorQualification.descriptor,
             ]),

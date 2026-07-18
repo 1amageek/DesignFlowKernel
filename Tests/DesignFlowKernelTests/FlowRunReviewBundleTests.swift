@@ -1063,7 +1063,7 @@ extension FlowRunLedgerSummaryTests {
                 ),
             ]
         ),
-        toolRegistry: ToolRegistry(descriptors: [descriptor]),
+        toolRegistry: try ToolRegistry(descriptors: [descriptor]),
         healthResults: [descriptor.toolID: health],
         executors: [
             SummaryStageExecutor(stageID: "001-drc", toolID: "native-drc", status: .succeeded),
