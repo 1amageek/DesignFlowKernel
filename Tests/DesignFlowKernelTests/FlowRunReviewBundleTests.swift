@@ -635,8 +635,10 @@ extension FlowRunLedgerSummaryTests {
                 format: .json,
                 sha256: String(repeating: "a", count: 64)
             ),
-        ]
+        ],
+        artifactPayloads: [summaryPath: Data(#"{"status":"passed"}"#.utf8)]
     )
+    try FileManager.default.removeItem(at: root.appending(path: summaryPath))
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
         runID: "run-1",

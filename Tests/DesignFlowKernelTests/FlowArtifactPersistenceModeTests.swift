@@ -16,5 +16,18 @@ struct FlowArtifactPersistenceModeTests {
         #expect(decoded == .createOnly)
         #expect(decoded != .immutable)
         #expect(decoded != .replaceable)
+        #expect(decoded != .appendOnly)
+    }
+
+    @Test
+    func appendOnlyIsDistinctAndCodable() throws {
+        let encoded = try JSONEncoder().encode(FlowArtifactPersistenceMode.appendOnly)
+        let decoded = try JSONDecoder().decode(
+            FlowArtifactPersistenceMode.self,
+            from: encoded
+        )
+
+        #expect(decoded == .appendOnly)
+        #expect(decoded != .replaceable)
     }
 }

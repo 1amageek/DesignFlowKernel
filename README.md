@@ -113,7 +113,8 @@ filesystem ownership into this package.
 ## Approval gate and resume
 
 Stages with `requiresApproval` evaluate an `approval` gate after execution, read from
-`runs/<run-id>/approvals/<stage-id>.json` (`FlowApprovalRecord`, latest wins):
+the immutable `runs/<run-id>/approvals/<stage-id>.json` `FlowApprovalRecord`.
+Only one decision may be recorded for a stage:
 
 | Approval state | Gate result | Run behavior |
 |---|---|---|
@@ -122,8 +123,22 @@ Stages with `requiresApproval` evaluate an `approval` gate after execution, read
 | rejected | failed (`STAGE_REJECTED`) | stage fails, run fails |
 | absent | — | run stops as `blocked` (`APPROVAL_PENDING`) |
 
-Approval and waiver decisions bind the exact plan and stage-result artifact
-references reviewed by the human. A waiver without a reason is rejected.
+Before recording an approval or waiver, the recorder verifies the canonical stage
+result and retains its exact bytes as an immutable, content-addressed action output:
+
+```text
+stages/<stage-id>/result.json
+  -> review/approval-inputs/<stage-id>-<sha256>.json
+  -> FlowApprovalRecord.evidence.stageResult
+  -> approval action input
+```
+
+The retention action is append-only and retry-safe. Its identity and timestamp are
+derived from persisted run state, so a process restart between retaining the reviewed
+result and appending the approval can resume without creating different evidence.
+The approval binds the exact plan reference and retained result snapshot. The
+canonical stage result may then be updated during resume without changing the bytes
+that the reviewer approved. A waiver without a reason is rejected.
 
 Resume is re-running the same runID: persisted approvals survive run-state re-creation,
 so recording a decision and re-running moves past the gate. The review cockpit and
@@ -145,6 +160,12 @@ it does not choose a storage path or expose a package-owned executable.
 Tool qualification and release policy decisions remain inputs from
 ToolQualification and the composing flow, rather than claims made by a domain
 engine.
+
+`DefaultFlowRunReleaseEvidenceCollector` also requires an injected
+`ProducerIdentity`. Its corpus history, performance envelope, and contract audit
+are active-run results, so each is persisted in replaceable mode until the run
+becomes terminal. The persistence boundary must return the exact injected
+producer on every reference; a missing or rewritten producer is a typed failure.
 
 ## Review contract
 

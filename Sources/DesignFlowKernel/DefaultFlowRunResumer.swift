@@ -6,17 +6,20 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
     private let orchestrator: DefaultFlowOrchestrator
     private let inspector: FlowRunLedgerInspecting
     private let artifactPersistence: any FlowArtifactPersisting
+    private let artifactLocationValidator: any FlowRunArtifactLocationValidator
 
     public init(
         loader: FlowRunLedgerLoading,
         orchestrator: DefaultFlowOrchestrator,
         inspector: FlowRunLedgerInspecting,
-        artifactPersistence: any FlowArtifactPersisting
+        artifactPersistence: any FlowArtifactPersisting,
+        artifactLocationValidator: any FlowRunArtifactLocationValidator = DefaultFlowRunArtifactLocationValidator()
     ) {
         self.loader = loader
         self.orchestrator = orchestrator
         self.inspector = inspector
         self.artifactPersistence = artifactPersistence
+        self.artifactLocationValidator = artifactLocationValidator
     }
 
     public func resumeRun(
@@ -30,7 +33,8 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
             toolRegistry: toolRegistry,
             healthResults: healthResults,
             executors: executors,
-            toolchainProfile: nil
+            toolchainProfile: nil,
+            artifactPreparer: nil
         )
     }
 
@@ -39,7 +43,8 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         toolRegistry: ToolRegistry,
         healthResults: [String: ToolHealthCheckResult],
         executors: [any FlowStageExecutor],
-        toolchainProfile: FlowToolchainProfileRecord?
+        toolchainProfile: FlowToolchainProfileRecord?,
+        artifactPreparer: (any FlowRunArtifactPreparing)? = nil
     ) async throws -> FlowRunResumeResult {
         let ledger = try await loader.loadRunLedger(
             runID: request.runID
@@ -48,7 +53,7 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
             throw FlowRunResumeError.missingPlan(request.runID)
         }
         try validateResumableStatus(ledger)
-        try await validatePlanIntegrity(ledger, workspaceID: request.workspaceID)
+        try await validatePlanIntegrity(ledger)
         var operationRequest = plan.makeRequest(workspaceID: request.workspaceID)
         if operationRequest.toolchainProfile == nil {
             operationRequest.toolchainProfile = toolchainProfile
@@ -59,7 +64,8 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
             request: operationRequest,
             toolRegistry: toolRegistry,
             healthResults: healthResults,
-            executors: executors
+            executors: executors,
+            artifactPreparer: artifactPreparer
         )
         let summary = try await inspector.inspectRun(
             runID: request.runID,
@@ -83,20 +89,36 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
         }
     }
 
-    private func validatePlanIntegrity(
-        _ ledger: FlowRunLedger,
-        workspaceID: FlowWorkspaceID
-    ) async throws {
+    private func validatePlanIntegrity(_ ledger: FlowRunLedger) async throws {
         let planPath = "runs/\(ledger.runID)/plan.json"
-        guard let reference = ledger.runManifest.artifacts.first(where: {
-            $0.id.rawValue == "run-plan" || $0.path == planPath
-        }) else {
+        let candidates = ledger.runManifest.artifacts.filter {
+            $0.id.rawValue == "run-plan"
+        }
+        let references = candidates.filter {
+            artifactLocationValidator.isReference(
+                $0,
+                boundTo: planPath,
+                allowingContentAddressedVariant: false
+            )
+                && $0.locator.role == .input
+                && $0.locator.kind == .other
+                && $0.locator.format == .json
+        }
+        guard candidates.count == 1,
+              references.count == 1,
+              let reference = references.first else {
             throw FlowRunResumeError.missingPlanReference(ledger.runID)
         }
         do {
-            _ = try await artifactPersistence.loadArtifactContent(
+            let content = try await artifactPersistence.loadArtifactContent(
                 for: reference
             )
+            let retainedPlan = try JSONDecoder().decode(FlowRunPlan.self, from: content)
+            guard retainedPlan == ledger.plan else {
+                throw FlowRunResumeError.planProjectionMismatch(ledger.runID)
+            }
+        } catch let error as FlowRunResumeError {
+            throw error
         } catch {
             throw FlowRunResumeError.invalidPlanReference(
                 runID: ledger.runID,

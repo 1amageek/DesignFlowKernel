@@ -35,7 +35,10 @@ extension FlowRunLedgerSummaryTests {
     let validator = DefaultFlowRunDecisionPacketValidator(
         loader: store,
         persistence: store,
-        reviewBundler: reviewBundler
+        reviewBundler: reviewBundler,
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
+            storagePrefix: ".xcircuite"
+        )
     )
     let result = try await DefaultFlowRunReleaseEnvelopeBuilder(
         decisionPacketValidator: validator,
@@ -612,6 +615,12 @@ extension FlowRunLedgerSummaryTests {
     #expect(result.artifacts.map(\.artifactID).contains("qualification-corpus-history"))
     #expect(result.artifacts.map(\.artifactID).contains("qualification-performance-envelope"))
     #expect(result.artifacts.map(\.artifactID).contains("qualification-contract-audit"))
+    #expect(result.artifacts.count == 3)
+    #expect(result.artifacts.allSatisfy {
+        $0.producer?.kind == .engine
+            && $0.producer?.identifier == "design-flow-kernel.release-evidence-collector"
+            && $0.producer?.version == "1.0.0"
+    })
     #expect(!result.corpusHistory.collectedAt.isEmpty)
     #expect(result.corpusHistory.previousEntryCount == 2)
     #expect(result.performanceEnvelope.domains.first?.durationRegressionRatio == 1.2)
@@ -963,7 +972,7 @@ extension FlowRunLedgerSummaryTests {
 	    })
 	}
 
-	@Test func releaseEnvelopeBlocksRetainedArtifactReferenceMismatch() async throws {
+	@Test func releaseEnvelopeTreatsWrongArtifactIdentityAtExpectedPathAsMissing() async throws {
 	    let root = try makeTemporaryRoot("agent-release-artifact-reference-mismatch")
 	    defer { removeTemporaryRoot(root) }
 	    let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
@@ -1029,9 +1038,9 @@ extension FlowRunLedgerSummaryTests {
 	    })
 	    #expect(envelope.status == .blocked)
 	    #expect(corpusRequirement.status == .blocked)
-	    #expect(corpusRequirement.diagnosticCodes.contains("release-envelope-corpus-history-reference-mismatch"))
+	    #expect(corpusRequirement.diagnosticCodes.contains("release-envelope-corpus-history-missing"))
 	    #expect(corpusRequirement.artifactIDs.contains("qualification-corpus-history"))
-	    #expect(corpusRequirement.artifactIDs.contains("wrong-corpus-history"))
+	    #expect(!corpusRequirement.artifactIDs.contains("wrong-corpus-history"))
 	}
 
 	@Test func releaseEnvelopeBlocksFractionalEvidenceCounts() async throws {

@@ -69,6 +69,16 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         stageResults: [FlowStageResult],
         workspaceID: FlowWorkspaceID
     ) -> FlowRunStageArtifactLadder {
+        let previousLadderPaths = Set(
+            bundle.artifacts
+                .filter { $0.reference.artifactID == Self.artifactID }
+                .map { $0.reference.path }
+        )
+        let reviewItems = bundle.reviewItems.map { item in
+            var normalized = item
+            normalized.artifactPaths.removeAll(where: previousLadderPaths.contains)
+            return normalized
+        }
         let artifacts = bundle.artifacts
             .filter { $0.reference.artifactID != Self.artifactID }
             .map {
@@ -84,7 +94,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         let runArtifacts = artifacts.filter { $0.stageID == nil }
         let stageResultsByID = stageResultMap(from: stageResults)
         let duplicateStageResultIDs = duplicateStageIDs(in: stageResults)
-        let reviewItemsByStage = Dictionary(grouping: bundle.reviewItems.filter { $0.stageID != nil }) {
+        let reviewItemsByStage = Dictionary(grouping: reviewItems.filter { $0.stageID != nil }) {
             $0.stageID ?? ""
         }
         let nextActionsByStage = Dictionary(grouping: bundle.summary.nextActions.filter { $0.stageID != nil }) {
@@ -129,11 +139,11 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
                 nextActions: nextActionsByStage[stageSummary.stageID, default: []].sorted(by: nextActionSort)
             )
         }
-        let runReviewItems = bundle.reviewItems
+        let runReviewItems = reviewItems
             .filter { $0.stageID == nil }
             .sorted(by: reviewItemSort)
         let readiness = readiness(
-            reviewItems: bundle.reviewItems,
+            reviewItems: reviewItems,
             artifacts: artifacts,
             hasDuplicateStageResults: !duplicateStageResultIDs.isEmpty
         )
@@ -142,10 +152,10 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             runArtifactCount: runArtifacts.count,
             stageArtifactCount: stageArtifacts.count,
             retryArtifactCount: artifacts.filter { $0.domain == "retry" }.count,
-            reviewItemCount: bundle.reviewItems.count,
-            unresolvedReviewItemCount: bundle.reviewItems.filter(isUnresolved).count,
+            reviewItemCount: reviewItems.count,
+            unresolvedReviewItemCount: reviewItems.filter(isUnresolved).count,
             invalidArtifactCount: artifacts.filter(hasIntegrityIssue).count,
-            artifactCoverageIssueCount: bundle.reviewItems.filter { $0.kind == .artifactCoverage }.count,
+            artifactCoverageIssueCount: reviewItems.filter { $0.kind == .artifactCoverage }.count,
             domainCounts: domainCounts(from: artifacts),
             stageCategoryCounts: stageCategoryCounts(from: stages),
             handoffRefCount: stages.reduce(0) { partial, stage in

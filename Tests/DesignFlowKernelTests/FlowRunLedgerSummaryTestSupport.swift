@@ -197,10 +197,28 @@ struct SummaryStageExecutor: FlowStageExecutor {
             )
         }
 
+        let diagnostics: [FlowDiagnostic]
+        let resolvedGates: [FlowGateResult]
+        if status == .failed, gates.isEmpty {
+            let diagnostic = FlowDiagnostic(
+                severity: .error,
+                code: "STAGE_FAILED",
+                message: "The test stage reported failure."
+            )
+            diagnostics = [diagnostic]
+            resolvedGates = [
+                FlowGateResult(gateID: "execution", status: .failed, diagnostics: [diagnostic]),
+            ]
+        } else {
+            diagnostics = []
+            resolvedGates = gates
+        }
+
         return FlowStageResult(
             stageID: stage.stageID,
             status: status,
-            gates: gates,
+            diagnostics: diagnostics,
+            gates: resolvedGates,
             artifacts: resolvedArtifacts
         )
     }

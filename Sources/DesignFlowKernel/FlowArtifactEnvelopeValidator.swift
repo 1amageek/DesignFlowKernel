@@ -8,7 +8,7 @@ public struct FlowArtifactEnvelopeValidator: Sendable {
     }
 
     public func validate(_ envelope: FlowArtifactEnvelope) throws {
-        guard envelope.schemaVersion == 1 else {
+        guard envelope.schemaVersion == 2 else {
             throw FlowArtifactEnvelopeValidationError.invalidSchemaVersion(envelope.schemaVersion)
         }
         try validateIdentifier(envelope.artifactID, field: "artifactID", kind: .artifactID)
@@ -33,7 +33,18 @@ public struct FlowArtifactEnvelopeValidator: Sendable {
         guard let producer else {
             return
         }
-        try validateNonEmpty(producer.producerID, field: "producer.producerID")
+        try validateNonEmpty(producer.identity.identifier, field: "producer.identity.identifier")
+        guard let build = producer.identity.build else {
+            throw FlowArtifactEnvelopeValidationError.missingProducerBuild
+        }
+        guard build.utf8.count == 64,
+              build.utf8.allSatisfy({ byte in
+                  (byte >= 48 && byte <= 57)
+                      || (byte >= 65 && byte <= 70)
+                      || (byte >= 97 && byte <= 102)
+              }) else {
+            throw FlowArtifactEnvelopeValidationError.invalidProducerBuild(build)
+        }
     }
 
     private func validateDependencies(

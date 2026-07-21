@@ -10,6 +10,8 @@ public enum FlowArtifactEnvelopeValidationError: Error, LocalizedError, Equatabl
     case invalidConfidence(field: String, value: Double)
     case invalidPosteriorVariance(field: String, value: Double)
     case nonFiniteNumericValue(field: String, value: Double)
+    case missingProducerBuild
+    case invalidProducerBuild(String)
 
     public var errorDescription: String? {
         switch self {
@@ -31,6 +33,10 @@ public enum FlowArtifactEnvelopeValidationError: Error, LocalizedError, Equatabl
             "Artifact envelope posterior variance must be non-negative: \(field)=\(value)."
         case .nonFiniteNumericValue(let field, let value):
             "Artifact envelope numeric evidence must be finite: \(field)=\(value)."
+        case .missingProducerBuild:
+            "Artifact envelope producer identity must retain its exact build digest."
+        case .invalidProducerBuild(let build):
+            "Artifact envelope producer build must be a SHA-256 digest: \(build)."
         }
     }
 }

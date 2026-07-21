@@ -160,24 +160,17 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
                 )
             }
         }
-        var artifactPaths: Set<String> = []
-        var artifactIDs: Set<String> = []
+        var artifactLocators: Set<ArtifactLocator> = []
         for artifact in artifacts {
             try Self.validateArtifactPath(artifact.path, runID: runID)
-            guard artifactPaths.insert(artifact.path).inserted else {
+            guard artifactLocators.insert(artifact.locator).inserted else {
                 throw FlowRunManifestError.invalidManifest(
                     runID: runID,
-                    reason: "artifact path '\(artifact.path)' must be unique."
+                    reason: "artifact locator for '\(artifact.path)' must be unique."
                 )
             }
             let artifactID = artifact.artifactID
             try FlowIdentifierValidator().validate(artifactID, kind: .artifactID)
-            guard artifactIDs.insert(artifactID).inserted else {
-                throw FlowRunManifestError.invalidManifest(
-                    runID: runID,
-                    reason: "artifactID '\(artifactID)' must be unique."
-                )
-            }
         }
 
         switch status {

@@ -7,13 +7,16 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
     public static let contractAuditArtifactID = "qualification-contract-audit"
 
     private let persistence: any FlowArtifactPersisting
+    private let producer: ProducerIdentity
     private let currentDate: Date
 
     public init(
         persistence: any FlowArtifactPersisting,
+        producer: ProducerIdentity,
         currentDate: Date = Date()
     ) {
         self.persistence = persistence
+        self.producer = producer
         self.currentDate = currentDate
     }
 
@@ -316,8 +319,16 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
                     format: .json
                 ),
                 runID: runID,
+                producer: producer,
                 mode: .replaceable
             )
+            guard reference.producer == producer else {
+                throw FlowRunReleaseEvidenceCollectionError.persistedProducerMismatch(
+                    artifactID: artifact.artifactID,
+                    expected: producer,
+                    actual: reference.producer
+                )
+            }
             references.append(reference)
         }
         return references

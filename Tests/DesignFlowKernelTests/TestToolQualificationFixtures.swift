@@ -36,6 +36,19 @@ enum TestToolQualificationFixtures {
             )
             try fixture.data.write(to: url, options: .atomic)
         }
+        for name in ["input", "output", "health-output"] {
+            let reference = try supportingArtifact(
+                toolID: descriptor.toolID,
+                name: name,
+                producer: issuer
+            )
+            let url = try reference.locator.location.resolvedFileURL(relativeTo: projectRoot)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("\(descriptor.toolID):\(name)".utf8).write(to: url, options: .atomic)
+        }
 
         var qualifiedDescriptor = descriptor
         qualifiedDescriptor.trustProfile.level = .smokeChecked

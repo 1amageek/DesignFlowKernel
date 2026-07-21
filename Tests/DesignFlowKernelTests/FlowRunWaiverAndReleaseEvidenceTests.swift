@@ -12,7 +12,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
         let recorder = DefaultFlowGateApprovalRecorder(
             loader: store,
             inspector: store,
-            ledgerPersistence: store
+            approvalPersistence: store
         )
 
         await #expect(throws: FlowGateApprovalError.waiverReasonRequired) {
@@ -72,7 +72,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
     }
 }
 
-private actor WaiverLedgerStore: FlowRunLedgerPersisting, FlowRunLedgerInspecting {
+private actor WaiverLedgerStore: FlowRunApprovalArtifactPersisting, FlowRunLedgerInspecting {
     private var ledger: FlowRunLedger
 
     init(ledger: FlowRunLedger) {
@@ -83,8 +83,40 @@ private actor WaiverLedgerStore: FlowRunLedgerPersisting, FlowRunLedgerInspectin
         ledger
     }
 
-    func saveRunLedger(_ ledger: FlowRunLedger) async throws {
+    func saveRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
         self.ledger = ledger
+        return ledger
+    }
+
+    func createRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        throw FlowRunLedgerPersistenceError.runAlreadyExists(runID: ledger.runID)
+    }
+
+    func appendActionArtifact(
+        content: Data,
+        reference: ArtifactReference,
+        action: FlowRunActionRecord
+    ) async throws -> FlowRunLedger {
+        ledger.actions.append(action)
+        return ledger
+    }
+
+    func appendApprovalArtifact(
+        content: Data,
+        reference: ArtifactReference,
+        approval: FlowApprovalRecord,
+        action: FlowRunActionRecord
+    ) async throws -> FlowRunLedger {
+        ledger.approvals.append(approval)
+        ledger.actions.append(action)
+        return ledger
+    }
+
+    func loadArtifactContent(for reference: ArtifactReference) async throws -> Data {
+        throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
+            path: reference.path,
+            reason: "test store has no artifact content"
+        )
     }
 
     func inspectRun(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunLedgerSummary {
@@ -132,6 +164,24 @@ private actor ReleaseEvidenceStore: FlowRunLedgerLoading, FlowArtifactPersisting
             locator: locator,
             digest: try SHA256ContentDigester().digest(data: content),
             byteCount: UInt64(content.count)
+        )
+    }
+
+    func persistArtifact(
+        content: Data,
+        id: ArtifactID?,
+        locator: ArtifactLocator,
+        runID: String,
+        producer: ProducerIdentity,
+        mode: FlowArtifactPersistenceMode
+    ) async throws -> ArtifactReference {
+        persistedArtifactCount += 1
+        return ArtifactReference(
+            id: id,
+            locator: locator,
+            digest: try SHA256ContentDigester().digest(data: content),
+            byteCount: UInt64(content.count),
+            producer: producer
         )
     }
 

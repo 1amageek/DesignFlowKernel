@@ -31,18 +31,18 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             runID: runID,
             workspaceID: workspaceID
         )
-        let manifestResult = await loadRunManifest(runID: runID, workspaceID: workspaceID)
+        let ledgerResult = await loadRunLedger(runID: runID, workspaceID: workspaceID)
         let requirements = await releaseRequirements(
             runID: runID,
             workspaceID: workspaceID,
             decisionPacketValidation: validation,
-            manifest: manifestResult.manifest,
+            retainedArtifacts: ledgerResult.retainedArtifacts,
             maxEvidenceAgeDays: maxEvidenceAgeDays
         )
         let diagnostics = releaseDiagnostics(
             decisionPacketValidation: validation,
             requirements: requirements,
-            manifestDiagnostic: manifestResult.diagnostic
+            manifestDiagnostic: ledgerResult.diagnostic
         )
         let envelope = FlowRunReleaseEnvelope(
             envelopeID: "release-envelope-\(runID)",
@@ -57,15 +57,15 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         return FlowRunReleaseEnvelopeBuildResult(envelope: envelope, artifact: artifact)
     }
 
-    private func loadRunManifest(
+    private func loadRunLedger(
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async -> (manifest: FlowRunManifest?, diagnostic: FlowDiagnostic?) {
+    ) async -> (retainedArtifacts: [ArtifactReference]?, diagnostic: FlowDiagnostic?) {
         do {
-            let manifest = try await loader.loadRunLedger(
+            let ledger = try await loader.loadRunLedger(
                 runID: runID
-            ).runManifest
-            return (manifest, nil)
+            )
+            return (ledger.artifacts + ledger.actions.flatMap(\.outputs), nil)
         } catch {
             return (
                 nil,
@@ -82,7 +82,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         runID: String,
         workspaceID: FlowWorkspaceID,
         decisionPacketValidation: FlowRunDecisionPacketValidationResult,
-        manifest: FlowRunManifest?,
+        retainedArtifacts: [ArtifactReference]?,
         maxEvidenceAgeDays: Int?
     ) async -> [FlowRunReleaseEnvelope.Requirement] {
         let corpus = await retainedArtifactRequirement(
@@ -95,7 +95,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 ageDiagnosticPrefix: "release-envelope-corpus-history",
                 runID: runID,
                 workspaceID: workspaceID,
-                manifest: manifest,
+                retainedArtifacts: retainedArtifacts,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
         let performance = await retainedArtifactRequirement(
@@ -108,7 +108,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 ageDiagnosticPrefix: "release-envelope-performance-envelope",
                 runID: runID,
                 workspaceID: workspaceID,
-                manifest: manifest,
+                retainedArtifacts: retainedArtifacts,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
         let contract = await retainedArtifactRequirement(
@@ -121,7 +121,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 ageDiagnosticPrefix: "release-envelope-contract-audit",
                 runID: runID,
                 workspaceID: workspaceID,
-                manifest: manifest,
+                retainedArtifacts: retainedArtifacts,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
         let qualification = await retainedArtifactRequirement(
@@ -134,7 +134,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 ageDiagnosticPrefix: "release-envelope-release-qualification",
                 runID: runID,
                 workspaceID: workspaceID,
-                manifest: manifest,
+                retainedArtifacts: retainedArtifacts,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
         let retention = await retainedArtifactRequirement(
@@ -147,7 +147,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 ageDiagnosticPrefix: "release-envelope-retention-index",
                 runID: runID,
                 workspaceID: workspaceID,
-                manifest: manifest,
+                retainedArtifacts: retainedArtifacts,
                 maxEvidenceAgeDays: maxEvidenceAgeDays
             )
         return [
@@ -186,29 +186,12 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         ageDiagnosticPrefix: String,
         runID: String,
         workspaceID: FlowWorkspaceID,
-        manifest: FlowRunManifest?,
+        retainedArtifacts: [ArtifactReference]?,
         maxEvidenceAgeDays: Int?
     ) async -> FlowRunReleaseEnvelope.Requirement {
         let path = "runs/\(runID)/\(relativePath)"
-        let reference = manifest?.artifacts.first { reference in
+        let reference = retainedArtifacts?.last { reference in
             reference.artifactID == artifactID
-                && matchesStoragePath(reference.path, logicalPath: path)
-        }
-        if reference == nil,
-           let mismatchedReference = manifest?.artifacts.first(where: { reference in
-               reference.artifactID == artifactID
-                   || matchesStoragePath(reference.path, logicalPath: path)
-           }) {
-            return FlowRunReleaseEnvelope.Requirement(
-                requirementID: requirementID,
-                title: title,
-                required: true,
-                status: .blocked,
-                purpose: purpose,
-                artifactIDs: uniqueSorted([artifactID, mismatchedReference.artifactID].compactMap { $0 }),
-                artifactPaths: uniqueSorted([path, mismatchedReference.path]),
-                diagnosticCodes: ["\(ageDiagnosticPrefix)-reference-mismatch"]
-            )
         }
         guard let reference else {
             return FlowRunReleaseEnvelope.Requirement(
@@ -305,10 +288,6 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             artifactPaths: [reference.path],
             artifactIntegrity: [integrity]
         )
-    }
-
-    private func matchesStoragePath(_ actualPath: String, logicalPath: String) -> Bool {
-        actualPath == logicalPath || actualPath.hasSuffix("/\(logicalPath)")
     }
 
     private func releaseArtifactContentDiagnosticCodes(

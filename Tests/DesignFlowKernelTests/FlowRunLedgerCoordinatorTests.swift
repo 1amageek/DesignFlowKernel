@@ -6,6 +6,92 @@ import Testing
 @Suite("FlowRunLedgerCoordinator")
 struct FlowRunLedgerCoordinatorTests {
     @Test
+    func createRejectsLifecycleDataWithTypedIssue() async throws {
+        var ledger = try makeLedger(runID: "run-invalid-create")
+        ledger.stages = [FlowStageResult(stageID: "simulation", status: .succeeded)]
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "unused"))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+
+        await #expect(throws: FlowRunLedgerPersistenceError.invalidInitialProjection(
+            runID: "run-invalid-create",
+            issue: .containsLifecycleProjection
+        )) {
+            try await coordinator.create(ledger)
+        }
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test
+    func atomicCreationRejectsOneOfTwoConcurrentCreators() async throws {
+        let store = AtomicCreationLedgerStore()
+        let first = FlowRunLedgerCoordinator(persistence: store)
+        let second = FlowRunLedgerCoordinator(persistence: store)
+        let ledger = try makeLedger(runID: "run-concurrent-create")
+
+        async let firstCreation = capture {
+            try await first.create(ledger)
+        }
+        async let secondCreation = capture {
+            try await second.create(ledger)
+        }
+
+        var successes = 0
+        var conflicts = 0
+        for result in await [firstCreation, secondCreation] {
+            switch result {
+            case .success:
+                successes += 1
+            case .failure(let error):
+                if let persistenceError = error as? FlowRunLedgerPersistenceError,
+                   persistenceError == .runAlreadyExists(runID: ledger.runID) {
+                    conflicts += 1
+                } else {
+                    Issue.record("Unexpected concurrent creation error: \(error)")
+                }
+            }
+        }
+
+        #expect(successes == 1)
+        #expect(conflicts == 1)
+        #expect(await store.storedLedger == ledger)
+    }
+
+    @Test
+    func artifactMergeKeepsStageLocalIdentifiersAndRejectsLocatorConflicts() throws {
+        let first = try artifactReference(
+            id: "stage-summary",
+            path: "runs/run-1/stages/001-drc/summary.json"
+        )
+        let second = try artifactReference(
+            id: "stage-summary",
+            path: "runs/run-1/stages/002-lvs/summary.json"
+        )
+
+        let merged = try mergedArtifactReferences([first, second, first])
+        #expect(merged.count == 2)
+        #expect(Set(merged.map(\.locator.location)) == Set([
+            first.locator.location,
+            second.locator.location,
+        ]))
+
+        let conflicting = ArtifactReference(
+            id: first.id,
+            locator: first.locator,
+            digest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "1", count: 64)
+            ),
+            byteCount: 1
+        )
+        #expect(throws: FlowExecutionError.conflictingArtifactReference(
+            artifactID: first.id.rawValue,
+            location: first.locator.location.value
+        )) {
+            _ = try mergedArtifactReferences([first, conflicting])
+        }
+    }
+
+    @Test
     func serializesLoadUpdateAndSaveThroughPersistenceProtocol() async throws {
         let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-1"))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
@@ -45,7 +131,7 @@ struct FlowRunLedgerCoordinatorTests {
     }
 
     @Test
-    func persistsCompleteLifecycleTransitions() async throws {
+    func startsAndFinalizesCompleteLifecycle() async throws {
         let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-lifecycle"))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
 
@@ -58,9 +144,13 @@ struct FlowRunLedgerCoordinatorTests {
         #expect(running.runManifest.startedAt != nil)
         #expect(running.runManifest.finishedAt == nil)
 
-        let succeeded = try await coordinator.transition(
+        let succeeded = try await coordinator.finalize(
             runID: "run-lifecycle",
-            to: .succeeded,
+            status: .succeeded,
+            stages: [FlowStageResult(stageID: "simulation", status: .succeeded)],
+            toolchain: toolchainManifest(runID: "run-lifecycle", stageID: "simulation"),
+            evidence: try evidenceManifest(artifacts: []),
+            artifacts: [],
             at: Date(timeIntervalSince1970: 1_700_000_020)
         )
         #expect(succeeded.runManifest.status == .succeeded)
@@ -90,7 +180,21 @@ struct FlowRunLedgerCoordinatorTests {
 
     @Test
     func recordsApprovalAndResumeStateWithoutStorageKnowledge() async throws {
-        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-review"))
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let blockedManifest = try FlowRunManifest(
+            runID: "run-review",
+            status: .blocked,
+            actor: FlowRunActor(kind: .system, identifier: "test"),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            startedAt: timestamp,
+            finishedAt: timestamp
+        )
+        let store = InMemoryLedgerStore(ledger: FlowRunLedger(
+            runID: "run-review",
+            runManifest: blockedManifest,
+            stages: [FlowStageResult(stageID: "review", status: .blocked)]
+        ))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
         let plan = try artifactReference(id: "plan", path: ".xcircuite/runs/run-review/plan.json")
         let stageResult = try artifactReference(
@@ -110,7 +214,6 @@ struct FlowRunLedgerCoordinatorTests {
 
         let updated = try await coordinator.update(runID: "run-review") {
             $0.approvals.append(approval)
-            $0.runManifest.status = .blocked
         }
         #expect(updated.approvals == [approval])
         #expect(updated.runManifest.status == .blocked)
@@ -137,13 +240,149 @@ struct FlowRunLedgerCoordinatorTests {
         _ = try await coordinator.update(runID: "run-cancel") {
             $0.cancellationRequest = request
         }
-        let cancelled = try await coordinator.transition(
+        let cancelled = try await coordinator.finalize(
             runID: "run-cancel",
-            to: .cancelled
+            status: .cancelled,
+            stages: [FlowStageResult(
+                stageID: "run",
+                status: .blocked,
+                gates: [FlowGateResult(gateID: "cancellation", status: .blocked)]
+            )],
+            toolchain: toolchainManifest(runID: "run-cancel", stageID: "run"),
+            evidence: try evidenceManifest(artifacts: []),
+            artifacts: []
         )
         #expect(cancelled.runManifest.status == .cancelled)
         #expect(cancelled.cancellationRequest == request)
         #expect(cancelled.runManifest.finishedAt != nil)
+    }
+
+    @Test
+    func rejectsTerminalStateThroughNonterminalTransitionAPI() async throws {
+        let runID = "run-terminal-bypass"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+
+        await #expect(throws: FlowRunLedgerPersistenceError.invalidTransition(
+            runID: runID,
+            from: "nonterminal-transition-api",
+            to: FlowRunStatus.failed.rawValue
+        )) {
+            try await coordinator.transition(runID: runID, to: .failed)
+        }
+        #expect(await store.saveCount == 1)
+    }
+
+    @Test
+    func finalizesAConsistentTerminalProjectionAtomically() async throws {
+        let runID = "run-atomic-finalize"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+        let artifact = try artifactReference(
+            id: "result",
+            path: ".xcircuite/runs/\(runID)/result.json"
+        )
+        let evidence = try evidenceManifest(artifacts: [artifact])
+
+        let finalized = try await coordinator.finalize(
+            runID: runID,
+            status: .succeeded,
+            stages: [FlowStageResult(stageID: "simulation", status: .succeeded)],
+            toolchain: toolchainManifest(runID: runID, stageID: "simulation"),
+            evidence: evidence,
+            artifacts: [artifact]
+        )
+
+        #expect(finalized.runManifest.status == .succeeded)
+        #expect(finalized.stages.first?.status == .succeeded)
+        #expect(finalized.evidence == evidence)
+        #expect(finalized.artifacts == [artifact])
+    }
+
+    @Test
+    func finalizesOutputToInputHandoffAtSharedPhysicalLocation() async throws {
+        let runID = "run-shared-handoff"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+        let path = ".storage/runs/\(runID)/waveforms/pre-simulation.json"
+        let output = try artifactReference(id: "pre-simulation-waveform", path: path)
+        let input = try artifactReference(
+            id: "post-layout-waveform-input",
+            path: path,
+            role: .input
+        )
+        let artifacts = [output, input]
+
+        let finalized = try await coordinator.finalize(
+            runID: runID,
+            status: .succeeded,
+            stages: [
+                FlowStageResult(
+                    stageID: "pre-simulation",
+                    status: .succeeded,
+                    artifacts: [output]
+                ),
+                FlowStageResult(
+                    stageID: "post-layout-comparison",
+                    status: .succeeded,
+                    artifacts: [input]
+                ),
+            ],
+            toolchain: FlowToolchainManifest(
+                runID: runID,
+                stages: [
+                    FlowToolchainStageRecord(
+                        stageID: "pre-simulation",
+                        executorToolID: "simulation-tool"
+                    ),
+                    FlowToolchainStageRecord(
+                        stageID: "post-layout-comparison",
+                        executorToolID: "comparison-tool"
+                    ),
+                ]
+            ),
+            evidence: try evidenceManifest(artifacts: artifacts),
+            artifacts: artifacts
+        )
+
+        #expect(finalized.artifacts.count == 2)
+        #expect(Set(finalized.artifacts.map(\.locator.location)).count == 1)
+        #expect(Set(finalized.artifacts.map(\.locator.role)) == Set([.output, .input]))
+    }
+
+    @Test
+    func rejectsInconsistentTerminalProjectionBeforeSaving() async throws {
+        let runID = "run-invalid-finalize"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+        let evidence = try evidenceManifest(artifacts: [])
+
+        await #expect(throws: FlowRunLedgerPersistenceError.invalidTerminalProjection(
+            runID: runID,
+            issue: .succeededRunContainsUnsuccessfulStage
+        )) {
+            try await coordinator.finalize(
+                runID: runID,
+                status: .succeeded,
+                stages: [FlowStageResult(
+                    stageID: "simulation",
+                    status: .failed,
+                    diagnostics: [FlowDiagnostic(
+                        severity: .error,
+                        code: "FAILED",
+                        message: "failed"
+                    )]
+                )],
+                toolchain: toolchainManifest(runID: runID, stageID: "simulation"),
+                evidence: evidence,
+                artifacts: []
+            )
+        }
+        #expect(await store.saveCount == 1)
     }
 
     @Test
@@ -159,6 +398,114 @@ struct FlowRunLedgerCoordinatorTests {
             }
         }
         #expect(await store.saveCount == 0)
+    }
+
+    @Test
+    func rejectsMutationOfKernelOwnedTerminalProjection() async throws {
+        let runID = "run-protected-projection"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+
+        await #expect(throws: FlowRunLedgerPersistenceError.protectedProjectionMutation(
+            runID: runID,
+            field: "stages"
+        )) {
+            try await coordinator.update(runID: runID) {
+                $0.stages.append(FlowStageResult(stageID: "bypass", status: .succeeded))
+            }
+        }
+        #expect(await store.saveCount == 0)
+    }
+
+    @Test
+    func terminalRunAcceptsTypedAppendOnlySuggestedActionSelection() async throws {
+        let runID = "run-terminal-decision"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+        _ = try await coordinator.finalize(
+            runID: runID,
+            status: .succeeded,
+            stages: [FlowStageResult(stageID: "simulation", status: .succeeded)],
+            toolchain: toolchainManifest(runID: runID, stageID: "simulation"),
+            evidence: try evidenceManifest(artifacts: []),
+            artifacts: []
+        )
+        let action = FlowRunActionRecord(
+            actionID: "select-review-action",
+            runID: runID,
+            actor: FlowRunActor(kind: .human, identifier: "reviewer"),
+            actionKind: FlowRunSuggestedActionSelection.actionKind,
+            status: .succeeded,
+            context: FlowRunActionContext(
+                suggestedAction: FlowRunActionContext.SuggestedAction(
+                    nextActionID: "review-failure",
+                    nextActionKind: "review",
+                    action: FlowRunSuggestedAction(
+                        id: "review-failure",
+                        readiness: .ready,
+                        operation: .reviewRun,
+                        runID: runID,
+                        reason: "Review the terminal failure evidence."
+                    )
+                )
+            )
+        )
+
+        let updated = try await coordinator.appendAction(action)
+
+        #expect(updated.actions == [action])
+        #expect(updated.suggestedActionSelections.count == 1)
+        #expect(updated.suggestedActionSelections.first?.actionRecordID == action.actionID)
+        #expect(updated.evidence?.artifacts == [])
+
+        let repeated = try await coordinator.appendAction(action)
+        #expect(repeated == updated)
+
+        await #expect(throws: FlowRunLedgerPersistenceError.duplicateActionID(
+            runID: runID,
+            actionID: action.actionID
+        )) {
+            try await coordinator.appendAction(
+                FlowRunActionRecord(
+                    actionID: action.actionID,
+                    runID: runID,
+                    actor: action.actor,
+                    actionKind: action.actionKind,
+                    status: .failed,
+                    context: action.context,
+                    createdAt: action.createdAt
+                )
+            )
+        }
+
+        let unretainedOutput = try artifactReference(
+            id: "unretained-output",
+            path: "runs/\(runID)/actions/unretained-output.json"
+        )
+        await #expect(throws: FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
+            runID: runID,
+            path: unretainedOutput.path
+        )) {
+            try await coordinator.appendAction(FlowRunActionRecord(
+                actionID: "bind-unretained-output",
+                runID: runID,
+                actor: FlowRunActor(kind: .agent, identifier: "agent"),
+                actionKind: "analysis.bind-output",
+                status: .succeeded,
+                outputs: [unretainedOutput]
+            ))
+        }
+
+        await #expect(throws: FlowRunLedgerPersistenceError.protectedProjectionMutation(
+            runID: runID,
+            field: "actions"
+        )) {
+            try await coordinator.update(runID: runID) { ledger in
+                ledger.actions.removeAll()
+                ledger.suggestedActionSelections.removeAll()
+            }
+        }
     }
 
     @Test
@@ -221,12 +568,16 @@ struct FlowRunLedgerCoordinatorTests {
         }
     }
 
-    private func artifactReference(id: String, path: String) throws -> ArtifactReference {
+    private func artifactReference(
+        id: String,
+        path: String,
+        role: ArtifactRole = .output
+    ) throws -> ArtifactReference {
         ArtifactReference(
             id: try ArtifactID(rawValue: id),
             locator: ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .output,
+                role: role,
                 kind: .report,
                 format: .json
             ),
@@ -235,6 +586,22 @@ struct FlowRunLedgerCoordinatorTests {
                 hexadecimalValue: String(repeating: "0", count: 64)
             ),
             byteCount: 0
+        )
+    }
+
+    private func evidenceManifest(artifacts: [ArtifactReference]) throws -> EvidenceManifest {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_100)
+        return EvidenceManifest(
+            provenance: try ExecutionProvenance(
+                producer: ProducerIdentity(
+                    kind: .engine,
+                    identifier: "ledger-test",
+                    version: "1"
+                ),
+                startedAt: timestamp,
+                completedAt: timestamp
+            ),
+            artifacts: artifacts
         )
     }
 
@@ -275,6 +642,21 @@ struct FlowRunLedgerCoordinatorTests {
     }
 }
 
+private func toolchainManifest(
+    runID: String,
+    stageID: String
+) -> FlowToolchainManifest {
+    FlowToolchainManifest(
+        runID: runID,
+        stages: [
+            FlowToolchainStageRecord(
+                stageID: stageID,
+                executorToolID: "test-tool"
+            ),
+        ]
+    )
+}
+
 private actor CoordinatedCASLedgerStore: FlowRunLedgerPersisting {
     private var ledger: FlowRunLedger
     private var loadCount = 0
@@ -298,7 +680,7 @@ private actor CoordinatedCASLedgerStore: FlowRunLedgerPersisting {
         return snapshot
     }
 
-    func saveRunLedger(_ proposed: FlowRunLedger) async throws {
+    func saveRunLedger(_ proposed: FlowRunLedger) async throws -> FlowRunLedger {
         let expected = ledger.runManifest.revision + 1
         guard proposed.runManifest.revision == expected else {
             throw FlowRunLedgerPersistenceError.concurrentUpdate(
@@ -308,6 +690,38 @@ private actor CoordinatedCASLedgerStore: FlowRunLedgerPersisting {
             )
         }
         ledger = proposed
+        return proposed
+    }
+
+    func createRunLedger(_ proposed: FlowRunLedger) async throws -> FlowRunLedger {
+        throw FlowRunLedgerPersistenceError.runAlreadyExists(runID: proposed.runID)
+    }
+}
+
+private actor AtomicCreationLedgerStore: FlowRunLedgerPersisting {
+    private(set) var storedLedger: FlowRunLedger?
+
+    func loadRunLedger(runID: String) async throws -> FlowRunLedger {
+        guard let storedLedger, storedLedger.runID == runID else {
+            throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: runID)
+        }
+        return storedLedger
+    }
+
+    func createRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        guard storedLedger == nil else {
+            throw FlowRunLedgerPersistenceError.runAlreadyExists(runID: ledger.runID)
+        }
+        storedLedger = ledger
+        return ledger
+    }
+
+    func saveRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        guard storedLedger != nil else {
+            throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: ledger.runID)
+        }
+        storedLedger = ledger
+        return ledger
     }
 }
 
@@ -318,7 +732,11 @@ private struct FailingLedgerStore: FlowRunLedgerPersisting {
         throw error
     }
 
-    func saveRunLedger(_ ledger: FlowRunLedger) async throws {
+    func saveRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        throw error
+    }
+
+    func createRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
         throw error
     }
 }
@@ -335,8 +753,13 @@ private actor InMemoryLedgerStore: FlowRunLedgerPersisting {
         ledger
     }
 
-    func saveRunLedger(_ ledger: FlowRunLedger) async throws {
+    func saveRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
         self.ledger = ledger
         saveCount += 1
+        return ledger
+    }
+
+    func createRunLedger(_ proposed: FlowRunLedger) async throws -> FlowRunLedger {
+        throw FlowRunLedgerPersistenceError.runAlreadyExists(runID: proposed.runID)
     }
 }

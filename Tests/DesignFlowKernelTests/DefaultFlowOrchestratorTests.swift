@@ -54,6 +54,382 @@ struct DefaultFlowOrchestratorTests {
         #expect(toolchain.stages.allSatisfy { $0.requiredTool == nil })
         #expect(toolchain.stages.allSatisfy { $0.selectedToolID == nil })
         _ = try await assertToolchainArtifact(in: root, runID: "run-1")
+
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
+        let evidence = try #require(ledger.evidence)
+        #expect(evidence.provenance == result.evidence.provenance)
+        #expect(Set(evidence.artifacts).isSubset(of: Set(ledger.artifacts)))
+        #expect(ledger.artifacts.filter { $0.id.rawValue == "run-manifest" }.count == 1)
+    }
+
+    @Test func retainsStageLocalArtifactsThatShareSemanticIdentifiers() async throws {
+        let root = try makeTemporaryRoot("stage-local-artifact-identifiers")
+        defer { removeTemporaryRoot(root) }
+        let runID = "run-stage-local-artifacts"
+        let firstPath = ".xcircuite/runs/\(runID)/stages/001-drc/raw/summary.json"
+        let secondPath = ".xcircuite/runs/\(runID)/stages/002-lvs/raw/summary.json"
+        let firstArtifact = TestArtifactReference(
+            artifactID: "stage-summary",
+            path: firstPath,
+            kind: .report,
+            format: .json
+        )
+        let secondArtifact = TestArtifactReference(
+            artifactID: "stage-summary",
+            path: secondPath,
+            kind: .report,
+            format: .json
+        )
+
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
+            request: FlowOperationRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: runID,
+                intent: "Retain stage-local artifacts",
+                stages: [
+                    FlowStageDefinition(stageID: "001-drc", displayName: "DRC"),
+                    FlowStageDefinition(stageID: "002-lvs", displayName: "LVS"),
+                ]
+            ),
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: [
+                SummaryStageExecutor(
+                    stageID: "001-drc",
+                    toolID: "drc-tool",
+                    status: .succeeded,
+                    artifacts: [firstArtifact],
+                    artifactPayloads: [firstPath: Data(#"{"stage":"drc"}"#.utf8)]
+                ),
+                SummaryStageExecutor(
+                    stageID: "002-lvs",
+                    toolID: "lvs-tool",
+                    status: .succeeded,
+                    artifacts: [secondArtifact],
+                    artifactPayloads: [secondPath: Data(#"{"stage":"lvs"}"#.utf8)]
+                ),
+            ]
+        )
+
+        #expect(result.status == .succeeded)
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: runID)
+        let sharedIdentifierArtifacts = ledger.artifacts.filter {
+            $0.id.rawValue == "stage-summary"
+        }
+        #expect(sharedIdentifierArtifacts.count == 2)
+        #expect(Set(sharedIdentifierArtifacts.map(\.path)) == Set([firstPath, secondPath]))
+        #expect(result.stages.allSatisfy { stage in
+            Set(stage.artifacts).isSubset(of: Set(ledger.artifacts))
+        })
+        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+    }
+
+    @Test func executorStageIdentifierMismatchFailsClosedBeforePersistingResult() async throws {
+        let root = try makeTemporaryRoot("stage-id-mismatch")
+        defer { removeTemporaryRoot(root) }
+        let script = StageResultScript(results: [
+            FlowStageResult(stageID: "wrong-stage", status: .succeeded),
+        ])
+
+        await #expect(throws: FlowExecutionError.self) {
+            try await makeTestOrchestrator(projectRoot: root).run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: "run-stage-id-mismatch",
+                    intent: "Reject mismatched executor output",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    ScriptedStageExecutor(stageID: "001-drc", toolID: "drc-tool", script: script),
+                ]
+            )
+        }
+        #expect(fileExists(
+            ".xcircuite/runs/run-stage-id-mismatch/stages/001-drc/result.json",
+            in: root
+        ))
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(
+            runID: "run-stage-id-mismatch"
+        )
+        #expect(ledger.runManifest.status == .failed)
+    }
+
+    @Test func preparedRunArtifactIsVerifiedAndRetainedInTerminalEvidence() async throws {
+        let root = try makeTemporaryRoot("prepared-run-artifact")
+        defer { removeTemporaryRoot(root) }
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let path = ".xcircuite/runs/run-prepared-artifact/toolchain-profile.json"
+
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
+            request: FlowOperationRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: "run-prepared-artifact",
+                intent: "Retain a prepared run artifact",
+                stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+            ),
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: [
+                StubStageExecutor(stageID: "001-drc", toolID: "drc-tool", status: .succeeded),
+            ],
+            artifactPreparer: TestRunArtifactPreparer(
+                infrastructure: infrastructure,
+                path: path,
+                payload: Data(#"{"profile":"local"}"#.utf8)
+            )
+        )
+
+        #expect(result.status == .succeeded)
+        let ledger = try await infrastructure.loadRunLedger(runID: "run-prepared-artifact")
+        #expect(ledger.artifacts.contains { $0.locator.location.value == path })
+        #expect(ledger.evidence?.artifacts.contains { $0.locator.location.value == path } == true)
+    }
+
+    @Test func artifactPreparationFailureFinalizesCreatedRunAsFailed() async throws {
+        let root = try makeTemporaryRoot("setup-failure")
+        defer { removeTemporaryRoot(root) }
+        let runID = "run-setup-failure"
+
+        await #expect(throws: StubStageError.self) {
+            try await makeTestOrchestrator(projectRoot: root).run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: runID,
+                    intent: "Retain setup failure evidence",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    StubStageExecutor(
+                        stageID: "001-drc",
+                        toolID: "drc-tool",
+                        status: .succeeded
+                    ),
+                ],
+                artifactPreparer: ThrowingRunArtifactPreparer()
+            )
+        }
+
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: runID)
+        #expect(ledger.runManifest.status == .failed)
+        #expect(ledger.runManifest.finishedAt != nil)
+        #expect(ledger.stages.map(\.stageID) == ["flow-setup"])
+        #expect(ledger.stages.first?.status == .failed)
+        #expect(ledger.stages.first?.diagnostics.first?.code == "FLOW_RUN_SETUP_FAILED")
+        #expect(ledger.toolchain?.stages.map(\.stageID) == ["flow-setup"])
+        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+    }
+
+    @Test func progressSetupFailureFinalizesRunningRunAsFailed() async throws {
+        let root = try makeTemporaryRoot("progress-setup-failure")
+        defer { removeTemporaryRoot(root) }
+        let runID = "run-progress-setup-failure"
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let orchestrator = DefaultFlowOrchestrator(
+            infrastructure: infrastructure,
+            ledgerPersistence: infrastructure,
+            producer: try testProducer(),
+            progressStore: FlowRunProgressStore(
+                persistence: FailingProgressPersistence(underlying: infrastructure)
+            )
+        )
+
+        await #expect(throws: SetupFault.self) {
+            try await orchestrator.run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: runID,
+                    intent: "Record progress setup failure",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    StubStageExecutor(
+                        stageID: "001-drc",
+                        toolID: "drc-tool",
+                        status: .succeeded
+                    ),
+                ]
+            )
+        }
+
+        let ledger = try await infrastructure.loadRunLedger(runID: runID)
+        #expect(ledger.runManifest.status == .failed)
+        #expect(ledger.runManifest.startedAt != nil)
+        #expect(ledger.runManifest.finishedAt != nil)
+        #expect(ledger.stages.map(\.stageID) == ["flow-setup"])
+        #expect(ledger.toolchain?.stages.map(\.stageID) == ["flow-setup"])
+    }
+
+    @Test func setupAndTerminalizationFailuresAreBothReported() async throws {
+        let root = try makeTemporaryRoot("setup-terminalization-failure")
+        defer { removeTemporaryRoot(root) }
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let ledgerPersistence = FailAfterInitialLedgerSave(underlying: infrastructure)
+        let orchestrator = DefaultFlowOrchestrator(
+            infrastructure: infrastructure,
+            ledgerPersistence: ledgerPersistence,
+            producer: try testProducer(),
+            progressStore: FlowRunProgressStore(persistence: infrastructure)
+        )
+
+        do {
+            _ = try await orchestrator.run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: "run-dual-failure",
+                    intent: "Report both failures",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    StubStageExecutor(
+                        stageID: "001-drc",
+                        toolID: "drc-tool",
+                        status: .succeeded
+                    ),
+                ],
+                artifactPreparer: ThrowingRunArtifactPreparer()
+            )
+            Issue.record("Expected setup terminalization to fail.")
+        } catch let error as FlowExecutionError {
+            guard case .setupFailureTerminalizationFailed(
+                let setup,
+                let terminalization
+            ) = error else {
+                Issue.record("Unexpected flow error: \(error)")
+                return
+            }
+            #expect(setup.message.contains("executionFailed"))
+            #expect(terminalization.message.contains("injectedLedgerSaveFailure"))
+        }
+    }
+
+    @Test func postStartPersistenceFailureFinalizesRunAsFailed() async throws {
+        let root = try makeTemporaryRoot("execution-terminalization")
+        defer { removeTemporaryRoot(root) }
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let progressPersistence = FailingNthProgressPersistence(
+            underlying: infrastructure,
+            failingAppendIndex: 3
+        )
+        let orchestrator = DefaultFlowOrchestrator(
+            infrastructure: infrastructure,
+            ledgerPersistence: infrastructure,
+            producer: try testProducer(),
+            progressStore: FlowRunProgressStore(persistence: progressPersistence)
+        )
+
+        await #expect(throws: SetupFault.progressWriteFailed) {
+            try await orchestrator.run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: "run-execution-terminalization",
+                    intent: "Terminalize a post-start persistence failure",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    StubStageExecutor(
+                        stageID: "001-drc",
+                        toolID: "drc-tool",
+                        status: .succeeded
+                    ),
+                ]
+            )
+        }
+
+        let ledger = try await infrastructure.loadRunLedger(
+            runID: "run-execution-terminalization"
+        )
+        #expect(ledger.runManifest.status == .failed)
+        #expect(ledger.runManifest.finishedAt != nil)
+        #expect(ledger.stages.map(\.stageID) == ["001-drc", "flow-execution"])
+        #expect(ledger.stages.map(\.status) == [.succeeded, .failed])
+        #expect(ledger.toolchain?.stages.map(\.stageID) == ["001-drc", "flow-execution"])
+        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+    }
+
+    @Test func succeededStageWithErrorDiagnosticFailsClosed() async throws {
+        let root = try makeTemporaryRoot("contradictory-stage")
+        defer { removeTemporaryRoot(root) }
+        let script = StageResultScript(results: [
+            FlowStageResult(
+                stageID: "001-drc",
+                status: .succeeded,
+                diagnostics: [
+                    FlowDiagnostic(
+                        severity: .error,
+                        code: "DRC_FAILED",
+                        message: "DRC reported an error."
+                    ),
+                ]
+            ),
+        ])
+
+        await #expect(throws: FlowExecutionError.self) {
+            try await makeTestOrchestrator(projectRoot: root).run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: "run-contradictory-stage",
+                    intent: "Reject contradictory executor output",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    ScriptedStageExecutor(stageID: "001-drc", toolID: "drc-tool", script: script),
+                ]
+            )
+        }
+    }
+
+    @Test func missingReportedArtifactFailsClosed() async throws {
+        let root = try makeTemporaryRoot("missing-stage-artifact")
+        defer { removeTemporaryRoot(root) }
+        let missingPath = ".xcircuite/runs/run-missing-stage-artifact/stages/001-drc/raw/report.json"
+
+        await #expect(throws: FlowExecutionError.self) {
+            try await makeTestOrchestrator(projectRoot: root).run(
+                request: FlowOperationRequest(
+                    workspaceID: try testWorkspaceID(for: root),
+                    runID: "run-missing-stage-artifact",
+                    intent: "Reject missing stage artifact",
+                    stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+                ),
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: [
+                    SummaryStageExecutor(
+                        stageID: "001-drc",
+                        toolID: "drc-tool",
+                        status: .succeeded,
+                        artifacts: [
+                            TestArtifactReference(
+                                artifactID: "missing-drc-report",
+                                path: missingPath,
+                                kind: .report,
+                                format: .json
+                            ),
+                        ]
+                    ),
+                ]
+            )
+        }
+        #expect(fileExists(
+            ".xcircuite/runs/run-missing-stage-artifact/stages/001-drc/result.json",
+            in: root
+        ))
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(
+            runID: "run-missing-stage-artifact"
+        )
+        #expect(ledger.runManifest.status == .failed)
     }
 
     @Test func successfulFlowPersistsProgressEventsForReview() async throws {
@@ -1583,6 +1959,171 @@ private struct StubStageExecutor: FlowStageExecutor {
     ) async throws -> FlowStageResult {
         FlowStageResult(stageID: stage.stageID, status: status)
     }
+}
+
+private struct TestRunArtifactPreparer: FlowRunArtifactPreparing {
+    let infrastructure: TestFlowInfrastructure
+    let path: String
+    let payload: Data
+
+    func prepareArtifacts(
+        runID: String,
+        workspaceID: FlowWorkspaceID
+    ) async throws -> [ArtifactReference] {
+        let locator = ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: path),
+            role: .input,
+            kind: .other,
+            format: .json
+        )
+        let reference = try await infrastructure.persistArtifact(
+            content: payload,
+            id: try ArtifactID(rawValue: "toolchain-profile"),
+            locator: locator,
+            runID: runID,
+            mode: .immutable
+        )
+        return [reference]
+    }
+}
+
+private struct ThrowingRunArtifactPreparer: FlowRunArtifactPreparing {
+    func prepareArtifacts(
+        runID: String,
+        workspaceID: FlowWorkspaceID
+    ) async throws -> [ArtifactReference] {
+        throw StubStageError.executionFailed
+    }
+}
+
+private enum SetupFault: Error {
+    case progressWriteFailed
+    case injectedLedgerSaveFailure
+}
+
+private struct FailingProgressPersistence: FlowRunProgressPersisting {
+    let underlying: any FlowRunProgressPersisting
+
+    func appendProgressEvent(
+        runID: String,
+        kind: FlowRunProgressEventKind,
+        stageID: String?,
+        stageStatus: FlowStageStatus?,
+        runStatus: FlowRunStatus?,
+        message: String,
+        createdAt: Date
+    ) async throws -> FlowRunProgressEvent {
+        throw SetupFault.progressWriteFailed
+    }
+
+    func loadProgressEvents(runID: String) async throws -> [FlowRunProgressEvent] {
+        try await underlying.loadProgressEvents(runID: runID)
+    }
+
+    func persistCancellationRequest(
+        _ request: FlowRunCancellationRequest
+    ) async throws -> ArtifactReference {
+        try await underlying.persistCancellationRequest(request)
+    }
+
+    func loadCancellationRequest(runID: String) async throws -> FlowRunCancellationRequest? {
+        try await underlying.loadCancellationRequest(runID: runID)
+    }
+
+    func runControlArtifacts(runID: String) async throws -> [ArtifactReference] {
+        try await underlying.runControlArtifacts(runID: runID)
+    }
+}
+
+private actor FailingNthProgressPersistence: FlowRunProgressPersisting {
+    let underlying: any FlowRunProgressPersisting
+    let failingAppendIndex: Int
+    private var appendCount = 0
+
+    init(
+        underlying: any FlowRunProgressPersisting,
+        failingAppendIndex: Int
+    ) {
+        self.underlying = underlying
+        self.failingAppendIndex = failingAppendIndex
+    }
+
+    func appendProgressEvent(
+        runID: String,
+        kind: FlowRunProgressEventKind,
+        stageID: String?,
+        stageStatus: FlowStageStatus?,
+        runStatus: FlowRunStatus?,
+        message: String,
+        createdAt: Date
+    ) async throws -> FlowRunProgressEvent {
+        appendCount += 1
+        guard appendCount != failingAppendIndex else {
+            throw SetupFault.progressWriteFailed
+        }
+        return try await underlying.appendProgressEvent(
+            runID: runID,
+            kind: kind,
+            stageID: stageID,
+            stageStatus: stageStatus,
+            runStatus: runStatus,
+            message: message,
+            createdAt: createdAt
+        )
+    }
+
+    func loadProgressEvents(runID: String) async throws -> [FlowRunProgressEvent] {
+        try await underlying.loadProgressEvents(runID: runID)
+    }
+
+    func persistCancellationRequest(
+        _ request: FlowRunCancellationRequest
+    ) async throws -> ArtifactReference {
+        try await underlying.persistCancellationRequest(request)
+    }
+
+    func loadCancellationRequest(runID: String) async throws -> FlowRunCancellationRequest? {
+        try await underlying.loadCancellationRequest(runID: runID)
+    }
+
+    func runControlArtifacts(runID: String) async throws -> [ArtifactReference] {
+        try await underlying.runControlArtifacts(runID: runID)
+    }
+}
+
+private actor FailAfterInitialLedgerSave: FlowRunLedgerPersisting {
+    let underlying: any FlowRunLedgerPersisting
+    private var saveCount = 0
+
+    init(underlying: any FlowRunLedgerPersisting) {
+        self.underlying = underlying
+    }
+
+    func loadRunLedger(runID: String) async throws -> FlowRunLedger {
+        try await underlying.loadRunLedger(runID: runID)
+    }
+
+    func createRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        let created = try await underlying.createRunLedger(ledger)
+        saveCount += 1
+        return created
+    }
+
+    func saveRunLedger(_ ledger: FlowRunLedger) async throws -> FlowRunLedger {
+        defer { saveCount += 1 }
+        guard saveCount == 0 else {
+            throw SetupFault.injectedLedgerSaveFailure
+        }
+        return try await underlying.saveRunLedger(ledger)
+    }
+}
+
+private func testProducer() throws -> ProducerIdentity {
+    try ProducerIdentity(
+        kind: .library,
+        identifier: "design-flow-kernel-tests",
+        version: "1"
+    )
 }
 
 private struct ThrowingStageExecutor: FlowStageExecutor {

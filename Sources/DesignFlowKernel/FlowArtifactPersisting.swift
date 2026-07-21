@@ -14,6 +14,17 @@ public protocol FlowArtifactPersisting: Sendable {
         mode: FlowArtifactPersistenceMode
     ) async throws -> ArtifactReference
 
+    /// Persists content while binding the exact producer identity to the
+    /// returned artifact reference and durable flow projection.
+    func persistArtifact(
+        content: Data,
+        id: ArtifactID?,
+        locator: ArtifactLocator,
+        runID: String,
+        producer: ProducerIdentity,
+        mode: FlowArtifactPersistenceMode
+    ) async throws -> ArtifactReference
+
     func loadArtifactContent(
         for reference: ArtifactReference
     ) async throws -> Data

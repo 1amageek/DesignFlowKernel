@@ -9,4 +9,7 @@ public enum FlowArtifactPersistenceMode: Sendable, Hashable, Codable {
 
     /// Atomically replaces existing content at the destination.
     case replaceable
+
+    /// Extends an audit artifact without permitting existing bytes to change.
+    case appendOnly
 }

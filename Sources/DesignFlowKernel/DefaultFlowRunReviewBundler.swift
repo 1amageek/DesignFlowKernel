@@ -27,24 +27,25 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     public func makeReviewBundle(runID: String, workspaceID: FlowWorkspaceID) async throws -> FlowRunReviewBundle {
         let ledger = try await loader.loadRunLedgerForReview(runID: runID)
         var summary = summarizer.summarize(ledger)
+        summary.actionCount = ledger.actions.lazy.filter(isRunSemanticAction).count
         let integrityByPath = await artifactIntegrityByPath(from: ledger)
         let contentsByPath = try await loadArtifactContents(from: ledger)
         let agentLoopSnapshot = try decodeOptionalRunJSON(
             FlowAgentLoopSnapshot.self,
-            runID: ledger.runID,
-            relativePath: "loop/snapshot.json",
+            artifactID: "agent-loop-snapshot",
+            ledger: ledger,
             contentsByPath: contentsByPath
         )
         let runGuardVerdict = try decodeOptionalRunJSON(
             FlowRunGuardVerdict.self,
-            runID: ledger.runID,
-            relativePath: "loop/guard-verdict.json",
+            artifactID: "run-guard-verdict",
+            ledger: ledger,
             contentsByPath: contentsByPath
         )
         let crossArtifactEvaluation = try decodeOptionalRunJSON(
             FlowCrossArtifactEvaluation.self,
-            runID: ledger.runID,
-            relativePath: "reports/cross-artifact-evaluation.json",
+            artifactID: "cross-artifact-evaluation",
+            ledger: ledger,
             contentsByPath: contentsByPath
         )
         let artifacts = reviewArtifacts(
@@ -93,6 +94,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         return (existing + additional).filter { action in
             seen.insert("\(action.kind):\(action.actionID)").inserted
         }
+    }
+
+    private func isRunSemanticAction(_ action: FlowRunActionRecord) -> Bool {
+        !action.actionKind.hasPrefix("review.")
+            && !action.actionKind.hasPrefix("release.")
     }
 
     private func planningNextActions(
@@ -353,7 +359,46 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             integrityByPath: integrityByPath,
             into: &artifacts
         )
+        appendActionArtifacts(
+            from: ledger,
+            integrityByPath: integrityByPath,
+            into: &artifacts
+        )
         return artifacts
+    }
+
+    private func appendActionArtifacts(
+        from ledger: FlowRunLedger,
+        integrityByPath: [String: ArtifactIntegrity],
+        into artifacts: inout [FlowRunReviewArtifact]
+    ) {
+        var seenPaths = Set(artifacts.map { $0.reference.path })
+        for reference in ledger.actions.flatMap(\.outputs)
+            where isReviewSourceActionArtifact(reference)
+                && seenPaths.insert(reference.path).inserted {
+            artifacts.append(
+                FlowRunReviewArtifact(
+                    reference: reference,
+                    purpose: reviewRole(for: reference),
+                    integrity: artifactIntegrity(
+                        for: reference,
+                        integrity: integrityByPath[reference.path]
+                    )
+                )
+            )
+        }
+    }
+
+    private func isReviewSourceActionArtifact(_ reference: ArtifactReference) -> Bool {
+        switch reference.artifactID {
+        case "agent-loop-snapshot",
+             "run-guard-verdict",
+             "cross-artifact-evaluation",
+             DefaultFlowRunStageArtifactLadderBuilder.artifactID:
+            return true
+        default:
+            return false
+        }
     }
 
     private func reviewRole(for reference: ArtifactReference) -> FlowRunReviewArtifactPurpose {
@@ -393,6 +438,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             }
         }
         for reference in ledger.artifacts {
+            references[reference.path] = reference
+            if let runRelativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
+                references[runRelativePath] = reference
+            }
+        }
+        for reference in ledger.actions.flatMap(\.outputs) {
             references[reference.path] = reference
             if let runRelativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
                 references[runRelativePath] = reference
@@ -1424,12 +1475,17 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
     private func decodeOptionalRunJSON<T: Decodable>(
         _ type: T.Type,
-        runID: String,
-        relativePath: String,
+        artifactID: String,
+        ledger: FlowRunLedger,
         contentsByPath: [String: Data]
     ) throws -> T? {
-        let projectRelativePath = "runs/\(runID)/\(relativePath)"
-        guard let content = contentsByPath[projectRelativePath] else {
+        let reference = (ledger.artifacts + ledger.actions.flatMap(\.outputs)).last {
+            $0.artifactID == artifactID
+        }
+        guard let reference,
+              let content = contentsByPath[reference.path]
+                ?? runRelativePath(for: reference.path, runID: ledger.runID)
+                    .flatMap({ contentsByPath[$0] }) else {
             return nil
         }
         return try JSONDecoder().decode(type, from: content)

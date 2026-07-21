@@ -2,7 +2,7 @@ import CircuiteFoundation
 import Foundation
 
 public struct FlowRunLedger: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var runID: String
     public var runManifest: FlowRunManifest
@@ -12,6 +12,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
     public var designDiff: DesignDiff?
     public var progressEvents: [FlowRunProgressEvent]
     public var cancellationRequest: FlowRunCancellationRequest?
+    public var evidence: EvidenceManifest?
     public var artifacts: [ArtifactReference]
     public var actions: [FlowRunActionRecord]
     public var suggestedActionSelections: [FlowRunSuggestedActionSelection]
@@ -26,6 +27,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         designDiff: DesignDiff? = nil,
         progressEvents: [FlowRunProgressEvent] = [],
         cancellationRequest: FlowRunCancellationRequest? = nil,
+        evidence: EvidenceManifest? = nil,
         artifacts: [ArtifactReference] = [],
         actions: [FlowRunActionRecord] = [],
         suggestedActionSelections: [FlowRunSuggestedActionSelection] = [],
@@ -39,6 +41,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         self.designDiff = designDiff
         self.progressEvents = progressEvents
         self.cancellationRequest = cancellationRequest
+        self.evidence = evidence
         self.artifacts = artifacts
         self.actions = actions
         self.suggestedActionSelections = suggestedActionSelections
@@ -55,6 +58,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         case designDiff
         case progressEvents
         case cancellationRequest
+        case evidence
         case artifacts
         case actions
         case suggestedActionSelections
@@ -82,6 +86,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
             FlowRunCancellationRequest.self,
             forKey: .cancellationRequest
         )
+        evidence = try container.decodeIfPresent(EvidenceManifest.self, forKey: .evidence)
         artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
         actions = try container.decode([FlowRunActionRecord].self, forKey: .actions)
         suggestedActionSelections = try container.decode(
@@ -102,6 +107,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         try container.encodeIfPresent(designDiff, forKey: .designDiff)
         try container.encode(progressEvents, forKey: .progressEvents)
         try container.encodeIfPresent(cancellationRequest, forKey: .cancellationRequest)
+        try container.encodeIfPresent(evidence, forKey: .evidence)
         try container.encode(artifacts, forKey: .artifacts)
         try container.encode(actions, forKey: .actions)
         try container.encode(suggestedActionSelections, forKey: .suggestedActionSelections)

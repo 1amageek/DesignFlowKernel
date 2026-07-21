@@ -1,6 +1,22 @@
 import Foundation
 
 public struct FlowRunActionContext: Sendable, Hashable, Codable {
+    public struct ArtifactEdit: Sendable, Hashable, Codable {
+        public var proposalID: String
+        public var targetPath: String
+        public var operation: String
+
+        public init(
+            proposalID: String,
+            targetPath: String,
+            operation: String
+        ) {
+            self.proposalID = proposalID
+            self.targetPath = targetPath
+            self.operation = operation
+        }
+    }
+
     public struct ReviewDecision: Sendable, Hashable, Codable {
         public var kind: FlowRunReviewDecisionKind
         public var decision: String
@@ -40,15 +56,18 @@ public struct FlowRunActionContext: Sendable, Hashable, Codable {
     }
 
     public var iterationID: String?
+    public var artifactEdit: ArtifactEdit?
     public var reviewDecision: ReviewDecision?
     public var suggestedAction: SuggestedAction?
 
     public init(
         iterationID: String? = nil,
+        artifactEdit: ArtifactEdit? = nil,
         reviewDecision: ReviewDecision? = nil,
         suggestedAction: SuggestedAction? = nil
     ) {
         self.iterationID = iterationID
+        self.artifactEdit = artifactEdit
         self.reviewDecision = reviewDecision
         self.suggestedAction = suggestedAction
     }

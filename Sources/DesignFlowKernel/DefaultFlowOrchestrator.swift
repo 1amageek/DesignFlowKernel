@@ -8,19 +8,22 @@ public struct DefaultFlowOrchestrator: Sendable {
     private let evaluator: ToolTrustEvaluator
     private let progressStore: FlowRunProgressStore
     private let producer: ProducerIdentity
+    private let stageResultValidator: any FlowStageResultValidating
 
     public init(
         infrastructure: any FlowRunInfrastructure,
         ledgerPersistence: any FlowRunLedgerPersisting,
         producer: ProducerIdentity,
         evaluator: ToolTrustEvaluator = ToolTrustEvaluator(),
-        progressStore: FlowRunProgressStore
+        progressStore: FlowRunProgressStore,
+        stageResultValidator: any FlowStageResultValidating = DefaultFlowStageResultValidator()
     ) {
         self.infrastructure = infrastructure
         self.ledgerCoordinator = FlowRunLedgerCoordinator(persistence: ledgerPersistence)
         self.producer = producer
         self.evaluator = evaluator
         self.progressStore = progressStore
+        self.stageResultValidator = stageResultValidator
     }
 
     private enum PersistedApprovalResolution {
@@ -34,7 +37,8 @@ public struct DefaultFlowOrchestrator: Sendable {
         request: FlowOperationRequest,
         toolRegistry: ToolRegistry,
         healthResults: [String: ToolHealthCheckResult],
-        executors: [any FlowStageExecutor]
+        executors: [any FlowStageExecutor],
+        artifactPreparer: (any FlowRunArtifactPreparing)? = nil
     ) async throws -> FlowRunResult {
         let runStartedAt = Date()
         try validate(request: request)
@@ -45,11 +49,11 @@ public struct DefaultFlowOrchestrator: Sendable {
             runID: request.runID,
             requireNew: !request.allowExistingRun
         )
-        let previousRunArtifacts: [ArtifactReference]
+        let createdRun = !request.allowExistingRun
+        var setupArtifacts: [ArtifactReference] = []
         if request.allowExistingRun {
-            previousRunArtifacts = try await ledgerCoordinator.load(runID: request.runID).artifacts
+            _ = try await ledgerCoordinator.load(runID: request.runID)
         } else {
-            previousRunArtifacts = []
             let now = Date()
             let manifest = try FlowRunManifest(
                 runID: request.runID,
@@ -59,7 +63,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 createdAt: now,
                 updatedAt: now
             )
-            try await ledgerCoordinator.save(
+            try await ledgerCoordinator.create(
                 FlowRunLedger(
                     runID: request.runID,
                     runManifest: manifest,
@@ -73,10 +77,64 @@ public struct DefaultFlowOrchestrator: Sendable {
                 )
             )
         }
-        let planReference = try await persistRunPlan(
-            request: request,
-            workspaceID: request.workspaceID
-        )
+        var planReference: ArtifactReference
+        var preparedRunArtifacts: [ArtifactReference] = []
+        do {
+            if let artifactPreparer {
+                let preparedArtifacts = try await artifactPreparer.prepareArtifacts(
+                    runID: request.runID,
+                    workspaceID: request.workspaceID
+                )
+                for artifact in preparedArtifacts {
+                    let integrity = await infrastructure.verifyArtifact(artifact)
+                    guard integrity.isVerified else {
+                        throw FlowExecutionError.runArtifactIntegrityFailure(
+                            artifactID: artifact.id.rawValue,
+                            issues: integrity.issues.map { $0.code.rawValue }
+                        )
+                    }
+                }
+                preparedRunArtifacts = preparedArtifacts
+                setupArtifacts = try mergedArtifactReferences(
+                    setupArtifacts + preparedArtifacts
+                )
+            }
+            planReference = try await persistRunPlan(
+                request: request,
+                workspaceID: request.workspaceID
+            )
+            _ = try await ledgerCoordinator.transition(
+                runID: request.runID,
+                to: .running,
+                registering: preparedRunArtifacts + [planReference]
+            )
+            planReference = try await retainedRunPlanReference(for: request)
+            try await progressStore.appendEvent(
+                runID: request.runID,
+                kind: .runStarted,
+                runStatus: .running,
+                message: "Run \(request.runID) started."
+            )
+        } catch {
+            let setupError = error
+            guard createdRun else {
+                throw setupError
+            }
+            do {
+                try await finalizeSetupFailure(
+                    request: request,
+                    runStartedAt: runStartedAt,
+                    preparedArtifacts: setupArtifacts,
+                    error: setupError
+                )
+            } catch {
+                throw FlowExecutionError.setupFailureTerminalizationFailed(
+                    setup: FlowFailureContext(capturing: setupError),
+                    terminalization: FlowFailureContext(capturing: error)
+                )
+            }
+            throw setupError
+        }
         let makeResult: (FlowRunStatus, [FlowStageResult]) throws -> FlowRunResult = { status, stages in
             let provenance = try ExecutionProvenance(
                 producer: producer,
@@ -91,18 +149,6 @@ public struct DefaultFlowOrchestrator: Sendable {
                 provenance: provenance
             )
         }
-        _ = try await ledgerCoordinator.transition(
-            runID: request.runID,
-            to: .running,
-            registering: [planReference]
-        )
-        try await progressStore.appendEvent(
-            runID: request.runID,
-            kind: .runStarted,
-            runStatus: .running,
-            message: "Run \(request.runID) started."
-        )
-
         let context = FlowExecutionContext(
             workspaceID: request.workspaceID,
             runID: request.runID,
@@ -112,8 +158,19 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
         var stageResults: [FlowStageResult] = []
         var toolchainRecords: [FlowToolchainStageRecord] = []
+        var activeStageID: String?
 
+        do {
         for stage in request.stages {
+            activeStageID = stage.stageID
+            guard let executor = executorsByStageID[stage.stageID] else {
+                throw FlowExecutionError.missingExecutor(stage.stageID)
+            }
+            let configuredToolchainRecord = FlowToolchainStageRecord(
+                stageID: stage.stageID,
+                executorToolID: executor.toolID,
+                requiredTool: stage.requiredTool
+            )
             if let cancellation = try await progressStore.loadCancellationRequest(
                 runID: request.runID,
             ) {
@@ -129,6 +186,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                     workspaceID: request.workspaceID
                 )
                 stageResults.append(blocked)
+                toolchainRecords.append(configuredToolchainRecord)
                 try await progressStore.appendEvent(
                     runID: request.runID,
                     kind: .cancellationObserved,
@@ -148,8 +206,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                     result,
                     workspaceID: request.workspaceID,
                     toolchainProfile: request.toolchainProfile,
-                    toolchainRecords: toolchainRecords,
-                    runLevelArtifacts: previousRunArtifacts + [planReference]
+                    toolchainRecords: toolchainRecords
                 )
                 return result
             }
@@ -158,10 +215,10 @@ public struct DefaultFlowOrchestrator: Sendable {
                !stage.requiresApproval,
                let persisted = try await reusableStageResult(
                    for: stage,
-                   runID: request.runID,
-                   workspaceID: request.workspaceID
-               ) {
+                   runID: request.runID
+            ) {
                 stageResults.append(persisted)
+                toolchainRecords.append(configuredToolchainRecord)
                 try await progressStore.appendEvent(
                     runID: request.runID,
                     kind: progressKind(for: persisted.status),
@@ -190,6 +247,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         workspaceID: request.workspaceID
                     )
                     stageResults.append(result)
+                    toolchainRecords.append(configuredToolchainRecord)
                     try await progressStore.appendEvent(
                         runID: request.runID,
                         kind: progressKind(for: result.status),
@@ -206,6 +264,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         workspaceID: request.workspaceID
                     )
                     stageResults.append(result)
+                    toolchainRecords.append(configuredToolchainRecord)
                     try await progressStore.appendEvent(
                         runID: request.runID,
                         kind: .stageBlocked,
@@ -225,8 +284,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         runResult,
                         workspaceID: request.workspaceID,
                         toolchainProfile: request.toolchainProfile,
-                        toolchainRecords: toolchainRecords,
-                        runLevelArtifacts: previousRunArtifacts + [planReference]
+                        toolchainRecords: toolchainRecords
                     )
                     return runResult
                 case .rejected(let result):
@@ -236,6 +294,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         workspaceID: request.workspaceID
                     )
                     stageResults.append(result)
+                    toolchainRecords.append(configuredToolchainRecord)
                     try await progressStore.appendEvent(
                         runID: request.runID,
                         kind: progressKind(for: result.status),
@@ -255,22 +314,14 @@ public struct DefaultFlowOrchestrator: Sendable {
                         runResult,
                         workspaceID: request.workspaceID,
                         toolchainProfile: request.toolchainProfile,
-                        toolchainRecords: toolchainRecords,
-                        runLevelArtifacts: previousRunArtifacts + [planReference]
+                        toolchainRecords: toolchainRecords
                     )
                     return runResult
                 }
             }
 
-            guard let executor = executorsByStageID[stage.stageID] else {
-                throw FlowExecutionError.missingExecutor(stage.stageID)
-            }
             var preExecutionGates: [FlowGateResult] = []
-            var toolchainRecord = FlowToolchainStageRecord(
-                stageID: stage.stageID,
-                executorToolID: executor.toolID,
-                requiredTool: stage.requiredTool
-            )
+            var toolchainRecord = configuredToolchainRecord
 
             if let requiredTool = stage.requiredTool {
                 let evaluatedTools = await evaluatedToolDecisions(
@@ -328,8 +379,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         result,
                         workspaceID: request.workspaceID,
                         toolchainProfile: request.toolchainProfile,
-                        toolchainRecords: toolchainRecords,
-                        runLevelArtifacts: previousRunArtifacts + [planReference]
+                        toolchainRecords: toolchainRecords
                     )
                     return result
                 }
@@ -377,8 +427,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                         result,
                         workspaceID: request.workspaceID,
                         toolchainProfile: request.toolchainProfile,
-                        toolchainRecords: toolchainRecords,
-                        runLevelArtifacts: previousRunArtifacts + [planReference]
+                        toolchainRecords: toolchainRecords
                     )
                     return result
                 }
@@ -390,14 +439,51 @@ public struct DefaultFlowOrchestrator: Sendable {
             }
             toolchainRecords.append(toolchainRecord)
 
-            let stageOutcome = try await executeStageWithRetry(
-                stage: stage,
-                executor: executor,
+            let stageOutcome: FlowStageExecutionOutcome
+            do {
+                stageOutcome = try await executeStageWithRetry(
+                    stage: stage,
+                    executor: executor,
                     context: context,
                     request: request,
                     planReference: planReference,
-                preExecutionGates: preExecutionGates
-            )
+                    preExecutionGates: preExecutionGates
+                )
+            } catch let error as FlowExecutionError where Self.isStageResultContractFailure(error) {
+                let failed = failedStageResult(
+                    stageID: stage.stageID,
+                    code: "STAGE_RESULT_REJECTED",
+                    message: error.localizedDescription
+                )
+                try await persistStageResult(
+                    failed,
+                    runID: request.runID,
+                    workspaceID: request.workspaceID
+                )
+                stageResults.append(failed)
+                try await progressStore.appendEvent(
+                    runID: request.runID,
+                    kind: .stageFailed,
+                    stageID: stage.stageID,
+                    stageStatus: .failed,
+                    runStatus: .failed,
+                    message: "Stage \(stage.stageID) produced an invalid result."
+                )
+                try await progressStore.appendEvent(
+                    runID: request.runID,
+                    kind: .runFinished,
+                    runStatus: .failed,
+                    message: "Run \(request.runID) failed because a stage result was rejected."
+                )
+                let failedRun = try makeResult(.failed, stageResults)
+                try await persistRunResult(
+                    failedRun,
+                    workspaceID: request.workspaceID,
+                    toolchainProfile: request.toolchainProfile,
+                    toolchainRecords: toolchainRecords
+                )
+                throw error
+            }
             let result = stageOutcome.result
             try await persistStageResult(
                 result,
@@ -426,8 +512,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                     runResult,
                     workspaceID: request.workspaceID,
                     toolchainProfile: request.toolchainProfile,
-                    toolchainRecords: toolchainRecords,
-                    runLevelArtifacts: previousRunArtifacts + [planReference]
+                    toolchainRecords: toolchainRecords
                 )
                 return runResult
             }
@@ -453,8 +538,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                     runResult,
                     workspaceID: request.workspaceID,
                     toolchainProfile: request.toolchainProfile,
-                    toolchainRecords: toolchainRecords,
-                    runLevelArtifacts: previousRunArtifacts + [planReference]
+                    toolchainRecords: toolchainRecords
                 )
                 return runResult
             }
@@ -471,10 +555,28 @@ public struct DefaultFlowOrchestrator: Sendable {
             runResult,
             workspaceID: request.workspaceID,
             toolchainProfile: request.toolchainProfile,
-            toolchainRecords: toolchainRecords,
-            runLevelArtifacts: previousRunArtifacts + [planReference]
+            toolchainRecords: toolchainRecords
         )
         return runResult
+        } catch {
+            let executionError = error
+            do {
+                try await finalizeExecutionFailure(
+                    request: request,
+                    runStartedAt: runStartedAt,
+                    activeStageID: activeStageID,
+                    completedStages: stageResults,
+                    toolchainRecords: toolchainRecords,
+                    error: executionError
+                )
+            } catch {
+                throw FlowExecutionError.executionFailureTerminalizationFailed(
+                    execution: FlowFailureContext(capturing: executionError),
+                    terminalization: FlowFailureContext(capturing: error)
+                )
+            }
+            throw executionError
+        }
     }
 
     private func executeStageWithRetry(
@@ -568,6 +670,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 stage: stage,
                 request: request
             )
+            try await validateStageResult(finalResult, expectedStageID: stage.stageID)
             return FlowStageExecutionOutcome(
                 result: finalResult,
                 runStatusOverride: cancelled ? .cancelled : nil
@@ -684,14 +787,9 @@ public struct DefaultFlowOrchestrator: Sendable {
         case .rejected:
             return .rejected(rejectedStageResult(stageID: stage.stageID, record: record))
         case .approved, .waived:
-            let resultPath = "runs/\(request.runID)/stages/\(stage.stageID)/result.json"
-            guard let reviewedResult: FlowStageResult = try await loadJSONArtifact(
-                FlowStageResult.self,
-                path: resultPath,
-                role: .output,
-                kind: .other,
-                format: .json,
-                workspaceID: request.workspaceID
+            guard let reviewedResult = try await loadPersistedStageResult(
+                stageID: stage.stageID,
+                runID: request.runID
             ) else {
                 let diagnostic = FlowDiagnostic(
                     severity: .error,
@@ -701,16 +799,12 @@ public struct DefaultFlowOrchestrator: Sendable {
                 return .blocked(approvalBindingBlockedStageResult(stageID: stage.stageID, diagnostic: diagnostic))
             }
             if isApprovalApplied(to: reviewedResult) {
-                let approvalInputPath = "runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json"
-                let approvalInputLocator = try artifactLocator(
-                    path: approvalInputPath,
-                    role: .input,
-                    kind: .report,
-                    format: .json
-                )
-                guard let approvalInputContent = try await infrastructure.loadArtifactContent(
-                    at: approvalInputLocator
-                ) else {
+                let approvalInputContent: Data
+                do {
+                    approvalInputContent = try await infrastructure.loadArtifactContent(
+                        for: record.evidence.stageResult
+                    )
+                } catch {
                     let diagnostic = FlowDiagnostic(
                         severity: .error,
                         code: "APPROVAL_REVIEW_INPUT_MISSING",
@@ -771,17 +865,6 @@ public struct DefaultFlowOrchestrator: Sendable {
                     )
                 }
             }
-            _ = try await persistJSONArtifact(
-                reviewedResult,
-                path: "runs/\(request.runID)/stages/\(stage.stageID)/approval-input.json",
-                id: "approval-review-\(stage.stageID.replacingOccurrences(of: ".", with: "-"))",
-                role: .input,
-                kind: .report,
-                format: .json,
-                runID: request.runID,
-                workspaceID: request.workspaceID,
-                mode: .immutable
-            )
             return .approved(approvedStageResult(from: reviewedResult, record: record))
         }
     }
@@ -1099,6 +1182,20 @@ public struct DefaultFlowOrchestrator: Sendable {
         return executorsByStageID
     }
 
+    private static func isStageResultContractFailure(_ error: FlowExecutionError) -> Bool {
+        switch error {
+        case .stageResultIdentifierMismatch, .invalidStageResult, .artifactIntegrityFailure:
+            true
+        case .missingExecutor, .duplicateStageID, .duplicateExecutorStageID,
+             .invalidExecutorToolID, .invalidRetryPolicy, .duplicateRunID,
+             .existingRunPlanMismatch, .missingArtifact, .invalidRunArtifactReference,
+             .conflictingArtifactReference,
+             .runArtifactIntegrityFailure,
+             .setupFailureTerminalizationFailed, .executionFailureTerminalizationFailed:
+            false
+        }
+    }
+
     private func aggregateStatus(_ stageResults: [FlowStageResult]) -> FlowRunStatus {
         if stageResults.contains(where: { $0.status == .failed }) {
             return .failed
@@ -1191,7 +1288,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             runID: request.runID,
             workspaceID: request.workspaceID
         )
-        updated.artifacts = mergedFoundationArtifacts(updated.artifacts + [reference])
+        updated.artifacts = try mergedArtifactReferences(updated.artifacts + [reference])
         return updated
     }
 
@@ -1224,6 +1321,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         runID: String,
         workspaceID: FlowWorkspaceID
     ) async throws {
+        try stageResultValidator.validate(result, expectedStageID: result.stageID)
         _ = try await persistJSONArtifact(
             result,
             path: "runs/\(runID)/stages/\(result.stageID)/result.json",
@@ -1239,21 +1337,73 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func reusableStageResult(
         for stage: FlowStageDefinition,
-        runID: String,
-        workspaceID: FlowWorkspaceID
+        runID: String
     ) async throws -> FlowStageResult? {
-        guard let result: FlowStageResult = try await loadJSONArtifact(
-            FlowStageResult.self,
-            path: "runs/\(runID)/stages/\(stage.stageID)/result.json",
-            role: .output,
-            kind: .other,
-            format: .json,
-            workspaceID: workspaceID
+        guard let result = try await loadPersistedStageResult(
+            stageID: stage.stageID,
+            runID: runID
         ) else { return nil }
-        guard result.stageID == stage.stageID, result.status == .succeeded else {
+        try await validateStageResult(result, expectedStageID: stage.stageID)
+        guard result.status == .succeeded else {
             return nil
         }
         return result
+    }
+
+    private func loadPersistedStageResult(
+        stageID: String,
+        runID: String
+    ) async throws -> FlowStageResult? {
+        guard let artifact = try await loadPersistedStageResultArtifact(
+            stageID: stageID,
+            runID: runID
+        ) else {
+            return nil
+        }
+        return try JSONDecoder().decode(FlowStageResult.self, from: artifact.content)
+    }
+
+    private func loadPersistedStageResultArtifact(
+        stageID: String,
+        runID: String
+    ) async throws -> (reference: ArtifactReference, content: Data)? {
+        let ledger = try await ledgerCoordinator.load(runID: runID)
+        let artifactID = try ArtifactID(rawValue: "\(stageID)-result")
+        let identifierMatches = ledger.artifacts.filter { $0.id == artifactID }
+        guard !identifierMatches.isEmpty else {
+            return nil
+        }
+        let typedMatches = identifierMatches.filter {
+            $0.locator.role == .output
+                && $0.locator.kind == .other
+                && $0.locator.format == .json
+        }
+        guard typedMatches.count == 1, let reference = typedMatches.first else {
+            throw FlowExecutionError.invalidRunArtifactReference(
+                artifactID: artifactID.rawValue,
+                reason: "expected exactly one output JSON stage-result artifact, found \(typedMatches.count)"
+            )
+        }
+        let content = try await infrastructure.loadArtifactContent(for: reference)
+        return (reference, content)
+    }
+
+    private func validateStageResult(
+        _ result: FlowStageResult,
+        expectedStageID: String
+    ) async throws {
+        try stageResultValidator.validate(result, expectedStageID: expectedStageID)
+        for artifact in result.artifacts {
+            let integrity = await infrastructure.verifyArtifact(artifact)
+            guard integrity.isVerified else {
+                throw FlowExecutionError.artifactIntegrityFailure(
+                    stageID: expectedStageID,
+                    artifactID: artifact.id.rawValue,
+                    artifactPath: artifact.locator.location.value,
+                    issues: integrity.issues.map { $0.code.rawValue }
+                )
+            }
+        }
     }
 
     private func blockedStageResult(
@@ -1316,39 +1466,145 @@ public struct DefaultFlowOrchestrator: Sendable {
         return String(describing: error)
     }
 
+    private func finalizeSetupFailure(
+        request: FlowOperationRequest,
+        runStartedAt: Date,
+        preparedArtifacts: [ArtifactReference],
+        error: any Error
+    ) async throws {
+        if !preparedArtifacts.isEmpty {
+            _ = try await ledgerCoordinator.register(
+                runID: request.runID,
+                artifacts: preparedArtifacts
+            )
+        }
+        let ledger = try await ledgerCoordinator.load(runID: request.runID)
+        try await validateFailureProjectionArtifacts(ledger.artifacts)
+        let stageID = "flow-setup"
+        let failure = failedStageResult(
+            stageID: stageID,
+            code: "FLOW_RUN_SETUP_FAILED",
+            message: diagnosticMessage(for: error)
+        )
+        let toolchain = FlowToolchainManifest(
+            runID: request.runID,
+            profile: request.toolchainProfile,
+            stages: [
+                FlowToolchainStageRecord(
+                    stageID: stageID,
+                    executorToolID: producer.identifier
+                ),
+            ]
+        )
+        let provenance = try ExecutionProvenance(
+            producer: producer,
+            inputs: ledger.artifacts.filter { $0.locator.role == .input },
+            startedAt: runStartedAt,
+            completedAt: Date()
+        )
+        _ = try await ledgerCoordinator.finalizeFailure(
+            runID: request.runID,
+            stages: [failure],
+            toolchain: toolchain,
+            provenance: provenance
+        )
+    }
+
+    private func finalizeExecutionFailure(
+        request: FlowOperationRequest,
+        runStartedAt: Date,
+        activeStageID: String?,
+        completedStages: [FlowStageResult],
+        toolchainRecords: [FlowToolchainStageRecord],
+        error: any Error
+    ) async throws {
+        let ledger = try await ledgerCoordinator.load(runID: request.runID)
+        guard !ledger.runManifest.status.isTerminal else {
+            return
+        }
+        try await validateFailureProjectionArtifacts(ledger.artifacts)
+        let completedStageIDs = Set(completedStages.map(\.stageID))
+        let failureStageID: String
+        if let activeStageID, !completedStageIDs.contains(activeStageID) {
+            failureStageID = activeStageID
+        } else {
+            failureStageID = "flow-execution"
+        }
+        let failure = failedStageResult(
+            stageID: failureStageID,
+            code: "FLOW_RUN_EXECUTION_FAILED",
+            message: diagnosticMessage(for: error)
+        )
+        var stages = completedStages.filter { $0.stageID != failureStageID }
+        stages.append(failure)
+        var records = toolchainRecords.filter { $0.stageID != failureStageID }
+        records.append(FlowToolchainStageRecord(
+            stageID: failureStageID,
+            executorToolID: producer.identifier
+        ))
+        let toolchain = FlowToolchainManifest(
+            runID: request.runID,
+            profile: request.toolchainProfile,
+            stages: records
+        )
+        let provenance = try ExecutionProvenance(
+            producer: producer,
+            inputs: ledger.artifacts.filter { $0.locator.role == .input },
+            startedAt: runStartedAt,
+            completedAt: Date()
+        )
+        _ = try await ledgerCoordinator.finalizeFailure(
+            runID: request.runID,
+            stages: stages,
+            toolchain: toolchain,
+            provenance: provenance
+        )
+    }
+
+    private func validateFailureProjectionArtifacts(
+        _ artifacts: [ArtifactReference]
+    ) async throws {
+        for artifact in artifacts {
+            let integrity = await infrastructure.verifyArtifact(artifact)
+            guard integrity.isVerified else {
+                throw FlowExecutionError.runArtifactIntegrityFailure(
+                    artifactID: artifact.id.rawValue,
+                    issues: integrity.issues.map { $0.code.rawValue }
+                )
+            }
+        }
+    }
+
     private func persistRunResult(
         _ result: FlowRunResult,
         workspaceID: FlowWorkspaceID,
         toolchainProfile: FlowToolchainProfileRecord?,
-        toolchainRecords: [FlowToolchainStageRecord],
-        runLevelArtifacts: [ArtifactReference]
+        toolchainRecords: [FlowToolchainStageRecord]
     ) async throws {
         let progressArtifacts = try await progressStore.runLevelArtifacts(
             runID: result.runID,
         )
         var stageResultArtifacts: [ArtifactReference] = []
         for stage in result.stages {
-            let locator = try artifactLocator(
-                path: "runs/\(result.runID)/stages/\(stage.stageID)/result.json",
-                role: .output,
-                kind: .other,
-                format: .json
-            )
-            guard let content = try await infrastructure.loadArtifactContent(
-                at: locator
+            guard let persisted = try await loadPersistedStageResultArtifact(
+                stageID: stage.stageID,
+                runID: result.runID
             ) else {
                 throw FlowExecutionError.missingArtifact(
-                    "runs/\(result.runID)/stages/\(stage.stageID)/result.json"
+                    "stage result \(stage.stageID) for run \(result.runID)"
                 )
             }
-            let reference = try await infrastructure.persistArtifact(
-                content: content,
-                id: ArtifactID(rawValue: "\(stage.stageID)-result"),
-                locator: locator,
-                runID: result.runID,
-                mode: .replaceable
+            let retained = try JSONDecoder().decode(
+                FlowStageResult.self,
+                from: persisted.content
             )
-            stageResultArtifacts.append(reference)
+            guard retained == stage else {
+                throw FlowExecutionError.invalidRunArtifactReference(
+                    artifactID: persisted.reference.id.rawValue,
+                    reason: "retained stage result does not match the in-memory terminal projection"
+                )
+            }
+            stageResultArtifacts.append(persisted.reference)
         }
         let toolchainReference = try await persistToolchainManifest(
             runID: result.runID,
@@ -1356,39 +1612,48 @@ public struct DefaultFlowOrchestrator: Sendable {
             records: toolchainRecords,
             workspaceID: workspaceID
         )
+        let runLevelArtifacts = try await ledgerCoordinator.load(
+            runID: result.runID
+        ).artifacts
         let reportedStageArtifacts = result.stages
             .flatMap(\.artifacts)
             .map { $0 }
         var retainedStageArtifacts: [ArtifactReference] = []
         for artifact in reportedStageArtifacts {
             let integrity = await infrastructure.verifyArtifact(artifact)
-            if integrity.isVerified {
-                retainedStageArtifacts.append(artifact)
+            guard integrity.isVerified else {
+                throw FlowExecutionError.artifactIntegrityFailure(
+                    stageID: result.stages.first { $0.artifacts.contains(artifact) }?.stageID ?? "unknown",
+                    artifactID: artifact.id.rawValue,
+                    artifactPath: artifact.locator.location.value,
+                    issues: integrity.issues.map { $0.code.rawValue }
+                )
             }
+            retainedStageArtifacts.append(artifact)
         }
-        let artifacts = mergedFoundationArtifacts(
+        let artifacts = try mergedArtifactReferences(
             runLevelArtifacts
                 + retainedStageArtifacts
                 + stageResultArtifacts
                 + progressArtifacts
                 + [toolchainReference]
         )
-        _ = try await ledgerCoordinator.update(
+        let toolchain = FlowToolchainManifest(
             runID: result.runID,
-        ) { ledger in
-            ledger.stages = result.stages
-            ledger.toolchain = FlowToolchainManifest(
-                runID: result.runID,
-                profile: toolchainProfile,
-                stages: toolchainRecords
-            )
-            ledger.artifacts = artifacts
-            ledger.runManifest.artifacts = artifacts
-        }
-        _ = try await ledgerCoordinator.transition(
+            profile: toolchainProfile,
+            stages: toolchainRecords
+        )
+        let evidence = EvidenceManifest(
+            provenance: result.evidence.provenance,
+            artifacts: artifacts
+        )
+        _ = try await ledgerCoordinator.finalize(
             runID: result.runID,
-            to: result.status,
-            registering: artifacts
+            status: result.status,
+            stages: result.stages,
+            toolchain: toolchain,
+            evidence: evidence,
+            artifacts: artifacts
         )
     }
 
@@ -1429,22 +1694,50 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
     }
 
-    private func mergedArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
-        var byPath: [String: ArtifactReference] = [:]
-        for artifact in artifacts {
-            byPath[artifact.path] = artifact
+    private func retainedRunPlanReference(
+        for request: FlowOperationRequest
+    ) async throws -> ArtifactReference {
+        let ledger = try await ledgerCoordinator.load(runID: request.runID)
+        let candidates = ledger.artifacts.filter {
+            $0.id.rawValue == "run-plan"
+                && $0.locator.role == .input
+                && $0.locator.kind == .other
+                && $0.locator.format == .json
         }
-        return byPath.values.sorted { $0.path < $1.path }
-    }
-
-    private func mergedFoundationArtifacts(
-        _ artifacts: [ArtifactReference]
-    ) -> [ArtifactReference] {
-        var byIdentity: [String: ArtifactReference] = [:]
-        for artifact in artifacts {
-            byIdentity[artifact.id.rawValue] = artifact
+        guard candidates.count == 1, let reference = candidates.first else {
+            throw FlowExecutionError.missingArtifact(
+                "canonical run plan for run \(request.runID)"
+            )
         }
-        return byIdentity.values.sorted { $0.path < $1.path }
+        let integrity = await infrastructure.verifyArtifact(reference)
+        guard integrity.isVerified else {
+            throw FlowExecutionError.runArtifactIntegrityFailure(
+                artifactID: reference.id.rawValue,
+                issues: integrity.issues.map { $0.code.rawValue }
+            )
+        }
+        let retainedPlan: FlowRunPlan
+        do {
+            retainedPlan = try JSONDecoder().decode(
+                FlowRunPlan.self,
+                from: await infrastructure.loadArtifactContent(for: reference)
+            )
+        } catch {
+            throw FlowExecutionError.invalidRunArtifactReference(
+                artifactID: reference.id.rawValue,
+                reason: "canonical run plan cannot be decoded: \(error.localizedDescription)"
+            )
+        }
+        let expectedPlan = FlowRunPlan(
+            runID: request.runID,
+            intent: request.intent,
+            toolchainProfile: request.toolchainProfile,
+            stages: request.stages
+        )
+        guard retainedPlan == expectedPlan else {
+            throw FlowExecutionError.existingRunPlanMismatch(request.runID)
+        }
+        return reference
     }
 
     private func persistToolchainManifest(
@@ -1480,7 +1773,7 @@ public struct DefaultFlowOrchestrator: Sendable {
     ) async throws -> ArtifactReference {
         let content = try encodedPackageJSON(value)
         let artifactID = try id.map(ArtifactID.init(rawValue:))
-        return try await infrastructure.persistArtifact(
+        return try await infrastructure.persistRunControlArtifact(
             content: content,
             id: artifactID,
             locator: try artifactLocator(

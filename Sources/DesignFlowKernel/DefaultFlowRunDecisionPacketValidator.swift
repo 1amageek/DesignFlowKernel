@@ -8,15 +8,18 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
     private let loader: any FlowRunLedgerLoading
     private let persistence: any FlowArtifactPersisting
     private let reviewBundler: any FlowRunReviewBundling
+    private let artifactLocationValidator: any FlowRunArtifactLocationValidator
 
     public init(
         loader: any FlowRunLedgerLoading,
         persistence: any FlowArtifactPersisting,
-        reviewBundler: any FlowRunReviewBundling
+        reviewBundler: any FlowRunReviewBundling,
+        artifactLocationValidator: any FlowRunArtifactLocationValidator = DefaultFlowRunArtifactLocationValidator()
     ) {
         self.loader = loader
         self.persistence = persistence
         self.reviewBundler = reviewBundler
+        self.artifactLocationValidator = artifactLocationValidator
     }
 
     public func validateDecisionPacket(
@@ -39,11 +42,11 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         workspaceID: FlowWorkspaceID,
         packetPath: String
     ) async -> FlowRunDecisionPacketValidationResult {
-        let manifest: FlowRunManifest
+        let ledger: FlowRunLedger
         do {
-            manifest = try await loader.loadRunLedger(
+            ledger = try await loader.loadRunLedger(
                 runID: runID
-            ).runManifest
+            )
         } catch {
             return blockedResult(
                 runID: runID,
@@ -58,16 +61,25 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             )
         }
 
-        let packetReference = manifest.artifacts.first { reference in
+        let retainedArtifacts = ledger.artifacts + ledger.actions.flatMap(\.outputs)
+        let packetCandidates = retainedArtifacts.filter { reference in
             reference.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
-                && matchesStoragePath(reference.path, logicalPath: packetPath)
         }
-        let mismatchedPacketReference = packetReference == nil
-            ? manifest.artifacts.first { reference in
-                reference.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
-                    || matchesStoragePath(reference.path, logicalPath: packetPath)
-            }
+        let matchingPacketReferences = packetCandidates.filter { reference in
+            reference.locator.role == .output
+                && reference.locator.kind == .report
+                && reference.locator.format == .json
+                && artifactLocationValidator.isReference(
+                    reference,
+                    boundTo: packetPath,
+                    allowingContentAddressedVariant: true
+                )
+        }
+        let packetReference = packetCandidates.count == 1
+            ? matchingPacketReferences.first
             : nil
+        let mismatchedPacketReference = packetReference == nil ? packetCandidates.last : nil
+        let resolvedPacketPath = packetReference?.path ?? packetPath
         let packetIntegrity: FlowArtifactIntegrityRecord?
         if let packetReference {
             do {
@@ -99,7 +111,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-artifact-reference-mismatch",
-                    message: "Run manifest decision packet reference must match the artifact ID and requested storage-relative path: \(mismatchedPacketReference.path)"
+                    message: "The retained decision packet reference is not exactly bound to the requested run and decision-packet artifact contract: \(mismatchedPacketReference.path)"
                 )
             )
         } else if packetReference == nil {
@@ -107,7 +119,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-artifact-reference-missing",
-                    message: "Run manifest does not register review/decision-packet.json."
+                    message: "The run ledger does not retain review/decision-packet.json."
                 )
             )
         }
@@ -140,7 +152,7 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             )
             return FlowRunDecisionPacketValidationResult(
                 runID: runID,
-                packetPath: packetPath,
+                packetPath: resolvedPacketPath,
                 status: .blocked,
                 packetArtifactIntegrity: packetIntegrity,
                 diagnostics: diagnostics
@@ -156,15 +168,11 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         diagnostics.append(contentsOf: currentState)
         return validationResult(
             runID: runID,
-            packetPath: packetPath,
+            packetPath: resolvedPacketPath,
             packet: packet,
             packetIntegrity: packetIntegrity,
             diagnostics: diagnostics
         )
-    }
-
-    private func matchesStoragePath(_ actualPath: String, logicalPath: String) -> Bool {
-        actualPath == logicalPath || actualPath.hasSuffix("/\(logicalPath)")
     }
 
     private func contentDiagnostics(

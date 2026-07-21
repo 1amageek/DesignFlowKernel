@@ -12,6 +12,76 @@ private struct StaticReviewBundler: FlowRunReviewBundling {
     }
 }
 
+enum DecisionPacketReferenceMismatch: String, CaseIterable, Sendable {
+    case differentDirectory
+    case arbitraryPrefix
+    case inputRole
+    case otherKind
+    case textFormat
+    case wrongContentDigestPath
+
+    func locator(for reference: ArtifactReference) throws -> ArtifactLocator {
+        let path: String
+        let role: ArtifactRole
+        let kind: ArtifactKind
+        let format: ArtifactFormat
+        switch self {
+        case .differentDirectory:
+            path = ".xcircuite/runs/run-1/reports/decision-packet.json"
+            role = .output
+            kind = .report
+            format = .json
+        case .arbitraryPrefix:
+            path = "evil/runs/run-1/review/decision-packet.json"
+            role = .output
+            kind = .report
+            format = .json
+        case .inputRole:
+            path = reference.path
+            role = .input
+            kind = .report
+            format = .json
+        case .otherKind:
+            path = reference.path
+            role = .output
+            kind = .other
+            format = .json
+        case .textFormat:
+            path = reference.path
+            role = .output
+            kind = .report
+            format = .text
+        case .wrongContentDigestPath:
+            path = ".xcircuite/runs/run-1/review/decision-packet-sha256-\(String(repeating: "0", count: 64)).json"
+            role = .output
+            kind = .report
+            format = .json
+        }
+        return ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: path),
+            role: role,
+            kind: kind,
+            format: format
+        )
+    }
+}
+
+private func advancingRevision(of manifest: FlowRunManifest) throws -> FlowRunManifest {
+    try FlowRunManifest(
+        runID: manifest.runID,
+        status: manifest.status,
+        revision: manifest.revision + 1,
+        actor: manifest.actor,
+        intent: manifest.intent,
+        parentRunID: manifest.parentRunID,
+        createdAt: manifest.createdAt,
+        updatedAt: max(Date(), manifest.updatedAt),
+        startedAt: manifest.startedAt,
+        finishedAt: manifest.finishedAt,
+        artifacts: manifest.artifacts
+    )
+}
+
 private func verifiedTestIntegrity() -> FlowRunReviewArtifactIntegrity {
     FlowRunReviewArtifactIntegrity(
         status: .verified,
@@ -228,7 +298,7 @@ extension FlowRunLedgerSummaryTests {
 	    })
 	}
 
-	@Test func decisionPacketValidatorBlocksArtifactReferenceMismatch() async throws {
+	@Test func decisionPacketValidatorRejectsWrongArtifactIdentityAtLegacyPath() async throws {
 	    let root = try makeTemporaryRoot("agent-decision-packet-reference-mismatch")
 	    defer { removeTemporaryRoot(root) }
 	    let summaryPath = ".xcircuite/runs/run-1/stages/001-drc/raw/drc-summary.json"
@@ -277,9 +347,106 @@ extension FlowRunLedgerSummaryTests {
 	    #expect(validation.status == .blocked)
 	    #expect(validation.packetArtifactIntegrity == nil)
 	    #expect(validation.diagnostics.contains {
-	        $0.code == "decision-packet-artifact-reference-mismatch"
+	        $0.code == "decision-packet-artifact-reference-missing"
+	    })
+	    #expect(validation.diagnostics.contains {
+	        $0.code == "decision-packet-unreadable"
 	    })
 	}
+
+    @Test(arguments: DecisionPacketReferenceMismatch.allCases)
+    func decisionPacketValidatorRejectsMismatchedReferenceBinding(
+        mismatch: DecisionPacketReferenceMismatch
+    ) async throws {
+        let root = try makeTemporaryRoot("decision-packet-binding-\(mismatch.rawValue)")
+        defer { removeTemporaryRoot(root) }
+        try await createBlockedApprovalRun(root: root, runID: "run-1")
+        _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
+            runID: "run-1",
+            workspaceID: try testWorkspaceID(for: root)
+        )
+        let store = await TestFlowInfrastructure.bound(to: root)
+        var ledger = try await store.loadRunLedger(runID: "run-1")
+        let original = try #require(ledger.artifacts.first {
+            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+        })
+        let locator = try mismatch.locator(for: original)
+        let mismatched = ArtifactReference(
+            id: original.id,
+            locator: locator,
+            digest: original.digest,
+            byteCount: original.byteCount,
+            producer: original.producer
+        )
+        ledger.artifacts.removeAll {
+            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+        }
+        ledger.artifacts.append(mismatched)
+        ledger.runManifest = try advancingRevision(of: ledger.runManifest)
+        _ = try await store.saveRunLedger(ledger)
+
+        let validation = try await makeTestDecisionPacketValidator(
+            projectRoot: root
+        ).validateDecisionPacket(
+            runID: "run-1",
+            workspaceID: try testWorkspaceID(for: root)
+        )
+
+        #expect(validation.status == .blocked)
+        #expect(validation.packetArtifactIntegrity == nil)
+        #expect(validation.diagnostics.contains {
+            $0.code == "decision-packet-artifact-reference-mismatch"
+        })
+    }
+
+    @Test func decisionPacketValidatorAcceptsDigestBoundContentAddressedPath() async throws {
+        let root = try makeTemporaryRoot("decision-packet-content-addressed")
+        defer { removeTemporaryRoot(root) }
+        try await createBlockedApprovalRun(root: root, runID: "run-1")
+        _ = try await makeTestDecisionPacketBuilder(projectRoot: root).buildDecisionPacket(
+            runID: "run-1",
+            workspaceID: try testWorkspaceID(for: root)
+        )
+        let store = await TestFlowInfrastructure.bound(to: root)
+        var ledger = try await store.loadRunLedger(runID: "run-1")
+        let original = try #require(ledger.artifacts.first {
+            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+        })
+        let content = try await store.loadArtifactContent(for: original)
+        let path = ".xcircuite/runs/run-1/review/decision-packet-\(original.digest.algorithm.rawValue)-\(original.digest.hexadecimalValue).json"
+        try content.write(to: root.appending(path: path), options: .atomic)
+        let contentAddressed = ArtifactReference(
+            id: original.id,
+            locator: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: path),
+                role: .output,
+                kind: .report,
+                format: .json
+            ),
+            digest: original.digest,
+            byteCount: original.byteCount,
+            producer: original.producer
+        )
+        ledger.artifacts.removeAll {
+            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+        }
+        ledger.artifacts.append(contentAddressed)
+        ledger.runManifest = try advancingRevision(of: ledger.runManifest)
+        _ = try await store.saveRunLedger(ledger)
+
+        let validation = try await makeTestDecisionPacketValidator(
+            projectRoot: root
+        ).validateDecisionPacket(
+            runID: "run-1",
+            workspaceID: try testWorkspaceID(for: root)
+        )
+
+        #expect(validation.packetArtifactIntegrity?.status == .verified)
+        #expect(!validation.diagnostics.contains {
+            $0.code == "decision-packet-artifact-reference-mismatch"
+        })
+        #expect(validation.packetPath == path)
+    }
 
 	@Test func decisionPacketValidatorBlocksUnreadableRunManifestWithDiagnostics() async throws {
 	    let root = try makeTemporaryRoot("agent-decision-packet-validation-missing-manifest")

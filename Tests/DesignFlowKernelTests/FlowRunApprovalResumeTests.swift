@@ -46,7 +46,292 @@ extension FlowRunLedgerSummaryTests {
     let persistedLedger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
     #expect(persistedLedger.approvals == [persisted])
     #expect(persisted.evidence.plan.artifactID == "run-plan")
-    #expect(persisted.evidence.stageResult.artifactID == "001-drc-result")
+    #expect(persisted.evidence.stageResult.artifactID == "approval-review-001-drc")
+    #expect(
+        persisted.evidence.stageResult.path
+            == ".xcircuite/runs/run-1/review/approval-inputs/001-drc-"
+                + persisted.evidence.stageResult.digest.hexadecimalValue
+                + ".json"
+    )
+    let action = try #require(persistedLedger.actions.last {
+        $0.actionKind == FlowRunReviewDecisionKind.approval.rawValue
+    })
+    #expect(action.outputs.count == 1)
+    let approvalReference = try #require(action.outputs.first)
+    #expect(action.inputs == [persisted.evidence.plan, persisted.evidence.stageResult])
+    #expect(approvalReference.artifactID == "approval-001-drc")
+    #expect(approvalReference.locator.role == .output)
+    #expect(approvalReference.locator.kind == .report)
+    #expect(approvalReference.locator.format == .json)
+    let content = try await TestFlowInfrastructure.bound(to: root).loadArtifactContent(
+        for: approvalReference
+    )
+    #expect(try JSONDecoder().decode(FlowApprovalRecord.self, from: content) == persisted)
+}
+
+@Test func approvalRecorderRejectsDuplicateStageDecision() async throws {
+    let root = try makeTemporaryRoot("agent-approval-duplicate")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    let recorder = await makeTestApprovalRecorder(projectRoot: root)
+    let request = FlowGateApprovalRequest(
+        workspaceID: try testWorkspaceID(for: root),
+        runID: "run-1",
+        stageID: "001-drc",
+        verdict: .approved,
+        reviewer: "reviewer-1"
+    )
+    _ = try await recorder.recordApproval(request)
+
+    await #expect(throws: FlowRunLedgerPersistenceError.duplicateApprovalID(
+        runID: "run-1",
+        approvalID: "001-drc"
+    )) {
+        try await recorder.recordApproval(request)
+    }
+}
+
+@Test func approvalRecorderRecoversAfterReviewedSnapshotWasRetained() async throws {
+    let root = try makeTemporaryRoot("agent-approval-retention-retry")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    let infrastructure = await TestFlowInfrastructure.bound(to: root)
+    let ledger = try await infrastructure.loadRunLedger(runID: "run-1")
+    let resultReference = try #require(ledger.artifacts.first {
+        $0.artifactID == "001-drc-result"
+    })
+    let resultContent = try await infrastructure.loadArtifactContent(for: resultReference)
+    let digest = try SHA256ContentDigester().digest(data: resultContent)
+    let snapshotReference = ArtifactReference(
+        id: try ArtifactID(rawValue: "approval-review-001-drc"),
+        locator: ArtifactLocator(
+            location: try ArtifactLocation(
+                workspaceRelativePath: ".xcircuite/runs/run-1/review/approval-inputs/001-drc-"
+                    + digest.hexadecimalValue
+                    + ".json"
+            ),
+            role: .output,
+            kind: .report,
+            format: .json
+        ),
+        digest: digest,
+        byteCount: UInt64(resultContent.count)
+    )
+    let retentionAction = FlowRunActionRecord(
+        actionID: "approval-review-001-drc-\(digest.hexadecimalValue)",
+        runID: "run-1",
+        stageID: "001-drc",
+        actor: FlowRunActor(kind: .system, identifier: "design-flow-kernel"),
+        actionKind: "approval.review.retain",
+        status: .succeeded,
+        inputs: [try #require(ledger.artifacts.first { $0.artifactID == "run-plan" })],
+        outputs: [snapshotReference],
+        createdAt: ledger.runManifest.finishedAt ?? ledger.runManifest.createdAt
+    )
+    _ = try await infrastructure.appendActionArtifact(
+        content: resultContent,
+        reference: snapshotReference,
+        action: retentionAction
+    )
+
+    let result = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .approved,
+            reviewer: "reviewer-after-restart",
+            decidedAt: Date(timeIntervalSince1970: 1_900_000_000)
+        )
+    )
+
+    #expect(result.approval.evidence.stageResult == snapshotReference)
+    let persisted = try await infrastructure.loadRunLedger(runID: "run-1")
+    #expect(persisted.actions.filter { $0.actionID == retentionAction.actionID }.count == 1)
+    #expect(persisted.approvals.count == 1)
+}
+
+@Test func approvalArtifactDeletionIsReportedAsIntegrityFailure() async throws {
+    let root = try makeTemporaryRoot("agent-approval-artifact-deleted")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .approved,
+            reviewer: "reviewer-1"
+        )
+    )
+    let store = await TestFlowInfrastructure.bound(to: root)
+    let ledger = try await store.loadRunLedger(runID: "run-1")
+    let reference = try #require(ledger.actions.last?.outputs.first)
+    try FileManager.default.removeItem(at: approvalArtifactURL(reference, root: root))
+
+    await #expect(throws: FlowRunLedgerPersistenceError.self) {
+        _ = try await store.loadArtifactContent(for: reference)
+    }
+}
+
+@Test func approvalArtifactModificationIsReportedAsIntegrityFailure() async throws {
+    let root = try makeTemporaryRoot("agent-approval-artifact-modified")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .approved,
+            reviewer: "reviewer-1"
+        )
+    )
+    let store = await TestFlowInfrastructure.bound(to: root)
+    let ledger = try await store.loadRunLedger(runID: "run-1")
+    let reference = try #require(ledger.actions.last?.outputs.first)
+    try Data(#"{"tampered":true}"#.utf8).write(
+        to: approvalArtifactURL(reference, root: root),
+        options: .atomic
+    )
+
+    await #expect(throws: FlowRunLedgerPersistenceError.self) {
+        _ = try await store.loadArtifactContent(for: reference)
+    }
+}
+
+private func approvalArtifactURL(_ reference: ArtifactReference, root: URL) -> URL {
+    let path = reference.path.hasPrefix(".xcircuite/")
+        ? reference.path
+        : ".xcircuite/\(reference.path)"
+    return root.appending(path: path)
+}
+
+private struct StaticFlowRunLedgerLoader: FlowRunLedgerLoading {
+    let ledger: FlowRunLedger
+
+    func loadRunLedger(runID: String) async throws -> FlowRunLedger {
+        guard runID == ledger.runID else {
+            throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: runID)
+        }
+        return ledger
+    }
+}
+
+private func replacingManifestArtifacts(
+    in manifest: FlowRunManifest,
+    with artifacts: [ArtifactReference]
+) throws -> FlowRunManifest {
+    try FlowRunManifest(
+        runID: manifest.runID,
+        status: manifest.status,
+        revision: manifest.revision + 1,
+        actor: manifest.actor,
+        intent: manifest.intent,
+        parentRunID: manifest.parentRunID,
+        createdAt: manifest.createdAt,
+        updatedAt: max(Date(), manifest.updatedAt),
+        startedAt: manifest.startedAt,
+        finishedAt: manifest.finishedAt,
+        artifacts: artifacts
+    )
+}
+
+private func reference(
+    replacingPath path: String,
+    in reference: ArtifactReference
+) throws -> ArtifactReference {
+    ArtifactReference(
+        id: reference.id,
+        locator: ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: path),
+            role: reference.locator.role,
+            kind: reference.locator.kind,
+            format: reference.locator.format
+        ),
+        digest: reference.digest,
+        byteCount: reference.byteCount,
+        producer: reference.producer
+    )
+}
+
+@Test func approvalRecorderRejectsArbitraryArtifactPathPrefix() async throws {
+    let root = try makeTemporaryRoot("agent-approval-evil-prefix")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    let infrastructure = await TestFlowInfrastructure.bound(to: root)
+    var ledger = try await infrastructure.loadRunLedger(runID: "run-1")
+    let originalPlan = try #require(ledger.artifacts.first { $0.artifactID == "run-plan" })
+    let forgedPlan = try reference(
+        replacingPath: "evil/runs/run-1/plan.json",
+        in: originalPlan
+    )
+    ledger.artifacts.removeAll { $0.artifactID == "run-plan" }
+    ledger.artifacts.append(forgedPlan)
+    let recorder = DefaultFlowGateApprovalRecorder(
+        loader: StaticFlowRunLedgerLoader(ledger: ledger),
+        inspector: await makeTestLedgerInspector(projectRoot: root),
+        approvalPersistence: infrastructure,
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
+            storagePrefix: ".xcircuite"
+        )
+    )
+
+    await #expect(throws: FlowGateApprovalError.evidenceArtifactNotFound(
+        "runs/run-1/plan.json"
+    )) {
+        try await recorder.recordApproval(
+            FlowGateApprovalRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: "run-1",
+                stageID: "001-drc",
+                verdict: .approved,
+                reviewer: "reviewer-1"
+            )
+        )
+    }
+}
+
+@Test func resumerRejectsArbitraryArtifactPathPrefix() async throws {
+    let root = try makeTemporaryRoot("agent-resume-evil-prefix")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    let infrastructure = await TestFlowInfrastructure.bound(to: root)
+    var ledger = try await infrastructure.loadRunLedger(runID: "run-1")
+    let originalPlan = try #require(ledger.runManifest.artifacts.first {
+        $0.artifactID == "run-plan"
+    })
+    let forgedPlan = try reference(
+        replacingPath: "evil/runs/run-1/plan.json",
+        in: originalPlan
+    )
+    var artifacts = ledger.runManifest.artifacts.filter { $0.artifactID != "run-plan" }
+    artifacts.append(forgedPlan)
+    ledger.runManifest = try replacingManifestArtifacts(
+        in: ledger.runManifest,
+        with: artifacts
+    )
+    let resumer = DefaultFlowRunResumer(
+        loader: StaticFlowRunLedgerLoader(ledger: ledger),
+        orchestrator: try await makeTestOrchestrator(projectRoot: root),
+        inspector: await makeTestLedgerInspector(projectRoot: root),
+        artifactPersistence: infrastructure,
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
+            storagePrefix: ".xcircuite"
+        )
+    )
+
+    await #expect(throws: FlowRunResumeError.missingPlanReference("run-1")) {
+        try await resumer.resumeRun(
+            request: FlowRunResumeRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: "run-1"
+            ),
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: []
+        )
+    }
 }
 
 @Test func approvalRecorderReturnsRejectedDecisionAndResumeAction() async throws {
@@ -352,6 +637,43 @@ extension FlowRunLedgerSummaryTests {
     }
 }
 
+@Test func resumerRejectsLedgerPlanThatDiffersFromDigestBoundArtifact() async throws {
+    let root = try makeTemporaryRoot("agent-resume-ledger-plan-mismatch")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+
+    let infrastructure = await TestFlowInfrastructure.bound(to: root)
+    var ledger = try await infrastructure.loadRunLedger(runID: "run-1")
+    let retainedPlan = try #require(ledger.plan)
+    ledger.plan = FlowRunPlan(
+        runID: retainedPlan.runID,
+        intent: "Forged ledger intent",
+        toolchainProfile: retainedPlan.toolchainProfile,
+        stages: retainedPlan.stages
+    )
+    let resumer = DefaultFlowRunResumer(
+        loader: StaticFlowRunLedgerLoader(ledger: ledger),
+        orchestrator: try await makeTestOrchestrator(projectRoot: root),
+        inspector: await makeTestLedgerInspector(projectRoot: root),
+        artifactPersistence: infrastructure,
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
+            storagePrefix: ".xcircuite"
+        )
+    )
+
+    await #expect(throws: FlowRunResumeError.planProjectionMismatch("run-1")) {
+        try await resumer.resumeRun(
+            request: FlowRunResumeRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: "run-1"
+            ),
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: []
+        )
+    }
+}
+
 @Test func staleApprovalBlocksResumeWhenReviewedStageResultChanges() async throws {
     let root = try makeTemporaryRoot("agent-resume-stale-approval")
     defer { removeTemporaryRoot(root) }
@@ -639,6 +961,74 @@ extension FlowRunLedgerSummaryTests {
         atPath: root.appending(path: ".xcircuite/runs/run-1/stages/001-lvs/result.json")
             .path(percentEncoded: false)
     ))
+}
+
+@Test func resumerRejectsAmbiguousPersistedStageResultReferences() async throws {
+    let root = try makeTemporaryRoot("agent-resume-ambiguous-stage-result")
+    defer { removeTemporaryRoot(root) }
+    try await createBlockedApprovalRun(root: root, runID: "run-1")
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            stageID: "001-drc",
+            verdict: .approved,
+            reviewer: "reviewer-1"
+        )
+    )
+
+    let originalResultURL = root.appending(
+        path: ".xcircuite/runs/run-1/stages/001-drc/result.json"
+    )
+    let duplicateResultPath = ".xcircuite/runs/run-1/stages/001-drc/duplicate-result.json"
+    let duplicateResultURL = root.appending(path: duplicateResultPath)
+    try Data(contentsOf: originalResultURL).write(to: duplicateResultURL, options: .atomic)
+    let infrastructure = await TestFlowInfrastructure.bound(to: root)
+    let duplicateReference = try await infrastructure.fileReference(
+        forProjectRelativePath: duplicateResultPath,
+        artifactID: "001-drc-result",
+        role: .output,
+        kind: .other,
+        format: .json,
+        inProjectAt: root,
+        producerRunID: "run-1"
+    )
+    try await infrastructure.upsertRunArtifact(
+        duplicateReference,
+        runID: "run-1",
+        inProjectAt: root
+    )
+
+    let qualification = try await TestToolQualificationFixtures.qualificationRecord(
+        for: drcDescriptor(),
+        projectRoot: root
+    )
+    let descriptor = qualification.descriptor
+    do {
+        _ = try await makeTestRunResumer(projectRoot: root).resumeRun(
+            request: FlowRunResumeRequest(
+                workspaceID: try testWorkspaceID(for: root),
+                runID: "run-1"
+            ),
+            toolRegistry: try ToolRegistry(descriptors: [descriptor]),
+            healthResults: [descriptor.toolID: qualification.health],
+            executors: [
+                SummaryStageExecutor(
+                    stageID: "001-drc",
+                    toolID: "native-drc",
+                    status: .succeeded
+                ),
+            ]
+        )
+        Issue.record("Expected ambiguous stage-result references to be rejected")
+    } catch let error as FlowExecutionError {
+        #expect(error == .invalidRunArtifactReference(
+            artifactID: "001-drc-result",
+            reason: "expected exactly one output JSON stage-result artifact, found 2"
+        ))
+    } catch {
+        throw error
+    }
 }
 
 @Test func resumePreservesRunLevelArtifacts() async throws {

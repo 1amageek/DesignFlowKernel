@@ -66,12 +66,16 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         from ledger: FlowRunLedger,
         envelopes: [FlowArtifactEnvelope]
     ) -> [FlowLoopIterationSummary] {
-        guard !ledger.actions.isEmpty else {
+        let iterationActions = ledger.actions.filter { action in
+            !action.actionKind.hasPrefix("review.")
+                && !action.actionKind.hasPrefix("release.")
+        }
+        guard !iterationActions.isEmpty else {
             return []
         }
 
         var grouped: [(iterationID: String, actions: [FlowRunActionRecord])] = []
-        for (index, action) in ledger.actions.enumerated() {
+        for (index, action) in iterationActions.enumerated() {
             let iterationID = action.context.iterationID ?? "iteration-\(index + 1)"
             if let existingIndex = grouped.firstIndex(where: { $0.iterationID == iterationID }) {
                 grouped[existingIndex].actions.append(action)
