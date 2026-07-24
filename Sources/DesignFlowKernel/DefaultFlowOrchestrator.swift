@@ -79,6 +79,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         }
         var planReference: ArtifactReference
         var preparedRunArtifacts: [ArtifactReference] = []
+        var transitionedToRunning = false
         do {
             if let artifactPreparer {
                 let preparedArtifacts = try await artifactPreparer.prepareArtifacts(
@@ -108,6 +109,7 @@ public struct DefaultFlowOrchestrator: Sendable {
                 to: .running,
                 registering: preparedRunArtifacts + [planReference]
             )
+            transitionedToRunning = true
             planReference = try await retainedRunPlanReference(for: request)
             try await progressStore.appendEvent(
                 runID: request.runID,
@@ -117,7 +119,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
         } catch {
             let setupError = error
-            guard createdRun else {
+            guard createdRun || transitionedToRunning else {
                 throw setupError
             }
             do {
@@ -908,7 +910,8 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func isApprovalApplied(to result: FlowStageResult) -> Bool {
         result.status == .succeeded
             && result.gates.contains {
-                $0.gateID == "approval" && $0.status == .passed
+                $0.gateID == "approval"
+                    && ($0.status == .passed || $0.status == .waived)
             }
     }
 
@@ -1486,15 +1489,21 @@ public struct DefaultFlowOrchestrator: Sendable {
             code: "FLOW_RUN_SETUP_FAILED",
             message: diagnosticMessage(for: error)
         )
+        var retainedStages = ledger.stages.filter { $0.stageID != stageID }
+        retainedStages.append(failure)
+        var retainedToolchainStages = ledger.toolchain?.stages.filter {
+            $0.stageID != stageID
+        } ?? []
+        retainedToolchainStages.append(
+            FlowToolchainStageRecord(
+                stageID: stageID,
+                executorToolID: producer.identifier
+            )
+        )
         let toolchain = FlowToolchainManifest(
             runID: request.runID,
             profile: request.toolchainProfile,
-            stages: [
-                FlowToolchainStageRecord(
-                    stageID: stageID,
-                    executorToolID: producer.identifier
-                ),
-            ]
+            stages: retainedToolchainStages
         )
         let provenance = try ExecutionProvenance(
             producer: producer,
@@ -1504,7 +1513,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
         _ = try await ledgerCoordinator.finalizeFailure(
             runID: request.runID,
-            stages: [failure],
+            stages: retainedStages,
             toolchain: toolchain,
             provenance: provenance
         )

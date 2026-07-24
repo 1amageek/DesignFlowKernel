@@ -5,6 +5,7 @@ public protocol FlowRunInfrastructure:
     FlowArtifactPersisting,
     FlowRunControlArtifactPersisting,
     FlowRunControlLoading,
+    FlowRunLedgerLoading,
     FlowRunWorkspacePreparing,
     FlowRunEvidencePersisting,
     FlowRunProgressPersisting,

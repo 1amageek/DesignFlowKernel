@@ -159,6 +159,40 @@ struct FlowRunLedgerCoordinatorTests {
     }
 
     @Test
+    func terminalRunRejectsGenericArtifactRegistration() async throws {
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-terminal-register"))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: "run-terminal-register", to: .running)
+        let finalized = try await coordinator.finalize(
+            runID: "run-terminal-register",
+            status: .succeeded,
+            stages: [FlowStageResult(stageID: "simulation", status: .succeeded)],
+            toolchain: toolchainManifest(
+                runID: "run-terminal-register",
+                stageID: "simulation"
+            ),
+            evidence: try evidenceManifest(artifacts: []),
+            artifacts: []
+        )
+        let lateArtifact = try artifactReference(
+            id: "late-artifact",
+            path: "runs/run-terminal-register/reports/late.json"
+        )
+
+        await #expect(throws: FlowRunLedgerPersistenceError.protectedProjectionMutation(
+            runID: "run-terminal-register",
+            field: "artifacts"
+        )) {
+            try await coordinator.register(
+                runID: "run-terminal-register",
+                artifacts: [lateArtifact]
+            )
+        }
+        let persisted = try await store.loadRunLedger(runID: "run-terminal-register")
+        #expect(persisted == finalized)
+    }
+
+    @Test
     func rejectsInvalidTerminalTransition() async throws {
         var ledger = try makeLedger(runID: "run-final")
         ledger.runManifest.status = .succeeded

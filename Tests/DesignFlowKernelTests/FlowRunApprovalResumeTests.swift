@@ -542,6 +542,78 @@ private func reference(
     #expect(resumed.result.stages.map(\.stageID) == ["001-drc", "002-drc"])
 }
 
+@Test func waiverRemainsAppliedAcrossASecondResume() async throws {
+    let root = try makeTemporaryRoot("agent-resume-waiver-twice")
+    defer { removeTemporaryRoot(root) }
+    let stages = [
+        FlowStageDefinition(
+            stageID: "001-review",
+            displayName: "Review",
+            requiresApproval: true
+        ),
+        FlowStageDefinition(stageID: "002-verify", displayName: "Verify"),
+    ]
+    let blocked = try await makeTestOrchestrator(projectRoot: root).run(
+        request: FlowOperationRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            intent: "Retain a waiver across retries",
+            stages: stages
+        ),
+        toolRegistry: ToolRegistry(),
+        healthResults: [:],
+        executors: [
+            SummaryStageExecutor(stageID: "001-review", toolID: "review-tool", status: .succeeded),
+            SummaryStageExecutor(stageID: "002-verify", toolID: "verify-tool", status: .failed),
+        ]
+    )
+    #expect(blocked.status == .blocked)
+
+    _ = try await makeTestApprovalRecorder(projectRoot: root).recordApproval(
+        FlowGateApprovalRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1",
+            stageID: "001-review",
+            verdict: .waived,
+            reviewer: "reviewer-1",
+            note: "Accepted for this run."
+        )
+    )
+    let firstResume = try await makeTestRunResumer(projectRoot: root).resumeRun(
+        request: FlowRunResumeRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1"
+        ),
+        toolRegistry: ToolRegistry(),
+        healthResults: [:],
+        executors: [
+            SummaryStageExecutor(stageID: "001-review", toolID: "review-tool", status: .succeeded),
+            SummaryStageExecutor(stageID: "002-verify", toolID: "verify-tool", status: .failed),
+        ]
+    )
+    #expect(firstResume.result.status == .failed)
+    #expect(firstResume.result.stages.first?.gates.contains {
+        $0.gateID == "approval" && $0.status == .waived
+    } == true)
+
+    let secondResume = try await makeTestRunResumer(projectRoot: root).resumeRun(
+        request: FlowRunResumeRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-1"
+        ),
+        toolRegistry: ToolRegistry(),
+        healthResults: [:],
+        executors: [
+            SummaryStageExecutor(stageID: "001-review", toolID: "review-tool", status: .succeeded),
+            SummaryStageExecutor(stageID: "002-verify", toolID: "verify-tool", status: .succeeded),
+        ]
+    )
+    #expect(secondResume.result.status == .succeeded)
+    #expect(secondResume.result.stages.first?.gates.contains {
+        $0.gateID == "approval" && $0.status == .waived
+    } == true)
+}
+
 @Test func ledgerLoaderRejectsStageResultGapInInterruptedRun() async throws {
     let root = try makeTemporaryRoot("agent-ledger-gap")
     defer { removeTemporaryRoot(root) }

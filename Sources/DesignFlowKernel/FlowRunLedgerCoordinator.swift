@@ -290,6 +290,12 @@ public actor FlowRunLedgerCoordinator {
             runID: runID,
             allowsProtectedProjectionMutation: true
         ) { ledger in
+            guard !ledger.runManifest.status.isTerminal else {
+                throw FlowRunLedgerPersistenceError.protectedProjectionMutation(
+                    runID: runID,
+                    field: "artifacts"
+                )
+            }
             ledger.artifacts = try mergedArtifactReferences(ledger.artifacts + artifacts)
             ledger.runManifest.artifacts = ledger.artifacts
         }

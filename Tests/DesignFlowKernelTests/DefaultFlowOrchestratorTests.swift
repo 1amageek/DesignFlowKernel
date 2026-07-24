@@ -265,6 +265,62 @@ struct DefaultFlowOrchestratorTests {
         #expect(ledger.toolchain?.stages.map(\.stageID) == ["flow-setup"])
     }
 
+    @Test func resumeSetupFailureRestoresTerminalFailureInsteadOfLeavingRunningRun() async throws {
+        let root = try makeTemporaryRoot("resume-progress-setup-failure")
+        defer { removeTemporaryRoot(root) }
+        let runID = "run-resume-progress-setup-failure"
+        let infrastructure = await TestFlowInfrastructure.bound(to: root)
+        let request = FlowOperationRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: runID,
+            intent: "Retry a failed run",
+            stages: [FlowStageDefinition(stageID: "001-drc", displayName: "DRC")]
+        )
+        let executors: [any FlowStageExecutor] = [
+            SummaryStageExecutor(
+                stageID: "001-drc",
+                toolID: "drc-tool",
+                status: .failed
+            ),
+        ]
+        let initial = try await makeTestOrchestrator(projectRoot: root).run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: executors
+        )
+        #expect(initial.status == .failed)
+
+        var resumeRequest = request
+        resumeRequest.allowExistingRun = true
+        let progressPersistence = FailingNthProgressPersistence(
+            underlying: infrastructure,
+            failingAppendIndex: 1
+        )
+        let orchestrator = DefaultFlowOrchestrator(
+            infrastructure: infrastructure,
+            ledgerPersistence: infrastructure,
+            producer: try testProducer(),
+            progressStore: FlowRunProgressStore(persistence: progressPersistence)
+        )
+
+        await #expect(throws: SetupFault.progressWriteFailed) {
+            try await orchestrator.run(
+                request: resumeRequest,
+                toolRegistry: ToolRegistry(),
+                healthResults: [:],
+                executors: executors
+            )
+        }
+
+        let ledger = try await infrastructure.loadRunLedger(runID: runID)
+        #expect(ledger.runManifest.status == .failed)
+        #expect(ledger.runManifest.finishedAt != nil)
+        #expect(ledger.stages.map(\.stageID) == ["001-drc", "flow-setup"])
+        #expect(ledger.stages.first?.status == .failed)
+        #expect(ledger.toolchain?.stages.map(\.stageID) == ["001-drc", "flow-setup"])
+    }
+
     @Test func setupAndTerminalizationFailuresAreBothReported() async throws {
         let root = try makeTemporaryRoot("setup-terminalization-failure")
         defer { removeTemporaryRoot(root) }
