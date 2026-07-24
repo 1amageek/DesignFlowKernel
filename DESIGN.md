@@ -36,9 +36,11 @@ flowchart TD
 - `FlowArtifactPersisting` is the canonical artifact seam. It persists, loads,
   and verifies `CircuiteFoundation.ArtifactReference` values while leaving the
   concrete namespace and filesystem boundary to the injected implementation.
-- `FlowRunInfrastructure` composes artifact, run-control, workspace-preparation,
-  progress, evidence, and ToolQualification artifact-reading capabilities for
-  orchestration without introducing a storage facade.
+- `FlowRunInfrastructure` composes artifact, run-control, ledger-loading,
+  workspace-preparation, progress, evidence, and ToolQualification
+  artifact-reading capabilities for orchestration without introducing a
+  storage facade. Stage executors consume this protocol rather than opening a
+  concrete ledger file.
 - `FlowOperationRequest`, stage results, and the run ledger remain domain and
   persistence models owned by this package.
 
@@ -52,6 +54,9 @@ flowchart TD
 4. A `FlowRunLedgerPersisting` implementation persists the run so a later
    invocation can resume the same run. The composing application supplies the
    concrete storage implementation bound to a validated `FlowWorkspaceID`.
+   If resume setup fails after the run returns to `running`, failure
+   finalization appends the `flow-setup` result and tool record without
+   discarding already retained stage or toolchain history.
 5. The orchestrator emits a `FlowRunResult` whose evidence and diagnostics are
    immediately consumable through CircuiteFoundation protocols.
 6. Review artifacts embed `ArtifactReference` as the single source of artifact

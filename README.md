@@ -77,6 +77,7 @@ and owns lifecycle, gates, approvals, retries, and resume.
 | `FlowDiagnostic` / `FlowDiagnosticSeverity` | Structured diagnostics (never opaque strings) |
 | `FlowExecutionContext` / `FlowExecutionError` | Execution environment and typed failures |
 | `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected semantic-action state |
+| `FlowRunLedgerLoading` | Asynchronous canonical ledger-loading seam used by the composed runtime and stage infrastructure |
 | `FlowRunReviewLedgerLoading` | Structurally validated metadata load for per-artifact human review; missing or corrupted evidence remains visible in the review bundle |
 | `FlowRunReviewBundle` | Human / Agent review contract with checklist items, approval records, canonical Foundation artifact references, flow-review purposes, and artifact integrity status for cockpit consumption |
 | `FlowRunProgressSnapshot` | Cursor-based progress event view over `progress.jsonl` |
@@ -112,14 +113,16 @@ filesystem ownership into this package.
 
 ## Approval gate and resume
 
-Stages with `requiresApproval` evaluate an `approval` gate after execution, read from
-the immutable `runs/<run-id>/approvals/<stage-id>.json` `FlowApprovalRecord`.
-Only one decision may be recorded for a stage:
+Stages with `requiresApproval` evaluate an `approval` gate after execution from
+an immutable `FlowApprovalRecord` supplied by the injected persistence
+boundary. DesignFlowKernel defines the decision and evidence contract but does
+not define the record's filesystem location. Only one decision may be recorded
+for a stage:
 
 | Approval state | Gate result | Run behavior |
 |---|---|---|
 | approved | passed | continue to the next stage |
-| waived with a non-empty review reason | passed with `STAGE_WAIVED` warning | continue while preserving the evidence-bound exception |
+| waived with a non-empty review reason | waived with `STAGE_WAIVED` warning | continue while preserving the evidence-bound exception |
 | rejected | failed (`STAGE_REJECTED`) | stage fails, run fails |
 | absent | — | run stops as `blocked` (`APPROVAL_PENDING`) |
 
@@ -127,8 +130,8 @@ Before recording an approval or waiver, the recorder verifies the canonical stag
 result and retains its exact bytes as an immutable, content-addressed action output:
 
 ```text
-stages/<stage-id>/result.json
-  -> review/approval-inputs/<stage-id>-<sha256>.json
+canonical stage-result ArtifactReference
+  -> immutable content-addressed reviewed snapshot
   -> FlowApprovalRecord.evidence.stageResult
   -> approval action input
 ```
@@ -143,6 +146,9 @@ that the reviewer approved. A waiver without a reason is rejected.
 Resume is re-running the same runID: persisted approvals survive run-state re-creation,
 so recording a decision and re-running moves past the gate. The review cockpit and
 the agent both operate on this one ledger — block → decide → resume.
+If setup fails after an interrupted run has transitioned back to `running`, the
+orchestrator retains the prior stage and toolchain records and appends a typed
+`flow-setup` failure. Setup failure does not replace the run's earlier evidence.
 
 ## Release envelope and retention evidence
 
@@ -242,5 +248,8 @@ contract; DesignFlowKernel remains the owner of flow lifecycle and resume.
 
 ```bash
 swift build
-swift test
+perl -e 'alarm 180; exec @ARGV' xcodebuild test \
+  -scheme DesignFlowKernel-Package \
+  -destination 'platform=macOS' \
+  -only-testing:DesignFlowKernelTests
 ```
