@@ -15,7 +15,7 @@ let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileMan
     ? .package(path: "../CircuiteFoundation")
     : .package(
         url: "https://github.com/1amageek/CircuiteFoundation.git",
-        revision: "7abcac83517935c9b9f7553d7016d62cffde259d"
+        revision: "dc792c88e189c822c9f83ea86cf139ee68560dca"
     )
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
@@ -24,7 +24,7 @@ let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileMana
     ? .package(path: "../ToolQualification")
     : .package(
         url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "d572d950a9dccb699413cd5157d901812354444f"
+        revision: "c489783a5673bc2dd0b94c438c2f53a65d9a2d8b"
     )
 
 let package = Package(
