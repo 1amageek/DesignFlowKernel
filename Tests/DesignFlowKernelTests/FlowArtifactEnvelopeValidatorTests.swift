@@ -72,24 +72,31 @@ struct FlowArtifactEnvelopeValidatorTests {
     }
 
     private func validEnvelope() throws -> FlowArtifactEnvelope {
-        let reference = ArtifactReference(
-            id: try ArtifactID(rawValue: "evidence-1"),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: ".xcircuite/runs/run-1/evidence.json"),
-                role: .output,
-                kind: .evidence,
-                format: .json
-            ),
-            digest: try ContentDigest(
+        let reference = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "0", count: 64)
             ),
-            byteCount: 1
+            byteCount: 1,
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .evidence,
+                format: .json
+            )
+        )
+        let binding = try FlowArtifactBinding(
+            logicalID: "evidence-1",
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative("runs/run-1/evidence.json")
+            )
         )
         return FlowArtifactEnvelope(
             artifactID: "evidence-1",
             role: "qualification-evidence",
-            reference: reference,
+            binding: binding,
             evaluationSpec: FlowEvaluationSpec(
                 specID: "spec-1",
                 objective: "Validate finite evidence",

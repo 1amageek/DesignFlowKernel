@@ -3,11 +3,11 @@ import Foundation
 
 public struct FlowRunReleaseEnvelopeBuildResult: Sendable, Hashable, Codable {
     public var envelope: FlowRunReleaseEnvelope
-    public var artifact: ArtifactReference
+    public var artifact: FlowArtifactBinding
 
     public init(
         envelope: FlowRunReleaseEnvelope,
-        artifact: ArtifactReference
+        artifact: FlowArtifactBinding
     ) {
         self.envelope = envelope
         self.artifact = artifact

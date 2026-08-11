@@ -85,14 +85,15 @@ struct FlowRunReleaseRetentionIndexTests {
         )
         let dashboard = try await store.persistArtifact(
             content: dashboardData,
-            id: ArtifactID(rawValue: "retention-dashboard"),
-            locator: ArtifactLocator(
-                location: ArtifactLocation(workspaceRelativePath: "retention/dashboard.json"),
+            logicalID: "retention-dashboard",
+            relativePath: FlowArtifactPath.relative("retention/dashboard.json"),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .json
             ),
             runID: "run-1",
+            producer: nil,
             mode: .replaceable
         )
         var entry = FlowRunReleaseHistoryEntry(
@@ -111,14 +112,15 @@ struct FlowRunReleaseRetentionIndexTests {
         historyData.append(Data("\n".utf8))
         let history = try await store.persistArtifact(
             content: historyData,
-            id: ArtifactID(rawValue: "retention-history"),
-            locator: ArtifactLocator(
-                location: ArtifactLocation(workspaceRelativePath: "retention/history.jsonl"),
+            logicalID: "retention-history",
+            relativePath: FlowArtifactPath.relative("retention/history.jsonl"),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .text
             ),
             runID: "run-1",
+            producer: nil,
             mode: .replaceable
         )
 

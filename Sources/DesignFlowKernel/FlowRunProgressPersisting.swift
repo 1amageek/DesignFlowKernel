@@ -23,7 +23,7 @@ public protocol FlowRunProgressPersisting: Sendable {
 
     func persistCancellationRequest(
         _ request: FlowRunCancellationRequest
-    ) async throws -> ArtifactReference
+    ) async throws -> FlowArtifactBinding
 
     func loadCancellationRequest(
         runID: String
@@ -31,5 +31,5 @@ public protocol FlowRunProgressPersisting: Sendable {
 
     func runControlArtifacts(
         runID: String
-    ) async throws -> [ArtifactReference]
+    ) async throws -> [FlowArtifactBinding]
 }

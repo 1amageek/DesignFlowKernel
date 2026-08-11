@@ -36,9 +36,7 @@ extension FlowRunLedgerSummaryTests {
         loader: store,
         persistence: store,
         reviewBundler: reviewBundler,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
     let result = try await DefaultFlowRunReleaseEnvelopeBuilder(
         decisionPacketValidator: validator,
@@ -49,8 +47,11 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(result.artifact.id.rawValue == "qualification-release-envelope")
-    #expect(result.artifact.locator.location.value == ".xcircuite/runs/run-1/qualification/release-envelope.json")
+    #expect(result.artifact.logicalID == "qualification-release-envelope")
+    #expect(
+        try result.artifact.requireLocalRelativePath().stringValue
+            == "runs/run-1/qualification/release-envelope.json"
+    )
     #expect(result.envelope.status == .blocked)
     #expect(result.envelope.requirements.contains {
         $0.requirementID == "decision-packet-validation" && $0.status == .needsReview
@@ -63,10 +64,13 @@ extension FlowRunLedgerSummaryTests {
     })
 
     let manifest = try await store.loadRunLedger(runID: "run-1").runManifest
-    #expect(manifest.artifacts.contains {
-        $0.artifactID == "qualification-release-envelope"
-            && $0.path == ".xcircuite/runs/run-1/qualification/release-envelope.json"
-    })
+    let releaseBinding = manifest.artifacts.first {
+        $0.logicalID == "qualification-release-envelope"
+    }
+    #expect(
+        try releaseBinding?.requireLocalRelativePath().stringValue
+            == "runs/run-1/qualification/release-envelope.json"
+    )
 }
 
 @Test func releaseEnvelopeBuilderReportsBlockedStatus() async throws {
@@ -612,9 +616,9 @@ extension FlowRunLedgerSummaryTests {
         contractReportURL: contractURL
     )
 
-    #expect(result.artifacts.map(\.artifactID).contains("qualification-corpus-history"))
-    #expect(result.artifacts.map(\.artifactID).contains("qualification-performance-envelope"))
-    #expect(result.artifacts.map(\.artifactID).contains("qualification-contract-audit"))
+    #expect(result.artifacts.map(\.logicalID).contains("qualification-corpus-history"))
+    #expect(result.artifacts.map(\.logicalID).contains("qualification-performance-envelope"))
+    #expect(result.artifacts.map(\.logicalID).contains("qualification-contract-audit"))
     #expect(result.artifacts.count == 3)
     #expect(result.artifacts.allSatisfy {
         $0.producer?.kind == .engine

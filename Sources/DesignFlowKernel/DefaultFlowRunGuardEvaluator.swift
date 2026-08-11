@@ -44,11 +44,11 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
             let content = try encoder.encode(verdict)
             let verdictArtifact = try await persistence.persistArtifact(
                 content: content,
-                id: ArtifactID(rawValue: "run-guard-verdict"),
-                locator: ArtifactLocator(
-                    location: try ArtifactLocation(
-                        workspaceRelativePath: "runs/\(runID)/loop/guard-verdict.json"
-                    ),
+                logicalID: "run-guard-verdict",
+                relativePath: FlowArtifactPath.relative(
+                    "runs/\(runID)/loop/guard-verdict.json"
+                ),
+                descriptor: ArtifactDescriptor(
                     role: .output,
                     kind: .report,
                     format: .json
@@ -56,7 +56,7 @@ public struct DefaultFlowRunGuardEvaluator: Sendable {
                 runID: runID,
                 mode: .replaceable
             )
-            artifactReferences.append(verdictArtifact)
+            artifactReferences.append(verdictArtifact.reference)
         }
         return FlowRunGuardEvaluationResult(
             runID: runID,

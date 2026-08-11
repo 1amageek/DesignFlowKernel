@@ -9,5 +9,5 @@ public protocol FlowRunArtifactPreparing: Sendable {
     func prepareArtifacts(
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async throws -> [ArtifactReference]
+    ) async throws -> [FlowArtifactBinding]
 }

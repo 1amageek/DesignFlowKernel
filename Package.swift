@@ -42,6 +42,7 @@ let package = Package(
             name: "DesignFlowKernel",
             dependencies: [
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
             ]
         ),
@@ -50,6 +51,7 @@ let package = Package(
             dependencies: [
                 "DesignFlowKernel",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
             ]
         ),
     ]

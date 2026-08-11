@@ -1,5 +1,6 @@
 import DesignFlowKernel
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 import Testing
 import ToolQualification
@@ -24,10 +25,10 @@ extension FlowRunLedgerSummaryTests {
 
     #expect(result.approval.verdict == .approved)
     #expect(result.approval.reviewer == "reviewer-1")
-    #expect(!result.approval.evidence.plan.digest.hexadecimalValue.isEmpty)
-    #expect(result.approval.evidence.plan.byteCount > 0)
-    #expect(!result.approval.evidence.stageResult.digest.hexadecimalValue.isEmpty)
-    #expect(result.approval.evidence.stageResult.byteCount > 0)
+    #expect(!result.approval.evidence.plan.reference.digest.hexadecimalValue.isEmpty)
+    #expect(result.approval.evidence.plan.reference.byteCount > 0)
+    #expect(!result.approval.evidence.stageResult.reference.digest.hexadecimalValue.isEmpty)
+    #expect(result.approval.evidence.stageResult.reference.byteCount > 0)
     #expect(result.summary.approvalCount == 1)
     #expect(result.summary.nextActions.contains {
         $0.kind == "resumeRun" && $0.stageID == "001-drc"
@@ -45,12 +46,12 @@ extension FlowRunLedgerSummaryTests {
 
     let persistedLedger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
     #expect(persistedLedger.approvals == [persisted])
-    #expect(persisted.evidence.plan.artifactID == "run-plan")
-    #expect(persisted.evidence.stageResult.artifactID == "approval-review-001-drc")
+    #expect(persisted.evidence.plan.logicalID == "run-plan")
+    #expect(persisted.evidence.stageResult.logicalID == "approval-review-001-drc")
     #expect(
-        persisted.evidence.stageResult.path
-            == ".xcircuite/runs/run-1/review/approval-inputs/001-drc-"
-                + persisted.evidence.stageResult.digest.hexadecimalValue
+        try persisted.evidence.stageResult.requireLocalRelativePath().stringValue
+            == "runs/run-1/review/approval-inputs/001-drc-"
+                + persisted.evidence.stageResult.reference.digest.hexadecimalValue
                 + ".json"
     )
     let action = try #require(persistedLedger.actions.last {
@@ -58,13 +59,15 @@ extension FlowRunLedgerSummaryTests {
     })
     #expect(action.outputs.count == 1)
     let approvalReference = try #require(action.outputs.first)
-    #expect(action.inputs == [persisted.evidence.plan, persisted.evidence.stageResult])
-    #expect(approvalReference.artifactID == "approval-001-drc")
-    #expect(approvalReference.locator.role == .output)
-    #expect(approvalReference.locator.kind == .report)
-    #expect(approvalReference.locator.format == .json)
+    #expect(action.inputs == [persisted.evidence.plan.reference, persisted.evidence.stageResult.reference])
+    let approvalBinding = try #require(persistedLedger.artifacts.first {
+        $0.logicalID == "approval-001-drc" && $0.reference == approvalReference
+    })
+    #expect(approvalBinding.role == .output)
+    #expect(approvalBinding.kind == .report)
+    #expect(approvalBinding.format == .json)
     let content = try await TestFlowInfrastructure.bound(to: root).loadArtifactContent(
-        for: approvalReference
+        for: approvalBinding
     )
     #expect(try JSONDecoder().decode(FlowApprovalRecord.self, from: content) == persisted)
 }
@@ -97,25 +100,22 @@ extension FlowRunLedgerSummaryTests {
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     let infrastructure = await TestFlowInfrastructure.bound(to: root)
     let ledger = try await infrastructure.loadRunLedger(runID: "run-1")
-    let resultReference = try #require(ledger.artifacts.first {
-        $0.artifactID == "001-drc-result"
+    let resultBinding = try #require(ledger.artifacts.first {
+        $0.logicalID == "001-drc-result"
     })
-    let resultContent = try await infrastructure.loadArtifactContent(for: resultReference)
+    let resultContent = try await infrastructure.loadArtifactContent(for: resultBinding)
     let digest = try SHA256ContentDigester().digest(data: resultContent)
-    let snapshotReference = ArtifactReference(
-        id: try ArtifactID(rawValue: "approval-review-001-drc"),
-        locator: ArtifactLocator(
-            location: try ArtifactLocation(
-                workspaceRelativePath: ".xcircuite/runs/run-1/review/approval-inputs/001-drc-"
-                    + digest.hexadecimalValue
-                    + ".json"
-            ),
+    let snapshotPath = try FlowArtifactPath.relative(
+        "runs/run-1/review/approval-inputs/001-drc-" + digest.hexadecimalValue + ".json"
+    )
+    let snapshotReference = try ArtifactReference(
+        digest: digest,
+        byteCount: UInt64(resultContent.count),
+        descriptor: ArtifactDescriptor(
             role: .output,
             kind: .report,
             format: .json
-        ),
-        digest: digest,
-        byteCount: UInt64(resultContent.count)
+        )
     )
     let retentionAction = FlowRunActionRecord(
         actionID: "approval-review-001-drc-\(digest.hexadecimalValue)",
@@ -124,13 +124,16 @@ extension FlowRunLedgerSummaryTests {
         actor: FlowRunActor(kind: .system, identifier: "design-flow-kernel"),
         actionKind: "approval.review.retain",
         status: .succeeded,
-        inputs: [try #require(ledger.artifacts.first { $0.artifactID == "run-plan" })],
+        inputs: [try #require(ledger.artifacts.first { $0.logicalID == "run-plan" }).reference],
         outputs: [snapshotReference],
         createdAt: ledger.runManifest.finishedAt ?? ledger.runManifest.createdAt
     )
     _ = try await infrastructure.appendActionArtifact(
         content: resultContent,
-        reference: snapshotReference,
+        logicalID: "approval-review-001-drc",
+        relativePath: snapshotPath,
+        descriptor: snapshotReference.descriptor,
+        producer: nil,
         action: retentionAction
     )
 
@@ -145,7 +148,8 @@ extension FlowRunLedgerSummaryTests {
         )
     )
 
-    #expect(result.approval.evidence.stageResult == snapshotReference)
+    #expect(result.approval.evidence.stageResult.reference == snapshotReference)
+    #expect(result.approval.evidence.stageResult.logicalID == "approval-review-001-drc")
     let persisted = try await infrastructure.loadRunLedger(runID: "run-1")
     #expect(persisted.actions.filter { $0.actionID == retentionAction.actionID }.count == 1)
     #expect(persisted.approvals.count == 1)
@@ -167,10 +171,11 @@ extension FlowRunLedgerSummaryTests {
     let store = await TestFlowInfrastructure.bound(to: root)
     let ledger = try await store.loadRunLedger(runID: "run-1")
     let reference = try #require(ledger.actions.last?.outputs.first)
-    try FileManager.default.removeItem(at: approvalArtifactURL(reference, root: root))
+    let binding = try #require(ledger.artifacts.first { $0.reference == reference })
+    try FileManager.default.removeItem(at: try approvalArtifactURL(binding, root: root))
 
     await #expect(throws: FlowRunLedgerPersistenceError.self) {
-        _ = try await store.loadArtifactContent(for: reference)
+        _ = try await store.loadArtifactContent(for: binding)
     }
 }
 
@@ -190,21 +195,21 @@ extension FlowRunLedgerSummaryTests {
     let store = await TestFlowInfrastructure.bound(to: root)
     let ledger = try await store.loadRunLedger(runID: "run-1")
     let reference = try #require(ledger.actions.last?.outputs.first)
+    let binding = try #require(ledger.artifacts.first { $0.reference == reference })
     try Data(#"{"tampered":true}"#.utf8).write(
-        to: approvalArtifactURL(reference, root: root),
+        to: try approvalArtifactURL(binding, root: root),
         options: .atomic
     )
 
     await #expect(throws: FlowRunLedgerPersistenceError.self) {
-        _ = try await store.loadArtifactContent(for: reference)
+        _ = try await store.loadArtifactContent(for: binding)
     }
 }
 
-private func approvalArtifactURL(_ reference: ArtifactReference, root: URL) -> URL {
-    let path = reference.path.hasPrefix(".xcircuite/")
-        ? reference.path
-        : ".xcircuite/\(reference.path)"
-    return root.appending(path: path)
+private func approvalArtifactURL(_ binding: FlowArtifactBinding, root: URL) throws -> URL {
+    root
+        .appending(path: ".xcircuite", directoryHint: .isDirectory)
+        .appending(path: try binding.requireLocalRelativePath().stringValue)
 }
 
 private struct StaticFlowRunLedgerLoader: FlowRunLedgerLoading {
@@ -220,7 +225,7 @@ private struct StaticFlowRunLedgerLoader: FlowRunLedgerLoading {
 
 private func replacingManifestArtifacts(
     in manifest: FlowRunManifest,
-    with artifacts: [ArtifactReference]
+    with artifacts: [FlowArtifactBinding]
 ) throws -> FlowRunManifest {
     try FlowRunManifest(
         runID: manifest.runID,
@@ -237,21 +242,19 @@ private func replacingManifestArtifacts(
     )
 }
 
-private func reference(
+private func binding(
     replacingPath path: String,
-    in reference: ArtifactReference
-) throws -> ArtifactReference {
-    ArtifactReference(
-        id: reference.id,
-        locator: ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: path),
-            role: reference.locator.role,
-            kind: reference.locator.kind,
-            format: reference.locator.format
+    in binding: FlowArtifactBinding
+) throws -> FlowArtifactBinding {
+    try FlowArtifactBinding(
+        logicalID: binding.logicalID,
+        reference: binding.reference,
+        availability: .local(
+            artifactID: binding.reference.id,
+            rootID: binding.requireLocalRootID(),
+            relativePath: FlowArtifactPath.relative(path)
         ),
-        digest: reference.digest,
-        byteCount: reference.byteCount,
-        producer: reference.producer
+        producer: binding.producer
     )
 }
 
@@ -261,20 +264,18 @@ private func reference(
     try await createBlockedApprovalRun(root: root, runID: "run-1")
     let infrastructure = await TestFlowInfrastructure.bound(to: root)
     var ledger = try await infrastructure.loadRunLedger(runID: "run-1")
-    let originalPlan = try #require(ledger.artifacts.first { $0.artifactID == "run-plan" })
-    let forgedPlan = try reference(
+    let originalPlan = try #require(ledger.artifacts.first { $0.logicalID == "run-plan" })
+    let forgedPlan = try binding(
         replacingPath: "evil/runs/run-1/plan.json",
         in: originalPlan
     )
-    ledger.artifacts.removeAll { $0.artifactID == "run-plan" }
+    ledger.artifacts.removeAll { $0.logicalID == "run-plan" }
     ledger.artifacts.append(forgedPlan)
     let recorder = DefaultFlowGateApprovalRecorder(
         loader: StaticFlowRunLedgerLoader(ledger: ledger),
         inspector: await makeTestLedgerInspector(projectRoot: root),
         approvalPersistence: infrastructure,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 
     await #expect(throws: FlowGateApprovalError.evidenceArtifactNotFound(
@@ -299,13 +300,13 @@ private func reference(
     let infrastructure = await TestFlowInfrastructure.bound(to: root)
     var ledger = try await infrastructure.loadRunLedger(runID: "run-1")
     let originalPlan = try #require(ledger.runManifest.artifacts.first {
-        $0.artifactID == "run-plan"
+        $0.logicalID == "run-plan"
     })
-    let forgedPlan = try reference(
+    let forgedPlan = try binding(
         replacingPath: "evil/runs/run-1/plan.json",
         in: originalPlan
     )
-    var artifacts = ledger.runManifest.artifacts.filter { $0.artifactID != "run-plan" }
+    var artifacts = ledger.runManifest.artifacts.filter { $0.logicalID != "run-plan" }
     artifacts.append(forgedPlan)
     ledger.runManifest = try replacingManifestArtifacts(
         in: ledger.runManifest,
@@ -316,9 +317,7 @@ private func reference(
         orchestrator: try await makeTestOrchestrator(projectRoot: root),
         inspector: await makeTestLedgerInspector(projectRoot: root),
         artifactPersistence: infrastructure,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 
     await #expect(throws: FlowRunResumeError.missingPlanReference("run-1")) {
@@ -352,8 +351,8 @@ private func reference(
 
     #expect(result.approval.verdict == .rejected)
     #expect(result.approval.stageID == "001-drc")
-    #expect(result.approval.evidence.plan.byteCount > 0)
-    #expect(result.approval.evidence.stageResult.byteCount > 0)
+    #expect(result.approval.evidence.plan.reference.byteCount > 0)
+    #expect(result.approval.evidence.stageResult.reference.byteCount > 0)
     #expect(result.summary.approvalCount == 1)
     #expect(result.summary.nextActions.contains {
         $0.kind == "resumeRun" && $0.stageID == "001-drc"
@@ -661,10 +660,10 @@ private func reference(
     )
     let planURL = root.appending(path: ".xcircuite/runs/run-1/plan.json")
     let resultURL = root.appending(path: ".xcircuite/runs/run-1/stages/001-drc/result.json")
-    #expect(approval.evidence.plan.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: planURL)))
-    #expect(approval.evidence.plan.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: planURL)))
-    #expect(approval.evidence.stageResult.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: resultURL)))
-    #expect(approval.evidence.stageResult.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: resultURL)))
+    #expect(approval.evidence.plan.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: planURL)))
+    #expect(approval.evidence.plan.reference.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: planURL)))
+    #expect(approval.evidence.stageResult.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(fileAt: resultURL)))
+    #expect(approval.evidence.stageResult.reference.byteCount == UInt64(try TestContentDigester().byteCount(fileAt: resultURL)))
 }
 
 @Test func resumerRejectsTamperedPersistedPlan() async throws {
@@ -728,9 +727,7 @@ private func reference(
         orchestrator: try await makeTestOrchestrator(projectRoot: root),
         inspector: await makeTestLedgerInspector(projectRoot: root),
         artifactPersistence: infrastructure,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 
     await #expect(throws: FlowRunResumeError.planProjectionMismatch("run-1")) {
@@ -1155,10 +1152,16 @@ private func reference(
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
     #expect(manifest.artifacts.contains {
-        $0.path == ".xcircuite/runs/run-1/design-diff.json"
+        guard let path = try? $0.requireLocalRelativePath().stringValue else {
+            return false
+        }
+        return path == "runs/run-1/design-diff.json"
     })
     #expect(manifest.artifacts.contains {
-        $0.path == ".xcircuite/runs/run-1/plan.json"
+        guard let path = try? $0.requireLocalRelativePath().stringValue else {
+            return false
+        }
+        return path == "runs/run-1/plan.json"
     })
 }
 

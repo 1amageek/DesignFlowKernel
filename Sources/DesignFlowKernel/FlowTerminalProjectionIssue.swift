@@ -10,7 +10,7 @@ public enum FlowTerminalProjectionIssue: Sendable, Equatable, LocalizedError {
     case failedRunMissingFailedStage
     case blockedOrCancelledRunMissingBlockedStage
     case invalidPartialRunStages
-    case duplicateArtifactLocator
+    case conflictingArtifactMaterialization
     case evidenceArtifactInventoryMismatch
     case provenanceInputNotRetained
     case stageArtifactNotRetained(stageID: String)
@@ -37,8 +37,8 @@ public enum FlowTerminalProjectionIssue: Sendable, Equatable, LocalizedError {
             "A blocked or cancelled run requires a blocked stage."
         case .invalidPartialRunStages:
             "A partial run requires skipped stages and cannot contain failed or blocked stages."
-        case .duplicateArtifactLocator:
-            "Artifact locators must be unique. A physical location may be referenced under distinct handoff roles."
+        case .conflictingArtifactMaterialization:
+            "A physical artifact location cannot resolve to multiple content identities."
         case .evidenceArtifactInventoryMismatch:
             "Evidence artifacts must exactly match the ledger artifact inventory."
         case .provenanceInputNotRetained:

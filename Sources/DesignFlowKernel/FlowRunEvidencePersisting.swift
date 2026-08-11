@@ -8,14 +8,14 @@ public protocol FlowRunEvidencePersisting: Sendable {
 
     func persistCrossArtifactEvaluation(
         _ evaluation: FlowCrossArtifactEvaluation
-    ) async throws -> ArtifactReference
+    ) async throws -> FlowArtifactBinding
 
     func persistLoopIterationSummaries(
         _ iterations: [FlowLoopIterationSummary],
         runID: String
-    ) async throws -> ArtifactReference
+    ) async throws -> FlowArtifactBinding
 
     func persistAgentLoopSnapshot(
         _ snapshot: FlowAgentLoopSnapshot
-    ) async throws -> ArtifactReference
+    ) async throws -> FlowArtifactBinding
 }

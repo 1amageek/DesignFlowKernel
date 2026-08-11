@@ -2,24 +2,24 @@ import CircuiteFoundation
 import Foundation
 
 public struct DesignDiff: Sendable, Hashable, Codable {
-    @FlowSchemaVersion1 public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var runID: String
     public var title: String
     public var actor: String
     public var reviewState: DesignDiffReviewState
-    public var baseSnapshot: ArtifactReference?
-    public var proposedSnapshot: ArtifactReference?
+    public var baseSnapshot: FlowArtifactBinding?
+    public var proposedSnapshot: FlowArtifactBinding?
     public var changes: [DesignDiffChange]
     public var createdAt: Date
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         runID: String,
         title: String,
         actor: String,
         reviewState: DesignDiffReviewState = .proposed,
-        baseSnapshot: ArtifactReference? = nil,
-        proposedSnapshot: ArtifactReference? = nil,
+        baseSnapshot: FlowArtifactBinding? = nil,
+        proposedSnapshot: FlowArtifactBinding? = nil,
         changes: [DesignDiffChange],
         createdAt: Date = Date()
     ) {

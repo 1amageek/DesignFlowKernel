@@ -3,12 +3,11 @@ import Foundation
 
 public struct FlowRunDecisionPacketBuildResult: Sendable, Hashable, Codable {
     public var packet: FlowRunDecisionPacket
-    /// Canonical Foundation reference for the persisted decision packet.
-    public var artifact: ArtifactReference
+    public var artifact: FlowArtifactBinding
 
     public init(
         packet: FlowRunDecisionPacket,
-        artifact: ArtifactReference
+        artifact: FlowArtifactBinding
     ) {
         self.packet = packet
         self.artifact = artifact
@@ -17,7 +16,7 @@ public struct FlowRunDecisionPacketBuildResult: Sendable, Hashable, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         packet = try container.decode(FlowRunDecisionPacket.self, forKey: .packet)
-        artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
+        artifact = try container.decode(FlowArtifactBinding.self, forKey: .artifact)
     }
 
     private enum CodingKeys: String, CodingKey {

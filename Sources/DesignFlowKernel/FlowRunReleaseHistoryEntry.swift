@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 
 public struct FlowRunReleaseHistoryEntry: Sendable, Hashable, Codable {

@@ -7,6 +7,7 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
     public var actor: FlowRunActor
     public var toolchainProfile: FlowToolchainProfileRecord?
     public var stages: [FlowStageDefinition]
+    public var stageInputs: [FlowStageInputBinding]
     public var allowExistingRun: Bool
 
     public init(
@@ -19,6 +20,7 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
         ),
         toolchainProfile: FlowToolchainProfileRecord? = nil,
         stages: [FlowStageDefinition],
+        stageInputs: [FlowStageInputBinding] = [],
         allowExistingRun: Bool = false
     ) {
         self.workspaceID = workspaceID
@@ -27,6 +29,7 @@ public struct FlowOperationRequest: Sendable, Hashable, Codable {
         self.actor = actor
         self.toolchainProfile = toolchainProfile
         self.stages = stages
+        self.stageInputs = stageInputs
         self.allowExistingRun = allowExistingRun
     }
 

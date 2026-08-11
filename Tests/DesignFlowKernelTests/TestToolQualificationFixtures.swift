@@ -1,10 +1,13 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 import ToolQualification
+@testable import DesignFlowKernel
 
 enum TestToolQualificationFixtures {
     private struct EvidenceFixture: Sendable {
         let evidence: ToolEvidence
+        let binding: FlowArtifactBinding
         let data: Data
     }
 
@@ -25,29 +28,33 @@ enum TestToolQualificationFixtures {
         let health = try healthFixture(toolID: descriptor.toolID, issuer: issuer)
         let fixtures = [smoke, corpus, health]
 
+        let infrastructure = await TestFlowInfrastructure.bound(to: projectRoot)
         for fixture in fixtures {
-            guard let artifact = fixture.evidence.artifact else {
-                throw ToolQualificationRecordError.invalidStructure
-            }
-            let url = try artifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
+            let url = projectRoot
+                .appending(path: ".xcircuite", directoryHint: .isDirectory)
+                .appending(path: try fixture.binding.requireLocalRelativePath().stringValue)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
             try fixture.data.write(to: url, options: .atomic)
+            await infrastructure.registerArtifactBinding(fixture.binding)
         }
         for name in ["input", "output", "health-output"] {
-            let reference = try supportingArtifact(
+            let binding = try supportingArtifact(
                 toolID: descriptor.toolID,
                 name: name,
                 producer: issuer
             )
-            let url = try reference.locator.location.resolvedFileURL(relativeTo: projectRoot)
+            let url = projectRoot
+                .appending(path: ".xcircuite", directoryHint: .isDirectory)
+                .appending(path: try binding.requireLocalRelativePath().stringValue)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
             try Data("\(descriptor.toolID):\(name)".utf8).write(to: url, options: .atomic)
+            await infrastructure.registerArtifactBinding(binding)
         }
 
         var qualifiedDescriptor = descriptor
@@ -58,7 +65,6 @@ enum TestToolQualificationFixtures {
             status: .passed,
             evidence: [health.evidence, corpus.evidence]
         )
-        let infrastructure = await TestFlowInfrastructure.bound(to: projectRoot)
         let record = try await DefaultToolQualificationRecordIssuer().issue(
             recordID: "\(descriptor.toolID)-test-qualification-record",
             descriptor: qualifiedDescriptor,
@@ -95,12 +101,12 @@ enum TestToolQualificationFixtures {
                 toolID: toolID,
                 name: "input",
                 producer: issuer
-            )],
+            ).reference],
             outputArtifacts: [try supportingArtifact(
                 toolID: toolID,
                 name: "output",
                 producer: issuer
-            )],
+            ).reference],
             checkedAt: checkedAt
         )
         return try evidenceFixture(
@@ -127,12 +133,12 @@ enum TestToolQualificationFixtures {
                 toolID: toolID,
                 name: "input",
                 producer: issuer
-            )],
+            ).reference],
             outputArtifacts: [try supportingArtifact(
                 toolID: toolID,
                 name: "output",
                 producer: issuer
-            )],
+            ).reference],
             cases: [ToolQualificationCaseOutcome(
                 caseID: "fixture-case",
                 coverageTags: ["fixture"],
@@ -167,12 +173,12 @@ enum TestToolQualificationFixtures {
                 toolID: toolID,
                 name: "input",
                 producer: issuer
-            )],
+            ).reference],
             outputArtifacts: [try supportingArtifact(
                 toolID: toolID,
                 name: "health-output",
                 producer: issuer
-            )],
+            ).reference],
             checkedAt: checkedAt
         )
         return try evidenceFixture(
@@ -191,27 +197,35 @@ enum TestToolQualificationFixtures {
         data: Data,
         producer: ProducerIdentity
     ) throws -> EvidenceFixture {
-        let artifact = ArtifactReference(
-            id: try ArtifactID(rawValue: "\(toolID)-\(kind.rawValue)-evidence"),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(
-                    workspaceRelativePath: ".xcircuite/qualification/test-fixtures/\(toolID)-\(kind.rawValue).json"
-                ),
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .evidence,
                 format: .json
+            )
+        )
+        let binding = try FlowArtifactBinding(
+            logicalID: "\(toolID)-\(kind.rawValue)-evidence",
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(
+                    "qualification/test-fixtures/\(toolID)-\(kind.rawValue).json"
+                )
             ),
-            digest: try SHA256ContentDigester().digest(data: data),
-            byteCount: UInt64(data.count),
             producer: producer
         )
         return EvidenceFixture(
             evidence: ToolEvidence(
                 evidenceID: evidenceID,
                 kind: kind,
-                artifact: artifact,
+                artifact: reference,
                 checkedAt: checkedAt
             ),
+            binding: binding,
             data: data
         )
     }
@@ -220,20 +234,27 @@ enum TestToolQualificationFixtures {
         toolID: String,
         name: String,
         producer: ProducerIdentity
-    ) throws -> ArtifactReference {
+    ) throws -> FlowArtifactBinding {
         let data = Data("\(toolID):\(name)".utf8)
-        return ArtifactReference(
-            id: try ArtifactID(rawValue: "\(toolID)-\(name)"),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(
-                    workspaceRelativePath: ".xcircuite/qualification/test-fixtures/\(toolID)-\(name).json"
-                ),
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .evidence,
                 format: .json
+            )
+        )
+        return try FlowArtifactBinding(
+            logicalID: "\(toolID)-\(name)",
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(
+                    "qualification/test-fixtures/\(toolID)-\(name).json"
+                )
             ),
-            digest: try SHA256ContentDigester().digest(data: data),
-            byteCount: UInt64(data.count),
             producer: producer
         )
     }

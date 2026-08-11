@@ -150,8 +150,8 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(result.artifact.artifactID == "review-stage-artifact-ladder")
-    #expect(result.artifact.path == ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json")
+    #expect(result.artifact.logicalID == "review-stage-artifact-ladder")
+    #expect(try result.artifact.requireLocalRelativePath().stringValue == "runs/\(runID)/review/stage-artifact-ladder.json")
     #expect(result.ladder.runID == runID)
     #expect(result.ladder.readiness == .needsReview)
     #expect(result.ladder.stages.map(\.stageID) == [
@@ -200,7 +200,7 @@ extension FlowRunLedgerSummaryTests {
     #expect(drcStage.artifacts.contains {
         $0.role == "stage-attempts"
             && $0.domain == "retry"
-            && $0.path == ".xcircuite/runs/\(runID)/stages/003-drc/attempts.json"
+            && $0.path == "local:test-workspace/runs/\(runID)/stages/003-drc/attempts.json"
     })
     #expect(drcStage.artifacts.contains {
         $0.domain == "drc"
@@ -241,10 +241,10 @@ extension FlowRunLedgerSummaryTests {
         FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
     )
-    #expect(manifest.artifacts.contains {
-        $0.artifactID == "review-stage-artifact-ladder"
-            && $0.path == ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json"
-    })
+    let ladderBinding = manifest.artifacts.first {
+        $0.logicalID == "review-stage-artifact-ladder"
+    }
+    #expect(try ladderBinding?.requireLocalRelativePath().stringValue == "runs/\(runID)/review/stage-artifact-ladder.json")
     for path in [
         editPath,
         exportPath,
@@ -255,9 +255,14 @@ extension FlowRunLedgerSummaryTests {
         reviewPath,
         ".xcircuite/runs/\(runID)/review/stage-artifact-ladder.json",
     ] {
-        let reference = try #require(manifest.artifacts.first { $0.path == path })
-        #expect(!reference.digest.hexadecimalValue.isEmpty)
-        #expect(reference.byteCount > 0)
+        let relativePath = path.hasPrefix(".xcircuite/")
+            ? String(path.dropFirst(".xcircuite/".count))
+            : path
+        let binding = try #require(manifest.artifacts.first {
+            (try? $0.requireLocalRelativePath().stringValue) == relativePath
+        })
+        #expect(!binding.reference.digest.hexadecimalValue.isEmpty)
+        #expect(binding.reference.byteCount > 0)
     }
 
     let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
@@ -267,13 +272,13 @@ extension FlowRunLedgerSummaryTests {
     let runManifestArtifact = try #require(bundle.artifacts.first {
         $0.purpose == .runManifest
     })
-    #expect(runManifestArtifact.reference.artifactID == "run-manifest")
+    #expect(runManifestArtifact.binding.logicalID == "run-manifest")
     #expect(!runManifestArtifact.reference.digest.hexadecimalValue.isEmpty)
     #expect(runManifestArtifact.reference.byteCount > 0)
     #expect(runManifestArtifact.integrity?.status == .verified)
     #expect(bundle.artifacts.contains {
         $0.purpose == .stageArtifactLadder
-            && $0.reference.artifactID == "review-stage-artifact-ladder"
+            && $0.binding.logicalID == "review-stage-artifact-ladder"
     })
 }
 
@@ -301,7 +306,7 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(result.artifact.artifactID == "review-stage-artifact-ladder")
+    #expect(result.artifact.logicalID == "review-stage-artifact-ladder")
     #expect(result.ladder.stages.count == 1)
     #expect(result.ladder.stages.first?.artifacts.contains {
         $0.domain == "drc" && $0.role == "stage-summary"

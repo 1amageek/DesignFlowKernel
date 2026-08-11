@@ -60,12 +60,12 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     private func loadRunLedger(
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async -> (retainedArtifacts: [ArtifactReference]?, diagnostic: FlowDiagnostic?) {
+    ) async -> (retainedArtifacts: [FlowArtifactBinding]?, diagnostic: FlowDiagnostic?) {
         do {
             let ledger = try await loader.loadRunLedger(
                 runID: runID
             )
-            return (ledger.artifacts + ledger.actions.flatMap(\.outputs), nil)
+            return (ledger.artifacts, nil)
         } catch {
             return (
                 nil,
@@ -82,7 +82,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         runID: String,
         workspaceID: FlowWorkspaceID,
         decisionPacketValidation: FlowRunDecisionPacketValidationResult,
-        retainedArtifacts: [ArtifactReference]?,
+        retainedArtifacts: [FlowArtifactBinding]?,
         maxEvidenceAgeDays: Int?
     ) async -> [FlowRunReleaseEnvelope.Requirement] {
         let corpus = await retainedArtifactRequirement(
@@ -186,12 +186,12 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         ageDiagnosticPrefix: String,
         runID: String,
         workspaceID: FlowWorkspaceID,
-        retainedArtifacts: [ArtifactReference]?,
+        retainedArtifacts: [FlowArtifactBinding]?,
         maxEvidenceAgeDays: Int?
     ) async -> FlowRunReleaseEnvelope.Requirement {
         let path = "runs/\(runID)/\(relativePath)"
         let reference = retainedArtifacts?.last { reference in
-            reference.artifactID == artifactID
+            reference.logicalID == artifactID
         }
         guard let reference else {
             return FlowRunReleaseEnvelope.Requirement(
@@ -211,19 +211,19 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             _ = try await persistence.loadArtifactContent(for: reference)
             integrity = FlowArtifactIntegrityRecord(
                 status: .verified,
-                path: reference.locator.location.value,
-                expectedSHA256: reference.digest.hexadecimalValue,
-                actualSHA256: reference.digest.hexadecimalValue,
-                expectedByteCount: reference.byteCount,
-                actualByteCount: reference.byteCount,
+                path: reference.availabilityDescription,
+                expectedSHA256: reference.reference.digest.hexadecimalValue,
+                actualSHA256: reference.reference.digest.hexadecimalValue,
+                expectedByteCount: reference.reference.byteCount,
+                actualByteCount: reference.reference.byteCount,
                 message: "Artifact content was verified by the injected persistence boundary."
             )
         } catch {
             integrity = FlowArtifactIntegrityRecord(
                 status: .unreadableArtifact,
-                path: reference.locator.location.value,
-                expectedSHA256: reference.digest.hexadecimalValue,
-                expectedByteCount: reference.byteCount,
+                path: reference.availabilityDescription,
+                expectedSHA256: reference.reference.digest.hexadecimalValue,
+                expectedByteCount: reference.reference.byteCount,
                 message: error.localizedDescription
             )
         }
@@ -235,7 +235,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 status: .blocked,
                 purpose: purpose,
                 artifactIDs: [artifactID],
-                artifactPaths: [reference.path],
+                artifactPaths: [reference.availabilityDescription],
                 artifactIntegrity: [integrity],
                 diagnosticCodes: ["\(missingDiagnosticCode)-integrity-\(integrity.status.rawValue)"]
             )
@@ -254,7 +254,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 status: .blocked,
                 purpose: purpose,
                 artifactIDs: [artifactID],
-                artifactPaths: [reference.path],
+                artifactPaths: [reference.availabilityDescription],
                 artifactIntegrity: [integrity],
                 diagnosticCodes: [ageDiagnosticCode]
             )
@@ -273,7 +273,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
                 status: .blocked,
                 purpose: purpose,
                 artifactIDs: [artifactID],
-                artifactPaths: [reference.path],
+                artifactPaths: [reference.availabilityDescription],
                 artifactIntegrity: [integrity],
                 diagnosticCodes: contentDiagnosticCodes
             )
@@ -285,14 +285,14 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
             status: .passed,
             purpose: purpose,
             artifactIDs: [artifactID],
-            artifactPaths: [reference.path],
+            artifactPaths: [reference.availabilityDescription],
             artifactIntegrity: [integrity]
         )
     }
 
     private func releaseArtifactContentDiagnosticCodes(
         artifactID: String,
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID,
         runID: String
     ) async -> [String] {
@@ -313,7 +313,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func corpusHistoryDiagnosticCodes(
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await corpusCountDiagnosticCodes(reference: reference)
@@ -405,7 +405,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func performanceEnvelopeDiagnosticCodes(
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await performanceCountDiagnosticCodes(reference: reference)
@@ -478,7 +478,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func contractAuditDiagnosticCodes(
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID
     ) async -> [String] {
         let countCodes = await contractCountDiagnosticCodes(reference: reference)
@@ -532,7 +532,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         return codes.sorted()
     }
 
-    private func corpusCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+    private func corpusCountDiagnosticCodes(reference: FlowArtifactBinding) async -> [String] {
         do {
             let content = try await persistence.loadArtifactContent(for: reference)
             let document = try JSONDecoder().decode(CorpusCountDocument.self, from: content)
@@ -557,7 +557,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
     }
 
-    private func performanceCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+    private func performanceCountDiagnosticCodes(reference: FlowArtifactBinding) async -> [String] {
         do {
             let content = try await persistence.loadArtifactContent(for: reference)
             let document = try JSONDecoder().decode(PerformanceCountDocument.self, from: content)
@@ -574,7 +574,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         }
     }
 
-    private func contractCountDiagnosticCodes(reference: ArtifactReference) async -> [String] {
+    private func contractCountDiagnosticCodes(reference: FlowArtifactBinding) async -> [String] {
         do {
             let content = try await persistence.loadArtifactContent(for: reference)
             let document = try JSONDecoder().decode(ContractCountDocument.self, from: content)
@@ -602,7 +602,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func releaseQualificationDiagnosticCodes(
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID,
         runID: String
     ) async -> [String] {
@@ -689,7 +689,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
     }
 
     private func retentionIndexDiagnosticCodes(
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID,
         runID: String,
         maxEvidenceAgeDays: Int?
@@ -718,7 +718,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func evidenceAgeDiagnosticCode(
         artifactID: String,
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID,
         maxEvidenceAgeDays: Int?,
         diagnosticPrefix: String
@@ -862,15 +862,15 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
         _ envelope: FlowRunReleaseEnvelope,
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try await persistence.persistArtifact(
             content: encoder.encode(envelope),
-            id: ArtifactID(rawValue: Self.artifactID),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+            logicalID: Self.artifactID,
+            relativePath: FlowArtifactPath.relative(projectRelativePath),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .json
@@ -882,7 +882,7 @@ public struct DefaultFlowRunReleaseEnvelopeBuilder: FlowRunReleaseEnvelopeBuildi
 
     private func decodeArtifact<Value: Decodable>(
         _ type: Value.Type,
-        reference: ArtifactReference,
+        reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID
     ) async throws -> Value {
         let content = try await persistence.loadArtifactContent(

@@ -179,18 +179,19 @@ struct SummaryStageExecutor: FlowStageExecutor {
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        var resolvedArtifacts: [ArtifactReference] = []
-        for artifact in artifacts {
-            let reference = try foundationReference(from: artifact)
+        var resolvedArtifacts: [FlowArtifactBinding] = []
+        for (index, artifact) in artifacts.enumerated() {
+            let binding = try foundationBinding(from: artifact, fallbackIndex: index)
             guard let payload = artifactPayloads[artifact.path] else {
-                resolvedArtifacts.append(reference)
+                resolvedArtifacts.append(binding)
                 continue
             }
             resolvedArtifacts.append(
                 try await context.infrastructure.persistArtifact(
                     content: payload,
-                    id: reference.id,
-                    locator: reference.locator,
+                    logicalID: binding.logicalID,
+                    relativePath: binding.requireLocalRelativePath(),
+                    descriptor: binding.descriptor,
                     runID: context.runID,
                     mode: .replaceable
                 )
@@ -223,22 +224,36 @@ struct SummaryStageExecutor: FlowStageExecutor {
         )
     }
 
-    private func foundationReference(
-        from fixture: TestArtifactReference
-    ) throws -> ArtifactReference {
-        ArtifactReference(
-            id: try fixture.artifactID.map { try ArtifactID(rawValue: $0) },
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: fixture.path),
-                role: fixture.role,
-                kind: try ArtifactKind(rawValue: fixture.kind.rawValue),
-                format: try ArtifactFormat(rawValue: fixture.format.rawValue.lowercased())
-            ),
-            digest: try ContentDigest(
+    private func foundationBinding(
+        from fixture: TestArtifactReference,
+        fallbackIndex: Int
+    ) throws -> FlowArtifactBinding {
+        let reference = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: fixture.sha256 ?? String(repeating: "0", count: 64)
             ),
-            byteCount: UInt64(fixture.byteCount ?? 0)
+            byteCount: UInt64(fixture.byteCount ?? 0),
+            descriptor: ArtifactDescriptor(
+                role: fixture.role,
+                kind: try ArtifactKind(rawValue: fixture.kind.rawValue),
+                format: try ArtifactFormat(rawValue: fixture.format.rawValue.lowercased())
+            )
+        )
+        let path = fixture.path.hasPrefix(".xcircuite/")
+            ? String(fixture.path.dropFirst(".xcircuite/".count))
+            : fixture.path
+        return try FlowArtifactBinding(
+            logicalID: fixture.artifactID ?? "stage-artifact-\(fallbackIndex)",
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(path)
+            ),
+            producer: try fixture.producerRunID.map {
+                try ProducerIdentity(kind: .engine, identifier: $0, version: "1")
+            }
         )
     }
 }

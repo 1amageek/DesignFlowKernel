@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 
 /// Serializes typed run-ledger updates behind the kernel persistence protocol.
@@ -157,7 +158,8 @@ public actor FlowRunLedgerCoordinator {
     public func transition(
         runID: String,
         to status: FlowRunStatus,
-        registering artifacts: [ArtifactReference] = [],
+        binding plan: FlowRunPlan? = nil,
+        registering artifacts: [FlowArtifactBinding] = [],
         at timestamp: Date = Date()
     ) async throws -> FlowRunLedger {
         guard !status.isTerminal else {
@@ -176,8 +178,24 @@ public actor FlowRunLedgerCoordinator {
                 current: ledger.runManifest.status,
                 requested: status
             )
+            if let plan {
+                guard plan.runID == runID else {
+                    throw FlowRunLedgerPersistenceError.runIdentifierMismatch(
+                        requested: runID,
+                        stored: plan.runID
+                    )
+                }
+                if let existingPlan = ledger.plan, existingPlan != plan {
+                    throw FlowRunLedgerPersistenceError
+                        .protectedProjectionMutation(
+                            runID: runID,
+                            field: "plan"
+                        )
+                }
+                ledger.plan = plan
+            }
             Self.applyTransition(next, to: &ledger.runManifest, at: timestamp)
-            ledger.artifacts = try mergedArtifactReferences(ledger.artifacts + artifacts)
+            ledger.artifacts = try mergedArtifactBindings(ledger.artifacts + artifacts)
         }
     }
 
@@ -194,7 +212,7 @@ public actor FlowRunLedgerCoordinator {
         stages: [FlowStageResult],
         toolchain: FlowToolchainManifest,
         evidence: EvidenceManifest,
-        artifacts: [ArtifactReference],
+        artifacts: [FlowArtifactBinding],
         at timestamp: Date = Date()
     ) async throws -> FlowRunLedger {
         try Self.validateTerminalProjection(
@@ -256,9 +274,10 @@ public actor FlowRunLedgerCoordinator {
                 )
             }
             let artifacts = ledger.artifacts
-            let evidence = EvidenceManifest(
+            let evidence = try EvidenceManifest.contentAddressed(
                 provenance: provenance,
-                artifacts: artifacts
+                artifacts: artifacts.map(\.reference),
+                digester: SHA256ContentDigester()
             )
             try Self.validateTerminalProjection(
                 runID: runID,
@@ -284,7 +303,7 @@ public actor FlowRunLedgerCoordinator {
     @discardableResult
     public func register(
         runID: String,
-        artifacts: [ArtifactReference]
+        artifacts: [FlowArtifactBinding]
     ) async throws -> FlowRunLedger {
         try await update(
             runID: runID,
@@ -296,7 +315,7 @@ public actor FlowRunLedgerCoordinator {
                     field: "artifacts"
                 )
             }
-            ledger.artifacts = try mergedArtifactReferences(ledger.artifacts + artifacts)
+            ledger.artifacts = try mergedArtifactBindings(ledger.artifacts + artifacts)
             ledger.runManifest.artifacts = ledger.artifacts
         }
     }
@@ -367,7 +386,7 @@ public actor FlowRunLedgerCoordinator {
         stages: [FlowStageResult],
         toolchain: FlowToolchainManifest,
         evidence: EvidenceManifest,
-        artifacts: [ArtifactReference]
+        artifacts: [FlowArtifactBinding]
     ) throws {
         func reject(_ issue: FlowTerminalProjectionIssue) throws -> Never {
             throw FlowRunLedgerPersistenceError.invalidTerminalProjection(
@@ -426,15 +445,21 @@ public actor FlowRunLedgerCoordinator {
             try reject(.nonterminalStatus(status))
         }
 
-        let artifactLocators = artifacts.map(\.locator)
-        guard Set(artifactLocators).count == artifactLocators.count else {
-            try reject(.duplicateArtifactLocator)
+        var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
+        for artifact in artifacts {
+            let materialization = FlowArtifactMaterializationIdentity(artifact.availability)
+            if let existingContent = contentByMaterialization[materialization],
+               existingContent != artifact.reference.id {
+                try reject(.conflictingArtifactMaterialization)
+            }
+            contentByMaterialization[materialization] = artifact.reference.id
         }
-        guard Set(evidence.artifacts) == Set(artifacts),
+        let artifactReferences = artifacts.map(\.reference)
+        guard Set(evidence.artifacts) == Set(artifactReferences),
               evidence.artifacts.count == artifacts.count else {
             try reject(.evidenceArtifactInventoryMismatch)
         }
-        guard Set(evidence.provenance.inputs).isSubset(of: Set(artifacts)) else {
+        guard Set(evidence.provenance.inputs).isSubset(of: Set(artifactReferences)) else {
             try reject(.provenanceInputNotRetained)
         }
         let artifactInventory = Set(artifacts)

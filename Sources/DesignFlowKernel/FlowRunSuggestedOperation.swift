@@ -8,7 +8,7 @@ public enum FlowRunSuggestedOperation: Sendable, Hashable, Codable {
     case evaluateRunGuard
     case validatePlanningProblem
     case auditProblemTranslation
-    case generateCandidatePlan(rejectedPlansArtifactID: ArtifactID?)
+    case generateCandidatePlan(rejectedPlansArtifactID: String?)
     case executeCandidatePlan
     case verifyCandidatePlan(scope: FlowRunVerificationScope)
     case generateParameterCandidates

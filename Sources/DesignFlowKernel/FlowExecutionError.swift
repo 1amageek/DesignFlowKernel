@@ -6,6 +6,11 @@ public enum FlowExecutionError: Error, LocalizedError, Equatable {
     case duplicateExecutorStageID(String)
     case invalidExecutorToolID(stageID: String, toolID: String)
     case invalidRetryPolicy(stageID: String, maxAttempts: Int)
+    case stageInputForUndeclaredStage(String)
+    case duplicateStageInput(String)
+    case emptyStageInput(String)
+    case duplicateStageInputArtifact(stageID: String, artifactID: String)
+    case duplicateStageInputLogicalID(stageID: String, logicalID: String)
     case duplicateRunID(String)
     case existingRunPlanMismatch(String)
     case missingArtifact(String)
@@ -41,6 +46,16 @@ public enum FlowExecutionError: Error, LocalizedError, Equatable {
             "Invalid executor tool ID for stage \(stageID): \(toolID)"
         case .invalidRetryPolicy(let stageID, let maxAttempts):
             "Invalid retry policy for stage \(stageID): maxAttempts must be at least 1, got \(maxAttempts)"
+        case .stageInputForUndeclaredStage(let stageID):
+            "Stage input targets an undeclared stage: \(stageID)"
+        case .duplicateStageInput(let stageID):
+            "Duplicate stage input binding: \(stageID)"
+        case .emptyStageInput(let stageID):
+            "Stage input binding has no artifacts: \(stageID)"
+        case .duplicateStageInputArtifact(let stageID, let artifactID):
+            "Stage input \(stageID) repeats artifact identity \(artifactID)"
+        case .duplicateStageInputLogicalID(let stageID, let logicalID):
+            "Stage input \(stageID) repeats logical artifact ID \(logicalID)"
         case .duplicateRunID(let runID):
             "Run directory already exists for run ID: \(runID)"
         case .existingRunPlanMismatch(let runID):

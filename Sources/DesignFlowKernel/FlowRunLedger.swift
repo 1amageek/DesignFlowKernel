@@ -2,7 +2,7 @@ import CircuiteFoundation
 import Foundation
 
 public struct FlowRunLedger: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var runID: String
     public var runManifest: FlowRunManifest
@@ -13,7 +13,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
     public var progressEvents: [FlowRunProgressEvent]
     public var cancellationRequest: FlowRunCancellationRequest?
     public var evidence: EvidenceManifest?
-    public var artifacts: [ArtifactReference]
+    public var artifacts: [FlowArtifactBinding]
     public var actions: [FlowRunActionRecord]
     public var suggestedActionSelections: [FlowRunSuggestedActionSelection]
     public var approvals: [FlowApprovalRecord]
@@ -28,7 +28,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
         progressEvents: [FlowRunProgressEvent] = [],
         cancellationRequest: FlowRunCancellationRequest? = nil,
         evidence: EvidenceManifest? = nil,
-        artifacts: [ArtifactReference] = [],
+        artifacts: [FlowArtifactBinding] = [],
         actions: [FlowRunActionRecord] = [],
         suggestedActionSelections: [FlowRunSuggestedActionSelection] = [],
         approvals: [FlowApprovalRecord] = []
@@ -87,7 +87,7 @@ public struct FlowRunLedger: Sendable, Hashable, Codable {
             forKey: .cancellationRequest
         )
         evidence = try container.decodeIfPresent(EvidenceManifest.self, forKey: .evidence)
-        artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
+        artifacts = try container.decode([FlowArtifactBinding].self, forKey: .artifacts)
         actions = try container.decode([FlowRunActionRecord].self, forKey: .actions)
         suggestedActionSelections = try container.decode(
             [FlowRunSuggestedActionSelection].self,

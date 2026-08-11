@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 
 public struct FlowRunResult: Sendable, Hashable, Codable, ArtifactProducing,
@@ -21,9 +22,10 @@ public struct FlowRunResult: Sendable, Hashable, Codable, ArtifactProducing,
         self.runID = runID
         self.status = status
         self.stages = stages
-        self.evidence = EvidenceManifest(
+        self.evidence = try EvidenceManifest.contentAddressed(
             provenance: provenance,
-            artifacts: stages.flatMap(\.artifacts)
+            artifacts: stages.flatMap(\.artifacts).map(\.reference),
+            digester: SHA256ContentDigester()
         )
         self.diagnostics = try stages
             .flatMap(\.diagnostics)
@@ -68,7 +70,7 @@ public struct FlowRunResult: Sendable, Hashable, Codable, ArtifactProducing,
         evidence: EvidenceManifest,
         diagnostics: [DesignDiagnostic]
     ) throws {
-        guard evidence.artifacts == stages.flatMap(\.artifacts) else {
+        guard evidence.artifacts == stages.flatMap(\.artifacts).map(\.reference) else {
             throw FlowRunResultValidationError.artifactEvidenceMismatch
         }
         let expectedDiagnostics = try stages

@@ -49,11 +49,11 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         let projectRelativePath = "runs/\(runID)/\(Self.artifactRelativePath)"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let reference = try await persistence.persistArtifact(
+        let binding = try await persistence.persistArtifact(
             content: encoder.encode(ladder),
-            id: ArtifactID(rawValue: Self.artifactID),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+            logicalID: Self.artifactID,
+            relativePath: try FlowArtifactPath.relative(projectRelativePath),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .json
@@ -61,7 +61,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             runID: runID,
             mode: .replaceable
         )
-        return FlowRunStageArtifactLadderBuildResult(ladder: ladder, artifact: reference)
+        return FlowRunStageArtifactLadderBuildResult(ladder: ladder, artifact: binding)
     }
 
     public func makeStageArtifactLadder(
@@ -71,8 +71,8 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
     ) -> FlowRunStageArtifactLadder {
         let previousLadderPaths = Set(
             bundle.artifacts
-                .filter { $0.reference.artifactID == Self.artifactID }
-                .map { $0.reference.path }
+                .filter { $0.binding.logicalID == Self.artifactID }
+                .map { $0.binding.availabilityDescription }
         )
         let reviewItems = bundle.reviewItems.map { item in
             var normalized = item
@@ -80,7 +80,7 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
             return normalized
         }
         let artifacts = bundle.artifacts
-            .filter { $0.reference.artifactID != Self.artifactID }
+            .filter { $0.binding.logicalID != Self.artifactID }
             .map {
                 artifact(
                     from: $0,
@@ -185,11 +185,11 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         return FlowRunStageArtifactLadder.Artifact(
             role: reviewArtifact.purpose.rawValue,
             domain: domain,
-            artifactID: reviewArtifact.reference.artifactID,
+            artifactID: reviewArtifact.binding.logicalID,
             stageID: reviewArtifact.stageID,
-            path: reviewArtifact.reference.path,
-            kind: reviewArtifact.reference.kind,
-            format: reviewArtifact.reference.format,
+            path: reviewArtifact.binding.availabilityDescription,
+            kind: reviewArtifact.binding.kind,
+            format: reviewArtifact.binding.format,
             sha256: reviewArtifact.reference.digest.hexadecimalValue,
             byteCount: reviewArtifact.reference.byteCount,
             integrity: reviewArtifact.integrity,
@@ -202,22 +202,22 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         if artifact.purpose == .stageAttempts {
             return "retry"
         }
-        if artifact.purpose == .designDiff || artifact.reference.kind == .designDiff {
+        if artifact.purpose == .designDiff || artifact.binding.kind == .designDiff {
             return "edit"
         }
-        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.reference.path.contains("/planning/") {
+        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.binding.availabilityDescription.contains("/planning/") {
             return "planning"
         }
-        if artifact.purpose == .approval || artifact.purpose == .stageArtifactLadder || artifact.reference.path.contains("/review/") {
+        if artifact.purpose == .approval || artifact.purpose == .stageArtifactLadder || artifact.binding.availabilityDescription.contains("/review/") {
             return "review"
         }
         let searchable = [
             artifact.purpose.rawValue,
-            artifact.reference.artifactID,
+            artifact.binding.logicalID,
             artifact.stageID ?? "",
-            artifact.reference.path,
-            artifact.reference.kind.rawValue,
-            artifact.reference.format.rawValue,
+            artifact.binding.availabilityDescription,
+            artifact.binding.kind.rawValue,
+            artifact.binding.format.rawValue,
         ]
         .joined(separator: " ")
         .lowercased()
@@ -237,20 +237,20 @@ public struct DefaultFlowRunStageArtifactLadderBuilder: FlowRunStageArtifactLadd
         if searchable.contains("lvs") {
             return "lvs"
         }
-        if searchable.contains("pex") || searchable.contains("spef") || artifact.reference.kind == .parasitics || artifact.reference.format == .spef {
+        if searchable.contains("pex") || searchable.contains("spef") || artifact.binding.kind == .parasitics || artifact.binding.format == .spef {
             return "pex"
         }
-        if searchable.contains("export") || artifact.reference.format == .oasis || artifact.reference.format == .gdsii
-            || artifact.reference.format == .lef || artifact.reference.format == .def {
+        if searchable.contains("export") || artifact.binding.format == .oasis || artifact.binding.format == .gdsii
+            || artifact.binding.format == .lef || artifact.binding.format == .def {
             return "export"
         }
-        if artifact.reference.kind == .waveform || artifact.reference.kind == .measurement || searchable.contains("simulation") {
+        if artifact.binding.kind == .waveform || artifact.binding.kind == .measurement || searchable.contains("simulation") {
             return "simulation"
         }
-        if artifact.reference.kind == .layout {
+        if artifact.binding.kind == .layout {
             return "layout"
         }
-        if artifact.reference.kind == .netlist {
+        if artifact.binding.kind == .netlist {
             return "netlist"
         }
         return "other"

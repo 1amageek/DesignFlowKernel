@@ -23,8 +23,8 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
     public func collectReleaseEvidence(
         runID: String,
         workspaceID: FlowWorkspaceID,
-        signoffDashboard: ArtifactReference,
-        contractReport: ArtifactReference
+        signoffDashboard: FlowArtifactBinding,
+        contractReport: FlowArtifactBinding
     ) async throws -> FlowRunReleaseEvidenceCollectionResult {
         let dashboard: FlowRunSignoffDashboard = try await load(
             FlowRunSignoffDashboard.self,
@@ -41,28 +41,28 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         try validate(dashboard)
         try validate(contractReportDocument)
 
-        let dashboardSHA256 = signoffDashboard.digest.hexadecimalValue
-        let contractSHA256 = contractReport.digest.hexadecimalValue
+        let dashboardSHA256 = signoffDashboard.reference.digest.hexadecimalValue
+        let contractSHA256 = contractReport.reference.digest.hexadecimalValue
         let collectedAt = ISO8601DateFormatter().string(from: currentDate)
 
         let corpusHistory = makeCorpusHistory(
             runID: runID,
             collectedAt: collectedAt,
-            sourcePath: signoffDashboard.locator.location.value,
+            sourcePath: signoffDashboard.availabilityDescription,
             sourceSHA256: dashboardSHA256,
             dashboard: dashboard
         )
         let performanceEnvelope = makePerformanceEnvelope(
             runID: runID,
             collectedAt: collectedAt,
-            sourcePath: signoffDashboard.locator.location.value,
+            sourcePath: signoffDashboard.availabilityDescription,
             sourceSHA256: dashboardSHA256,
             dashboard: dashboard
         )
         let contractAudit = makeContractAudit(
             runID: runID,
             collectedAt: collectedAt,
-            sourcePath: contractReport.locator.location.value,
+            sourcePath: contractReport.availabilityDescription,
             sourceSHA256: contractSHA256,
             report: contractReportDocument
         )
@@ -89,7 +89,7 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
     private func load<T: Decodable>(
         _ type: T.Type,
         source: String,
-        from reference: ArtifactReference,
+        from reference: FlowArtifactBinding,
         workspaceID: FlowWorkspaceID
     ) async throws -> T {
         do {
@@ -297,23 +297,21 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
         contractAudit: FlowRunReleaseContractAudit
-    ) async throws -> [ArtifactReference] {
+    ) async throws -> [FlowArtifactBinding] {
         let artifacts: [(path: String, artifactID: String, value: any Encodable)] = [
             ("qualification/corpus-history.json", Self.corpusHistoryArtifactID, corpusHistory),
             ("qualification/performance-envelope.json", Self.performanceEnvelopeArtifactID, performanceEnvelope),
             ("qualification/contract-audit.json", Self.contractAuditArtifactID, contractAudit),
         ]
-        var references: [ArtifactReference] = []
+        var bindings: [FlowArtifactBinding] = []
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         for artifact in artifacts {
-            let reference = try await persistence.persistArtifact(
+            let binding = try await persistence.persistArtifact(
                 content: encoder.encode(artifact.value),
-                id: ArtifactID(rawValue: artifact.artifactID),
-                locator: ArtifactLocator(
-                    location: try ArtifactLocation(
-                        workspaceRelativePath: "runs/\(runID)/\(artifact.path)"
-                    ),
+                logicalID: artifact.artifactID,
+                relativePath: try FlowArtifactPath.relative("runs/\(runID)/\(artifact.path)"),
+                descriptor: ArtifactDescriptor(
                     role: .output,
                     kind: .report,
                     format: .json
@@ -322,15 +320,15 @@ public struct DefaultFlowRunReleaseEvidenceCollector: FlowRunReleaseEvidenceColl
                 producer: producer,
                 mode: .replaceable
             )
-            guard reference.producer == producer else {
+            guard binding.producer == producer else {
                 throw FlowRunReleaseEvidenceCollectionError.persistedProducerMismatch(
                     artifactID: artifact.artifactID,
                     expected: producer,
-                    actual: reference.producer
+                    actual: binding.producer
                 )
             }
-            references.append(reference)
+            bindings.append(binding)
         }
-        return references
+        return bindings
     }
 }

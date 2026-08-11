@@ -3,8 +3,8 @@ import CircuiteFoundation
 
 public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
     case path(String)
-    /// Canonical artifact input.
-    case artifact(ArtifactReference)
+    /// Canonical artifact input with independently resolved availability.
+    case artifact(FlowArtifactBinding)
     case stageArtifact(FlowToolchainStageArtifactSelectorRecord)
     case stageRawArtifact(FlowToolchainStageRawArtifactRecord)
 
@@ -27,7 +27,7 @@ public enum FlowToolchainInputReferenceRecord: Sendable, Hashable, Codable {
         case .path:
             self = .path(try container.decode(String.self, forKey: .value))
         case .artifact:
-            self = .artifact(try container.decode(ArtifactReference.self, forKey: .value))
+            self = .artifact(try container.decode(FlowArtifactBinding.self, forKey: .value))
         case .stageArtifact:
             self = .stageArtifact(
                 try container.decode(FlowToolchainStageArtifactSelectorRecord.self, forKey: .value)

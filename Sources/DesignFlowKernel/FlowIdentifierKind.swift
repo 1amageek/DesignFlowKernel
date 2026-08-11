@@ -6,5 +6,6 @@ public enum FlowIdentifierKind: String, Sendable, Hashable, Codable {
     case reviewArtifactPurpose
     case runID
     case stageID
+    case stageExecutionAttemptID
     case toolID
 }

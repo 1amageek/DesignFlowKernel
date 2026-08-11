@@ -27,9 +27,9 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let reference = try await persistence.persistArtifact(
             content: encoder.encode(packet),
-            id: ArtifactID(rawValue: Self.artifactID),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+            logicalID: Self.artifactID,
+            relativePath: FlowArtifactPath.relative(projectRelativePath),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .json
@@ -112,7 +112,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
                 required: false,
                 status: matchingArtifacts.isEmpty ? .notRequired : .satisfied,
                 purpose: purpose,
-                artifactPaths: matchingArtifacts.map { $0.reference.path }.sorted()
+                artifactPaths: matchingArtifacts.map { $0.binding.availabilityDescription }.sorted()
             )
         }
         guard !matchingArtifacts.isEmpty else {
@@ -133,7 +133,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
                 required: true,
                 status: .satisfied,
                 purpose: purpose,
-                artifactPaths: matchingArtifacts.map { $0.reference.path }.sorted()
+                artifactPaths: matchingArtifacts.map { $0.binding.availabilityDescription }.sorted()
             )
         }
         return FlowRunDecisionPacket.ArtifactRequirement(
@@ -141,7 +141,7 @@ public struct DefaultFlowRunDecisionPacketBuilder: FlowRunDecisionPacketBuilding
             required: true,
             status: .invalid,
             purpose: purpose,
-            artifactPaths: invalidArtifacts.map { $0.reference.path }.sorted(),
+            artifactPaths: invalidArtifacts.map { $0.binding.availabilityDescription }.sorted(),
             diagnosticCodes: artifactRequirementDiagnosticCodes(for: invalidArtifacts)
         )
     }

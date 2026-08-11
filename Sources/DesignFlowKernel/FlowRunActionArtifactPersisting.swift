@@ -9,7 +9,10 @@ public protocol FlowRunActionArtifactPersisting: FlowRunLedgerPersisting {
     @discardableResult
     func appendActionArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         action: FlowRunActionRecord
     ) async throws -> FlowRunLedger
 }

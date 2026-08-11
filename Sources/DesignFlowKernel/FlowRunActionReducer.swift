@@ -23,14 +23,14 @@ public struct FlowRunActionReducer: Sendable {
             return ledger
         }
         let retainedReferences = Set(
-            ledger.artifacts + ledger.actions.flatMap(\.outputs)
+            ledger.artifacts.map(\.reference) + ledger.actions.flatMap(\.outputs)
         )
         if let unretained = (action.inputs + action.outputs).first(where: {
             !retainedReferences.contains($0)
         }) {
             throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
                 runID: action.runID,
-                path: unretained.path
+                path: unretained.id.description
             )
         }
 

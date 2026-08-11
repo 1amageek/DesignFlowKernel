@@ -1,25 +1,28 @@
 import CircuiteFoundation
 
-func mergedArtifactReferences(
-    _ artifacts: [ArtifactReference]
-) throws -> [ArtifactReference] {
-    var referencesByLocator: [ArtifactLocator: ArtifactReference] = [:]
+func mergedArtifactBindings(
+    _ artifacts: [FlowArtifactBinding]
+) throws -> [FlowArtifactBinding] {
+    var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
+    var uniqueBindings: Set<FlowArtifactBinding> = []
     for artifact in artifacts {
-        if let existing = referencesByLocator[artifact.locator] {
-            guard existing == artifact else {
+        let identity = FlowArtifactMaterializationIdentity(artifact.availability)
+        if let existingContent = contentByMaterialization[identity] {
+            guard existingContent == artifact.reference.id else {
                 throw FlowExecutionError.conflictingArtifactReference(
-                    artifactID: artifact.id.rawValue,
-                    location: artifact.locator.location.value
+                    artifactID: artifact.logicalID,
+                    location: artifact.availabilityDescription
                 )
             }
-            continue
+        } else {
+            contentByMaterialization[identity] = artifact.reference.id
         }
-        referencesByLocator[artifact.locator] = artifact
+        uniqueBindings.insert(artifact)
     }
-    return referencesByLocator.values.sorted { lhs, rhs in
-        if lhs.locator.location.value != rhs.locator.location.value {
-            return lhs.locator.location.value < rhs.locator.location.value
+    return uniqueBindings.sorted { lhs, rhs in
+        if lhs.availabilityDescription != rhs.availabilityDescription {
+            return lhs.availabilityDescription < rhs.availabilityDescription
         }
-        return lhs.id.rawValue < rhs.id.rawValue
+        return lhs.logicalID < rhs.logicalID
     }
 }

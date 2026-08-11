@@ -11,9 +11,10 @@ public protocol FlowRunControlArtifactPersisting: FlowArtifactPersisting {
     /// projections such as the plan, result, ledger, or approval records.
     func persistRunControlArtifact(
         content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
         runID: String,
         mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference
+    ) async throws -> FlowArtifactBinding
 }

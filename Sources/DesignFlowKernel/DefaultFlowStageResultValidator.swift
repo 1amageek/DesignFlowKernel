@@ -112,11 +112,13 @@ public struct DefaultFlowStageResultValidator: FlowStageResultValidating {
     }
 
     private func validateArtifacts(
-        _ artifacts: [CircuiteFoundation.ArtifactReference],
+        _ artifacts: [FlowArtifactBinding],
         stageID: String
     ) throws {
-        let identifiers = artifacts.map(\.id)
-        let locations = artifacts.map(\.locator.location)
+        let identifiers = artifacts.map(\.logicalID)
+        let locations = artifacts.map {
+            FlowArtifactMaterializationIdentity($0.availability)
+        }
         guard Set(identifiers).count == identifiers.count,
               Set(locations).count == locations.count else {
             throw FlowExecutionError.invalidStageResult(

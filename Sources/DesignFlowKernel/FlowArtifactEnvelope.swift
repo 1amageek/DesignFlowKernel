@@ -6,7 +6,9 @@ public struct FlowArtifactEnvelope: Sendable, Hashable, Codable {
     public var artifactID: String
     public var role: String
     public var stageID: String?
-    public var reference: ArtifactReference
+    public var binding: FlowArtifactBinding
+
+    public var reference: ArtifactReference { binding.reference }
     public var producer: FlowArtifactProducer?
     public var inputs: [FlowArtifactDependency]
     public var dependencies: [FlowArtifactDependency]
@@ -16,11 +18,11 @@ public struct FlowArtifactEnvelope: Sendable, Hashable, Codable {
     public var delegationCertificate: FlowDelegationCertificate?
 
     public init(
-        schemaVersion: Int = 2,
+        schemaVersion: Int = 3,
         artifactID: String,
         role: String,
         stageID: String? = nil,
-        reference: ArtifactReference,
+        binding: FlowArtifactBinding,
         producer: FlowArtifactProducer? = nil,
         inputs: [FlowArtifactDependency] = [],
         dependencies: [FlowArtifactDependency] = [],
@@ -33,7 +35,7 @@ public struct FlowArtifactEnvelope: Sendable, Hashable, Codable {
         self.artifactID = artifactID
         self.role = role
         self.stageID = stageID
-        self.reference = reference
+        self.binding = binding
         self.producer = producer
         self.inputs = inputs
         self.dependencies = dependencies

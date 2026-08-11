@@ -11,7 +11,7 @@ struct FlowRunSuggestedActionTests {
             id: "generate-candidate-plan.with-rejected-feedback",
             readiness: .ready,
             operation: .generateCandidatePlan(
-                rejectedPlansArtifactID: try ArtifactID(rawValue: "planning-rejected-plans")
+                rejectedPlansArtifactID: "planning-rejected-plans"
             ),
             runID: "run-1",
             reason: "Regenerate the candidate plan from retained feedback."

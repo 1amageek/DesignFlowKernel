@@ -8,16 +8,15 @@ public struct FlowArtifactEnvelopeValidator: Sendable {
     }
 
     public func validate(_ envelope: FlowArtifactEnvelope) throws {
-        guard envelope.schemaVersion == 2 else {
+        guard envelope.schemaVersion == 3 else {
             throw FlowArtifactEnvelopeValidationError.invalidSchemaVersion(envelope.schemaVersion)
         }
         try validateIdentifier(envelope.artifactID, field: "artifactID", kind: .artifactID)
         try validateNonEmpty(envelope.role, field: "role")
-        try validateNonEmpty(envelope.reference.path, field: "reference.path")
-        if envelope.reference.artifactID != envelope.artifactID {
+        if envelope.binding.logicalID != envelope.artifactID {
             throw FlowArtifactEnvelopeValidationError.artifactIDMismatch(
                 envelopeArtifactID: envelope.artifactID,
-                referenceArtifactID: envelope.reference.artifactID
+                referenceArtifactID: envelope.binding.logicalID
             )
         }
         try validateProducer(envelope.producer)

@@ -1,5 +1,6 @@
 import Foundation
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import ToolQualification
 
 public struct DefaultFlowOrchestrator: Sendable {
@@ -50,7 +51,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             requireNew: !request.allowExistingRun
         )
         let createdRun = !request.allowExistingRun
-        var setupArtifacts: [ArtifactReference] = []
+        var setupArtifacts: [FlowArtifactBinding] = []
         if request.allowExistingRun {
             _ = try await ledgerCoordinator.load(runID: request.runID)
         } else {
@@ -71,14 +72,15 @@ public struct DefaultFlowOrchestrator: Sendable {
                         runID: request.runID,
                         intent: request.intent,
                         toolchainProfile: request.toolchainProfile,
-                        stages: request.stages
+                        stages: request.stages,
+                        stageInputs: request.stageInputs
                     ),
                     stages: []
                 )
             )
         }
-        var planReference: ArtifactReference
-        var preparedRunArtifacts: [ArtifactReference] = []
+        var planBinding: FlowArtifactBinding
+        var preparedRunArtifacts: [FlowArtifactBinding] = []
         var transitionedToRunning = false
         do {
             if let artifactPreparer {
@@ -90,27 +92,42 @@ public struct DefaultFlowOrchestrator: Sendable {
                     let integrity = await infrastructure.verifyArtifact(artifact)
                     guard integrity.isVerified else {
                         throw FlowExecutionError.runArtifactIntegrityFailure(
-                            artifactID: artifact.id.rawValue,
+                            artifactID: artifact.logicalID,
                             issues: integrity.issues.map { $0.code.rawValue }
                         )
                     }
                 }
                 preparedRunArtifacts = preparedArtifacts
-                setupArtifacts = try mergedArtifactReferences(
+                setupArtifacts = try mergedArtifactBindings(
                     setupArtifacts + preparedArtifacts
                 )
             }
-            planReference = try await persistRunPlan(
+            planBinding = try await persistRunPlan(
                 request: request,
                 workspaceID: request.workspaceID
             )
-            _ = try await ledgerCoordinator.transition(
+            let runPlan = FlowRunPlan(
                 runID: request.runID,
-                to: .running,
-                registering: preparedRunArtifacts + [planReference]
+                intent: request.intent,
+                toolchainProfile: request.toolchainProfile,
+                stages: request.stages,
+                stageInputs: request.stageInputs
             )
+            do {
+                _ = try await ledgerCoordinator.transition(
+                    runID: request.runID,
+                    to: .running,
+                    binding: runPlan,
+                    registering: preparedRunArtifacts + [planBinding]
+                )
+            } catch FlowRunLedgerPersistenceError.protectedProjectionMutation(
+                let runID,
+                let field
+            ) where field == "plan" {
+                throw FlowExecutionError.existingRunPlanMismatch(runID)
+            }
             transitionedToRunning = true
-            planReference = try await retainedRunPlanReference(for: request)
+            planBinding = try await retainedRunPlanReference(for: request)
             try await progressStore.appendEvent(
                 runID: request.runID,
                 kind: .runStarted,
@@ -137,6 +154,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             }
             throw setupError
         }
+        let planReference = planBinding.reference
         let makeResult: (FlowRunStatus, [FlowStageResult]) throws -> FlowRunResult = { status, stages in
             let provenance = try ExecutionProvenance(
                 producer: producer,
@@ -157,6 +175,9 @@ public struct DefaultFlowOrchestrator: Sendable {
             infrastructure: infrastructure,
             toolRegistry: toolRegistry,
             healthResults: healthResults
+        )
+        let stageInputsByID = Dictionary(
+            uniqueKeysWithValues: request.stageInputs.map { ($0.stageID, $0) }
         )
         var stageResults: [FlowStageResult] = []
         var toolchainRecords: [FlowToolchainStageRecord] = []
@@ -446,7 +467,9 @@ public struct DefaultFlowOrchestrator: Sendable {
                 stageOutcome = try await executeStageWithRetry(
                     stage: stage,
                     executor: executor,
-                    context: context,
+                    context: context.withStageInputArtifacts(
+                        stageInputsByID[stage.stageID]?.artifacts ?? []
+                    ),
                     request: request,
                     planReference: planReference,
                     preExecutionGates: preExecutionGates
@@ -607,7 +630,10 @@ public struct DefaultFlowOrchestrator: Sendable {
             var attemptResult: FlowStageResult
             var cancelled = false
             do {
-                attemptResult = try await executor.execute(stage: stage, context: context)
+                attemptResult = try await executor.execute(
+                    stage: stage,
+                    context: context.withStageExecutionAttemptID(.generated())
+                )
             } catch let cancellationError as FlowRunCancellationError {
                 cancelled = true
                 attemptResult = blockedStageResult(
@@ -876,7 +902,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         planReference: ArtifactReference,
         resultContent: Data
     ) -> FlowDiagnostic? {
-        guard planReference == record.evidence.plan else {
+        guard planReference == record.evidence.plan.reference else {
             return FlowDiagnostic(
                 severity: .error,
                 code: "APPROVAL_BINDING_MISMATCH",
@@ -889,8 +915,8 @@ public struct DefaultFlowOrchestrator: Sendable {
                 .digest(data: resultContent)
                 .hexadecimalValue
             let actualByteCount = UInt64(resultContent.count)
-            guard actualSHA256 == record.evidence.stageResult.digest.hexadecimalValue,
-                  actualByteCount == record.evidence.stageResult.byteCount else {
+            guard actualSHA256 == record.evidence.stageResult.reference.digest.hexadecimalValue,
+                  actualByteCount == record.evidence.stageResult.reference.byteCount else {
                 return FlowDiagnostic(
                     severity: .error,
                     code: "APPROVAL_BINDING_MISMATCH",
@@ -920,7 +946,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         planReference: ArtifactReference,
         stageResult: FlowStageResult
     ) -> FlowDiagnostic? {
-        guard planReference == record.evidence.plan else {
+        guard planReference == record.evidence.plan.reference else {
             return FlowDiagnostic(
                 severity: .error,
                 code: "APPROVAL_BINDING_MISMATCH",
@@ -940,8 +966,8 @@ public struct DefaultFlowOrchestrator: Sendable {
                 .digest(data: data)
                 .hexadecimalValue
             let actualByteCount = UInt64(data.count)
-            guard actualSHA256 == record.evidence.stageResult.digest.hexadecimalValue,
-                  actualByteCount == record.evidence.stageResult.byteCount else {
+            guard actualSHA256 == record.evidence.stageResult.reference.digest.hexadecimalValue,
+                  actualByteCount == record.evidence.stageResult.reference.byteCount else {
                 return FlowDiagnostic(
                     severity: .error,
                     code: "APPROVAL_BINDING_MISMATCH",
@@ -1156,6 +1182,38 @@ public struct DefaultFlowOrchestrator: Sendable {
                 throw FlowExecutionError.duplicateStageID(stage.stageID)
             }
         }
+        var inputStageIDs = Set<String>()
+        for input in request.stageInputs {
+            try validator.validate(input.stageID, kind: .stageID)
+            guard stageIDs.contains(input.stageID) else {
+                throw FlowExecutionError.stageInputForUndeclaredStage(
+                    input.stageID
+                )
+            }
+            guard inputStageIDs.insert(input.stageID).inserted else {
+                throw FlowExecutionError.duplicateStageInput(input.stageID)
+            }
+            guard !input.artifacts.isEmpty else {
+                throw FlowExecutionError.emptyStageInput(input.stageID)
+            }
+            var artifactIDs = Set<String>()
+            var logicalIDs = Set<String>()
+            for artifact in input.artifacts {
+                let artifactID = artifact.reference.id.description
+                guard artifactIDs.insert(artifactID).inserted else {
+                    throw FlowExecutionError.duplicateStageInputArtifact(
+                        stageID: input.stageID,
+                        artifactID: artifactID
+                    )
+                }
+                guard logicalIDs.insert(artifact.logicalID).inserted else {
+                    throw FlowExecutionError.duplicateStageInputLogicalID(
+                        stageID: input.stageID,
+                        logicalID: artifact.logicalID
+                    )
+                }
+            }
+        }
     }
 
     private func validateExecutorCoverage(
@@ -1190,7 +1248,10 @@ public struct DefaultFlowOrchestrator: Sendable {
         case .stageResultIdentifierMismatch, .invalidStageResult, .artifactIntegrityFailure:
             true
         case .missingExecutor, .duplicateStageID, .duplicateExecutorStageID,
-             .invalidExecutorToolID, .invalidRetryPolicy, .duplicateRunID,
+             .invalidExecutorToolID, .invalidRetryPolicy,
+             .stageInputForUndeclaredStage, .duplicateStageInput,
+             .emptyStageInput, .duplicateStageInputArtifact,
+             .duplicateStageInputLogicalID, .duplicateRunID,
              .existingRunPlanMismatch, .missingArtifact, .invalidRunArtifactReference,
              .conflictingArtifactReference,
              .runArtifactIntegrityFailure,
@@ -1291,7 +1352,7 @@ public struct DefaultFlowOrchestrator: Sendable {
             runID: request.runID,
             workspaceID: request.workspaceID
         )
-        updated.artifacts = try mergedArtifactReferences(updated.artifacts + [reference])
+        updated.artifacts = try mergedArtifactBindings(updated.artifacts + [reference])
         return updated
     }
 
@@ -1300,7 +1361,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         stageID: String,
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let relativePath = "runs/\(runID)/stages/\(stageID)/attempts.json"
         return try await persistJSONArtifact(
             attempts,
@@ -1369,26 +1430,26 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func loadPersistedStageResultArtifact(
         stageID: String,
         runID: String
-    ) async throws -> (reference: ArtifactReference, content: Data)? {
+    ) async throws -> (binding: FlowArtifactBinding, content: Data)? {
         let ledger = try await ledgerCoordinator.load(runID: runID)
-        let artifactID = try ArtifactID(rawValue: "\(stageID)-result")
-        let identifierMatches = ledger.artifacts.filter { $0.id == artifactID }
+        let logicalID = "\(stageID)-result"
+        let identifierMatches = ledger.artifacts.filter { $0.logicalID == logicalID }
         guard !identifierMatches.isEmpty else {
             return nil
         }
         let typedMatches = identifierMatches.filter {
-            $0.locator.role == .output
-                && $0.locator.kind == .other
-                && $0.locator.format == .json
+            $0.role == .output
+                && $0.kind == .other
+                && $0.format == .json
         }
-        guard typedMatches.count == 1, let reference = typedMatches.first else {
+        guard typedMatches.count == 1, let binding = typedMatches.first else {
             throw FlowExecutionError.invalidRunArtifactReference(
-                artifactID: artifactID.rawValue,
+                artifactID: logicalID,
                 reason: "expected exactly one output JSON stage-result artifact, found \(typedMatches.count)"
             )
         }
-        let content = try await infrastructure.loadArtifactContent(for: reference)
-        return (reference, content)
+        let content = try await infrastructure.loadArtifactContent(for: binding)
+        return (binding, content)
     }
 
     private func validateStageResult(
@@ -1401,8 +1462,8 @@ public struct DefaultFlowOrchestrator: Sendable {
             guard integrity.isVerified else {
                 throw FlowExecutionError.artifactIntegrityFailure(
                     stageID: expectedStageID,
-                    artifactID: artifact.id.rawValue,
-                    artifactPath: artifact.locator.location.value,
+                    artifactID: artifact.logicalID,
+                    artifactPath: artifact.availabilityDescription,
                     issues: integrity.issues.map { $0.code.rawValue }
                 )
             }
@@ -1472,7 +1533,7 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func finalizeSetupFailure(
         request: FlowOperationRequest,
         runStartedAt: Date,
-        preparedArtifacts: [ArtifactReference],
+        preparedArtifacts: [FlowArtifactBinding],
         error: any Error
     ) async throws {
         if !preparedArtifacts.isEmpty {
@@ -1507,7 +1568,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
         let provenance = try ExecutionProvenance(
             producer: producer,
-            inputs: ledger.artifacts.filter { $0.locator.role == .input },
+            inputs: ledger.artifacts.filter { $0.role == .input }.map(\.reference),
             startedAt: runStartedAt,
             completedAt: Date()
         )
@@ -1558,7 +1619,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         )
         let provenance = try ExecutionProvenance(
             producer: producer,
-            inputs: ledger.artifacts.filter { $0.locator.role == .input },
+            inputs: ledger.artifacts.filter { $0.role == .input }.map(\.reference),
             startedAt: runStartedAt,
             completedAt: Date()
         )
@@ -1571,13 +1632,13 @@ public struct DefaultFlowOrchestrator: Sendable {
     }
 
     private func validateFailureProjectionArtifacts(
-        _ artifacts: [ArtifactReference]
+        _ artifacts: [FlowArtifactBinding]
     ) async throws {
         for artifact in artifacts {
             let integrity = await infrastructure.verifyArtifact(artifact)
             guard integrity.isVerified else {
                 throw FlowExecutionError.runArtifactIntegrityFailure(
-                    artifactID: artifact.id.rawValue,
+                    artifactID: artifact.logicalID,
                     issues: integrity.issues.map { $0.code.rawValue }
                 )
             }
@@ -1593,7 +1654,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         let progressArtifacts = try await progressStore.runLevelArtifacts(
             runID: result.runID,
         )
-        var stageResultArtifacts: [ArtifactReference] = []
+        var stageResultArtifacts: [FlowArtifactBinding] = []
         for stage in result.stages {
             guard let persisted = try await loadPersistedStageResultArtifact(
                 stageID: stage.stageID,
@@ -1609,11 +1670,11 @@ public struct DefaultFlowOrchestrator: Sendable {
             )
             guard retained == stage else {
                 throw FlowExecutionError.invalidRunArtifactReference(
-                    artifactID: persisted.reference.id.rawValue,
+                    artifactID: persisted.binding.logicalID,
                     reason: "retained stage result does not match the in-memory terminal projection"
                 )
             }
-            stageResultArtifacts.append(persisted.reference)
+            stageResultArtifacts.append(persisted.binding)
         }
         let toolchainReference = try await persistToolchainManifest(
             runID: result.runID,
@@ -1627,20 +1688,20 @@ public struct DefaultFlowOrchestrator: Sendable {
         let reportedStageArtifacts = result.stages
             .flatMap(\.artifacts)
             .map { $0 }
-        var retainedStageArtifacts: [ArtifactReference] = []
+        var retainedStageArtifacts: [FlowArtifactBinding] = []
         for artifact in reportedStageArtifacts {
             let integrity = await infrastructure.verifyArtifact(artifact)
             guard integrity.isVerified else {
                 throw FlowExecutionError.artifactIntegrityFailure(
                     stageID: result.stages.first { $0.artifacts.contains(artifact) }?.stageID ?? "unknown",
-                    artifactID: artifact.id.rawValue,
-                    artifactPath: artifact.locator.location.value,
+                    artifactID: artifact.logicalID,
+                    artifactPath: artifact.availabilityDescription,
                     issues: integrity.issues.map { $0.code.rawValue }
                 )
             }
             retainedStageArtifacts.append(artifact)
         }
-        let artifacts = try mergedArtifactReferences(
+        let artifacts = try mergedArtifactBindings(
             runLevelArtifacts
                 + retainedStageArtifacts
                 + stageResultArtifacts
@@ -1652,9 +1713,10 @@ public struct DefaultFlowOrchestrator: Sendable {
             profile: toolchainProfile,
             stages: toolchainRecords
         )
-        let evidence = EvidenceManifest(
+        let evidence = try EvidenceManifest.contentAddressed(
             provenance: result.evidence.provenance,
-            artifacts: artifacts
+            artifacts: artifacts.map(\.reference),
+            digester: SHA256ContentDigester()
         )
         _ = try await ledgerCoordinator.finalize(
             runID: result.runID,
@@ -1669,12 +1731,13 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func persistRunPlan(
         request: FlowOperationRequest,
         workspaceID: FlowWorkspaceID
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let plan = FlowRunPlan(
             runID: request.runID,
             intent: request.intent,
             toolchainProfile: request.toolchainProfile,
-            stages: request.stages
+            stages: request.stages,
+            stageInputs: request.stageInputs
         )
         let path = "runs/\(request.runID)/plan.json"
         if request.allowExistingRun,
@@ -1705,23 +1768,23 @@ public struct DefaultFlowOrchestrator: Sendable {
 
     private func retainedRunPlanReference(
         for request: FlowOperationRequest
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let ledger = try await ledgerCoordinator.load(runID: request.runID)
         let candidates = ledger.artifacts.filter {
-            $0.id.rawValue == "run-plan"
-                && $0.locator.role == .input
-                && $0.locator.kind == .other
-                && $0.locator.format == .json
+            $0.logicalID == "run-plan"
+                && $0.role == .input
+                && $0.kind == .other
+                && $0.format == .json
         }
-        guard candidates.count == 1, let reference = candidates.first else {
+        guard candidates.count == 1, let binding = candidates.first else {
             throw FlowExecutionError.missingArtifact(
                 "canonical run plan for run \(request.runID)"
             )
         }
-        let integrity = await infrastructure.verifyArtifact(reference)
+        let integrity = await infrastructure.verifyArtifact(binding)
         guard integrity.isVerified else {
             throw FlowExecutionError.runArtifactIntegrityFailure(
-                artifactID: reference.id.rawValue,
+                artifactID: binding.logicalID,
                 issues: integrity.issues.map { $0.code.rawValue }
             )
         }
@@ -1729,11 +1792,11 @@ public struct DefaultFlowOrchestrator: Sendable {
         do {
             retainedPlan = try JSONDecoder().decode(
                 FlowRunPlan.self,
-                from: await infrastructure.loadArtifactContent(for: reference)
+                from: await infrastructure.loadArtifactContent(for: binding)
             )
         } catch {
             throw FlowExecutionError.invalidRunArtifactReference(
-                artifactID: reference.id.rawValue,
+                artifactID: binding.logicalID,
                 reason: "canonical run plan cannot be decoded: \(error.localizedDescription)"
             )
         }
@@ -1741,12 +1804,13 @@ public struct DefaultFlowOrchestrator: Sendable {
             runID: request.runID,
             intent: request.intent,
             toolchainProfile: request.toolchainProfile,
-            stages: request.stages
+            stages: request.stages,
+            stageInputs: request.stageInputs
         )
         guard retainedPlan == expectedPlan else {
             throw FlowExecutionError.existingRunPlanMismatch(request.runID)
         }
-        return reference
+        return binding
     }
 
     private func persistToolchainManifest(
@@ -1754,7 +1818,7 @@ public struct DefaultFlowOrchestrator: Sendable {
         profile: FlowToolchainProfileRecord?,
         records: [FlowToolchainStageRecord],
         workspaceID: FlowWorkspaceID
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let manifest = FlowToolchainManifest(runID: runID, profile: profile, stages: records)
         return try await persistJSONArtifact(
             manifest,
@@ -1772,21 +1836,20 @@ public struct DefaultFlowOrchestrator: Sendable {
     private func persistJSONArtifact<Value: Encodable>(
         _ value: Value,
         path: String,
-        id: String?,
+        id: String,
         role: ArtifactRole,
         kind: ArtifactKind,
         format: ArtifactFormat,
         runID: String,
         workspaceID: FlowWorkspaceID,
         mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let content = try encodedPackageJSON(value)
-        let artifactID = try id.map(ArtifactID.init(rawValue:))
         return try await infrastructure.persistRunControlArtifact(
             content: content,
-            id: artifactID,
-            locator: try artifactLocator(
-                path: path,
+            logicalID: id,
+            relativePath: FlowArtifactPath.relative(path),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: kind,
                 format: format
@@ -1804,30 +1867,13 @@ public struct DefaultFlowOrchestrator: Sendable {
         format: ArtifactFormat,
         workspaceID: FlowWorkspaceID
     ) async throws -> Value? {
-        let locator = try artifactLocator(
-            path: path,
-            role: role,
-            kind: kind,
-            format: format
-        )
+        _ = role
+        _ = kind
+        _ = format
         guard let content = try await infrastructure.loadArtifactContent(
-            at: locator
+            at: FlowArtifactPath.relative(path)
         ) else { return nil }
         return try JSONDecoder().decode(type, from: content)
-    }
-
-    private func artifactLocator(
-        path: String,
-        role: ArtifactRole,
-        kind: ArtifactKind,
-        format: ArtifactFormat
-    ) throws -> ArtifactLocator {
-        ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: path),
-            role: role,
-            kind: kind,
-            format: format
-        )
     }
 
     private func xcircuiteStatus(_ status: FlowRunStatus) -> FlowRunStatus {

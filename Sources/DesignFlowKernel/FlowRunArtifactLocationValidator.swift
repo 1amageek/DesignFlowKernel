@@ -1,10 +1,10 @@
 import CircuiteFoundation
 
 public protocol FlowRunArtifactLocationValidator: Sendable {
-    func location(boundTo logicalPath: String) throws -> ArtifactLocation
+    func relativePath(boundTo logicalPath: String) throws -> ArtifactRelativePath
 
-    func isReference(
-        _ reference: ArtifactReference,
+    func isBinding(
+        _ binding: FlowArtifactBinding,
         boundTo logicalPath: String,
         allowingContentAddressedVariant: Bool
     ) -> Bool

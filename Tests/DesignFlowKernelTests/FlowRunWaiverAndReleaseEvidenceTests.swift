@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 import Testing
 @testable import DesignFlowKernel
@@ -50,7 +51,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
         #expect(result.envelope.status == .blocked)
         #expect(!result.envelope.requirements.isEmpty)
         #expect(result.envelope.requirements.contains { $0.required && $0.status == .blocked })
-        #expect(result.artifact.id.rawValue == DefaultFlowRunReleaseEnvelopeBuilder.artifactID)
+        #expect(result.artifact.logicalID == DefaultFlowRunReleaseEnvelopeBuilder.artifactID)
         #expect(await store.persistedArtifactCount == 1)
     }
 
@@ -74,6 +75,7 @@ struct FlowRunWaiverAndReleaseEvidenceTests {
 
 private actor WaiverLedgerStore: FlowRunApprovalArtifactPersisting, FlowRunLedgerInspecting {
     private var ledger: FlowRunLedger
+    private var contentByAvailability: [ArtifactAvailability: Data] = [:]
 
     init(ledger: FlowRunLedger) {
         self.ledger = ledger
@@ -94,28 +96,91 @@ private actor WaiverLedgerStore: FlowRunApprovalArtifactPersisting, FlowRunLedge
 
     func appendActionArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         action: FlowRunActionRecord
     ) async throws -> FlowRunLedger {
+        let binding = try makeBinding(
+            content: content,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
+            producer: producer
+        )
+        guard action.outputs == [binding.reference] else {
+            throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
+                runID: action.runID,
+                path: binding.availabilityDescription
+            )
+        }
         ledger.actions.append(action)
+        ledger.artifacts.append(binding)
+        contentByAvailability[binding.availability] = content
         return ledger
     }
 
     func appendApprovalArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         approval: FlowApprovalRecord,
         action: FlowRunActionRecord
     ) async throws -> FlowRunLedger {
+        let binding = try makeBinding(
+            content: content,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
+            producer: producer
+        )
+        guard action.outputs == [binding.reference] else {
+            throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
+                runID: action.runID,
+                path: binding.availabilityDescription
+            )
+        }
         ledger.approvals.append(approval)
         ledger.actions.append(action)
+        ledger.artifacts.append(binding)
+        contentByAvailability[binding.availability] = content
         return ledger
     }
 
-    func loadArtifactContent(for reference: ArtifactReference) async throws -> Data {
-        throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
-            path: reference.path,
-            reason: "test store has no artifact content"
+    func loadArtifactContent(for binding: FlowArtifactBinding) async throws -> Data {
+        guard let content = contentByAvailability[binding.availability] else {
+            throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
+                path: binding.availabilityDescription,
+                reason: "test store has no artifact content"
+            )
+        }
+        return content
+    }
+
+    private func makeBinding(
+        content: Data,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?
+    ) throws -> FlowArtifactBinding {
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: content),
+            byteCount: UInt64(content.count),
+            descriptor: descriptor
+        )
+        return try FlowArtifactBinding(
+            logicalID: logicalID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "waiver-test"),
+                relativePath: relativePath
+            ),
+            producer: producer
         )
     }
 
@@ -142,6 +207,7 @@ private struct PassingDecisionPacketValidator: FlowRunDecisionPacketValidating {
 private actor ReleaseEvidenceStore: FlowRunLedgerLoading, FlowArtifactPersisting {
     private let ledger: FlowRunLedger
     private(set) var persistedArtifactCount = 0
+    private var contentByPath: [ArtifactRelativePath: Data] = [:]
 
     init(ledger: FlowRunLedger) {
         self.ledger = ledger
@@ -153,56 +219,54 @@ private actor ReleaseEvidenceStore: FlowRunLedgerLoading, FlowArtifactPersisting
 
     func persistArtifact(
         content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
         runID: String,
+        producer: ProducerIdentity?,
         mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         persistedArtifactCount += 1
-        return ArtifactReference(
-            id: id,
-            locator: locator,
-            digest: try SHA256ContentDigester().digest(data: content),
-            byteCount: UInt64(content.count)
-        )
-    }
-
-    func persistArtifact(
-        content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
-        runID: String,
-        producer: ProducerIdentity,
-        mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
-        persistedArtifactCount += 1
-        return ArtifactReference(
-            id: id,
-            locator: locator,
-            digest: try SHA256ContentDigester().digest(data: content),
+        contentByPath[relativePath] = content
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: content),
             byteCount: UInt64(content.count),
+            descriptor: descriptor
+        )
+        return try FlowArtifactBinding(
+            logicalID: logicalID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "release-test"),
+                relativePath: relativePath
+            ),
             producer: producer
         )
     }
 
     func loadArtifactContent(
-        for reference: ArtifactReference
+        for binding: FlowArtifactBinding
     ) async throws -> Data {
-        throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
-            path: reference.locator.location.value,
-            reason: "missing retained release evidence"
-        )
+        guard case .local(_, _, let relativePath) = binding.availability,
+              let content = contentByPath[relativePath] else {
+            throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
+                path: binding.availabilityDescription,
+                reason: "missing retained release evidence"
+            )
+        }
+        return content
     }
 
     func loadArtifactContent(
-        at locator: ArtifactLocator,
+        at relativePath: ArtifactRelativePath
     ) async throws -> Data? {
-        nil
+        contentByPath[relativePath]
     }
 
     func artifactExists(
-        at locator: ArtifactLocator,
+        at relativePath: ArtifactRelativePath
     ) async throws -> Bool {
-        false
+        contentByPath[relativePath] != nil
     }
 }

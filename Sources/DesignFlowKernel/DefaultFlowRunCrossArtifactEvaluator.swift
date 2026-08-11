@@ -43,7 +43,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             profileID: profile?.profileID,
             status: overallStatus(from: channelResults),
             generatedAt: generatedAt,
-            artifactIDs: stableUnique(artifactReferences.map { $0.id.rawValue } + envelopes.map(\.artifactID)),
+            artifactIDs: stableUnique(artifactReferences.map { $0.id.description } + envelopes.map(\.artifactID)),
             channelResults: channelResults,
             diagnostics: diagnostics,
             summary: summary(from: channelResults, diagnostics: diagnostics)
@@ -54,7 +54,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
             let reference = try await evidencePersistence.persistCrossArtifactEvaluation(
                 evaluation
             )
-            producedReferences.append(reference)
+            producedReferences.append(reference.reference)
         }
 
         return FlowRunCrossArtifactEvaluationResult(
@@ -206,7 +206,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         existingResults: [FlowEvaluationChannelResult]
     ) -> [FlowEvaluationChannelResult] {
         let artifactRoles = Set(
-            envelopes.map(\.role) + artifactReferences.map { $0.locator.role.rawValue }
+            envelopes.map(\.role) + artifactReferences.map { $0.descriptor.role.rawValue }
         )
         let resultChannelIDs = Set(existingResults.map(\.channelID))
         let observedChannelIDs = Set(envelopes.flatMap { envelope in
@@ -327,8 +327,8 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         envelopes: [FlowArtifactEnvelope]
     ) throws -> [ArtifactReference] {
         stableUniqueReferences(
-            ledger.runManifest.artifacts
-                + ledger.stages.flatMap(\.artifacts)
+            ledger.runManifest.artifacts.map(\.reference)
+                + ledger.stages.flatMap(\.artifacts).map(\.reference)
                 + envelopes.map(\.reference)
         )
     }
@@ -485,7 +485,7 @@ public struct DefaultFlowRunCrossArtifactEvaluator: Sendable {
         var seen: Set<String> = []
         var unique: [ArtifactReference] = []
         for reference in references {
-            let key = reference.id.rawValue
+            let key = reference.id.description
             guard !seen.contains(key) else {
                 continue
             }

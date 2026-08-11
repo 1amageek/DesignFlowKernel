@@ -10,29 +10,29 @@ public struct DefaultFlowRunArtifactLocationValidator: FlowRunArtifactLocationVa
         self.storagePrefix = normalized?.isEmpty == false ? normalized : nil
     }
 
-    public func location(boundTo logicalPath: String) throws -> ArtifactLocation {
+    public func relativePath(boundTo logicalPath: String) throws -> ArtifactRelativePath {
         let path = storagePrefix.map { "\($0)/\(logicalPath)" } ?? logicalPath
-        return try ArtifactLocation(workspaceRelativePath: path)
+        return try FlowArtifactPath.relative(path)
     }
 
-    public func isReference(
-        _ reference: ArtifactReference,
+    public func isBinding(
+        _ binding: FlowArtifactBinding,
         boundTo logicalPath: String,
         allowingContentAddressedVariant: Bool
     ) -> Bool {
-        guard reference.locator.location.storage == .workspaceRelative else {
+        guard case .local(_, _, let relativePath) = binding.availability else {
             return false
         }
         let expectedPath = storagePrefix.map { "\($0)/\(logicalPath)" } ?? logicalPath
-        if reference.path == expectedPath {
+        if relativePath.stringValue == expectedPath {
             return true
         }
         guard allowingContentAddressedVariant else {
             return false
         }
-        return reference.path == contentAddressedPath(
+        return relativePath.stringValue == contentAddressedPath(
             for: expectedPath,
-            digest: reference.digest
+            digest: binding.reference.digest
         )
     }
 

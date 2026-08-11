@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 
 public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetentionIndexValidating {
@@ -67,22 +68,12 @@ public struct DefaultFlowRunReleaseRetentionIndexValidator: FlowRunReleaseRetent
         }
 
         guard let dashboardData = try await persistence.loadArtifactContent(
-            at: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: index.sourceDashboardPath),
-                role: .output,
-                kind: .report,
-                format: .json
-            )
+            at: try FlowArtifactPath.relative(index.sourceDashboardPath)
         ) else {
             throw FlowRunReleaseRetentionError.missingSourceArtifact(index.sourceDashboardPath)
         }
         guard let historyData = try await persistence.loadArtifactContent(
-            at: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: index.historyPath),
-                role: .output,
-                kind: .report,
-                format: .text
-            )
+            at: try FlowArtifactPath.relative(index.historyPath)
         ) else {
             throw FlowRunReleaseRetentionError.missingSourceArtifact(index.historyPath)
         }

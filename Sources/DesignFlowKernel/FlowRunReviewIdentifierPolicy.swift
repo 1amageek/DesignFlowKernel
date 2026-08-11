@@ -74,6 +74,18 @@ struct FlowRunReviewIdentifierPolicy: Sendable {
     }
 
     private func digestPrefix(for value: String) -> String {
-        String(ArtifactID(stableKey: value).rawValue.dropFirst("derived-".count).prefix(12))
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return String(String(hash, radix: 16).leftPadding(toLength: 16, withPad: "0").prefix(12))
+    }
+}
+
+private extension String {
+    func leftPadding(toLength: Int, withPad pad: Character) -> String {
+        guard count < toLength else { return self }
+        return String(repeating: String(pad), count: toLength - count) + self
     }
 }

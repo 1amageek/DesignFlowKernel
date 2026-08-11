@@ -3,12 +3,12 @@ import Foundation
 
 public struct FlowRunStageArtifactLadderBuildResult: Sendable, Hashable, Codable {
     public var ladder: FlowRunStageArtifactLadder
-    /// Canonical Foundation reference for the persisted artifact ladder.
-    public var artifact: ArtifactReference
+    /// Canonical content identity and materialization for the persisted artifact ladder.
+    public var artifact: FlowArtifactBinding
 
     public init(
         ladder: FlowRunStageArtifactLadder,
-        artifact: ArtifactReference
+        artifact: FlowArtifactBinding
     ) {
         self.ladder = ladder
         self.artifact = artifact
@@ -17,7 +17,7 @@ public struct FlowRunStageArtifactLadderBuildResult: Sendable, Hashable, Codable
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         ladder = try container.decode(FlowRunStageArtifactLadder.self, forKey: .ladder)
-        artifact = try container.decode(ArtifactReference.self, forKey: .artifact)
+        artifact = try container.decode(FlowArtifactBinding.self, forKey: .artifact)
     }
 
     private enum CodingKeys: String, CodingKey {

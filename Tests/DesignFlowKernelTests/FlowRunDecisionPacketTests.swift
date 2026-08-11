@@ -20,7 +20,7 @@ enum DecisionPacketReferenceMismatch: String, CaseIterable, Sendable {
     case textFormat
     case wrongContentDigestPath
 
-    func locator(for reference: ArtifactReference) throws -> ArtifactLocator {
+    func binding(for original: FlowArtifactBinding) throws -> FlowArtifactBinding {
         let path: String
         let role: ArtifactRole
         let kind: ArtifactKind
@@ -37,17 +37,17 @@ enum DecisionPacketReferenceMismatch: String, CaseIterable, Sendable {
             kind = .report
             format = .json
         case .inputRole:
-            path = reference.path
+            path = try original.requireLocalRelativePath().stringValue
             role = .input
             kind = .report
             format = .json
         case .otherKind:
-            path = reference.path
+            path = try original.requireLocalRelativePath().stringValue
             role = .output
             kind = .other
             format = .json
         case .textFormat:
-            path = reference.path
+            path = try original.requireLocalRelativePath().stringValue
             role = .output
             kind = .report
             format = .text
@@ -57,11 +57,22 @@ enum DecisionPacketReferenceMismatch: String, CaseIterable, Sendable {
             kind = .report
             format = .json
         }
-        return ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: path),
-            role: role,
-            kind: kind,
-            format: format
+        let normalizedPath = path.hasPrefix(".xcircuite/")
+            ? String(path.dropFirst(".xcircuite/".count))
+            : path
+        let reference = ArtifactReference(
+            id: original.reference.id,
+            descriptor: ArtifactDescriptor(role: role, kind: kind, format: format)
+        )
+        return try FlowArtifactBinding(
+            logicalID: original.logicalID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: original.requireLocalRootID(),
+                relativePath: FlowArtifactPath.relative(normalizedPath)
+            ),
+            producer: original.producer
         )
     }
 }
@@ -118,8 +129,8 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(result.artifact.artifactID == "review-decision-packet")
-    #expect(result.artifact.path == ".xcircuite/runs/run-1/review/decision-packet.json")
+    #expect(result.artifact.logicalID == "review-decision-packet")
+    #expect(try result.artifact.requireLocalRelativePath().stringValue == "runs/run-1/review/decision-packet.json")
     #expect(result.packet.schemaVersion == 3)
     #expect(result.packet.reviewBundle.schemaVersion == 3)
     #expect(result.packet.readiness == .needsReview)
@@ -143,10 +154,8 @@ extension FlowRunLedgerSummaryTests {
         FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
-    #expect(manifest.artifacts.contains {
-        $0.artifactID == "review-decision-packet"
-            && $0.path == ".xcircuite/runs/run-1/review/decision-packet.json"
-    })
+    let packetBinding = manifest.artifacts.first { $0.logicalID == "review-decision-packet" }
+    #expect(try packetBinding?.requireLocalRelativePath().stringValue == "runs/run-1/review/decision-packet.json")
 }
 
 @Test func decisionPacketBuilderEmitsPacketResult() async throws {
@@ -173,7 +182,7 @@ extension FlowRunLedgerSummaryTests {
         workspaceID: try testWorkspaceID(for: root)
     )
 
-    #expect(result.artifact.artifactID == "review-decision-packet")
+    #expect(result.artifact.logicalID == "review-decision-packet")
     #expect(result.packet.runID == "run-1")
     #expect(result.packet.readiness == .needsReview)
     #expect(result.packet.completionIssues.contains {
@@ -225,10 +234,13 @@ extension FlowRunLedgerSummaryTests {
         FlowRunManifest.self,
         from: root.appending(path: ".xcircuite/runs/run-1/manifest.json")
     )
-    #expect(manifest.artifacts.contains {
-        $0.artifactID == "review-decision-packet-validation"
-            && $0.path == ".xcircuite/runs/run-1/review/decision-packet-validation.json"
-    })
+    let validationBinding = manifest.artifacts.first {
+        $0.logicalID == "review-decision-packet-validation"
+    }
+    #expect(
+        try validationBinding?.requireLocalRelativePath().stringValue
+            == "runs/run-1/review/decision-packet-validation.json"
+    )
 }
 
 @Test func decisionPacketValidatorBlocksStalePacketAfterApprovalChangesLedger() async throws {
@@ -322,19 +334,18 @@ extension FlowRunLedgerSummaryTests {
 
 	    let store = await TestFlowInfrastructure.bound(to: root)
 	    let manifest = try await store.loadRunManifest(runID: "run-1", inProjectAt: root)
-	    let packetPath = ".xcircuite/runs/run-1/review/decision-packet.json"
-	    let originalReference = try #require(manifest.artifacts.first {
-	        $0.path == packetPath
+	    let packetPath = "runs/run-1/review/decision-packet.json"
+	    let originalBinding = try #require(manifest.artifacts.first {
+	        (try? $0.requireLocalRelativePath().stringValue) == packetPath
 	    })
-	    let mismatchedReference = ArtifactReference(
-	        id: try ArtifactID(rawValue: "wrong-decision-packet"),
-	        locator: originalReference.locator,
-	        digest: originalReference.digest,
-	        byteCount: originalReference.byteCount,
-	        producer: originalReference.producer
+	    let mismatchedBinding = try FlowArtifactBinding(
+	        logicalID: "wrong-decision-packet",
+	        reference: originalBinding.reference,
+	        availability: originalBinding.availability,
+	        producer: originalBinding.producer
 	    )
 	    _ = try await store.upsertRunArtifacts(
-	        [mismatchedReference],
+	        [mismatchedBinding],
 	        runID: "run-1",
 	        inProjectAt: root
 	    )
@@ -368,18 +379,11 @@ extension FlowRunLedgerSummaryTests {
         let store = await TestFlowInfrastructure.bound(to: root)
         var ledger = try await store.loadRunLedger(runID: "run-1")
         let original = try #require(ledger.artifacts.first {
-            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+            $0.logicalID == DefaultFlowRunDecisionPacketBuilder.artifactID
         })
-        let locator = try mismatch.locator(for: original)
-        let mismatched = ArtifactReference(
-            id: original.id,
-            locator: locator,
-            digest: original.digest,
-            byteCount: original.byteCount,
-            producer: original.producer
-        )
+        let mismatched = try mismatch.binding(for: original)
         ledger.artifacts.removeAll {
-            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+            $0.logicalID == DefaultFlowRunDecisionPacketBuilder.artifactID
         }
         ledger.artifacts.append(mismatched)
         ledger.runManifest = try advancingRevision(of: ledger.runManifest)
@@ -410,25 +414,26 @@ extension FlowRunLedgerSummaryTests {
         let store = await TestFlowInfrastructure.bound(to: root)
         var ledger = try await store.loadRunLedger(runID: "run-1")
         let original = try #require(ledger.artifacts.first {
-            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+            $0.logicalID == DefaultFlowRunDecisionPacketBuilder.artifactID
         })
         let content = try await store.loadArtifactContent(for: original)
-        let path = ".xcircuite/runs/run-1/review/decision-packet-\(original.digest.algorithm.rawValue)-\(original.digest.hexadecimalValue).json"
-        try content.write(to: root.appending(path: path), options: .atomic)
-        let contentAddressed = ArtifactReference(
-            id: original.id,
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .output,
-                kind: .report,
-                format: .json
+        let path = "runs/run-1/review/decision-packet-\(original.reference.digest.algorithm.rawValue)-\(original.reference.digest.hexadecimalValue).json"
+        try content.write(
+            to: root.appending(path: ".xcircuite/\(path)"),
+            options: .atomic
+        )
+        let contentAddressed = try FlowArtifactBinding(
+            logicalID: original.logicalID,
+            reference: original.reference,
+            availability: .local(
+                artifactID: original.reference.id,
+                rootID: original.requireLocalRootID(),
+                relativePath: FlowArtifactPath.relative(path)
             ),
-            digest: original.digest,
-            byteCount: original.byteCount,
             producer: original.producer
         )
         ledger.artifacts.removeAll {
-            $0.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+            $0.logicalID == DefaultFlowRunDecisionPacketBuilder.artifactID
         }
         ledger.artifacts.append(contentAddressed)
         ledger.runManifest = try advancingRevision(of: ledger.runManifest)
@@ -445,7 +450,7 @@ extension FlowRunLedgerSummaryTests {
         #expect(!validation.diagnostics.contains {
             $0.code == "decision-packet-artifact-reference-mismatch"
         })
-        #expect(validation.packetPath == path)
+        #expect(validation.packetPath == contentAddressed.availabilityDescription)
     }
 
 	@Test func decisionPacketValidatorBlocksUnreadableRunManifestWithDiagnostics() async throws {

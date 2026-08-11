@@ -1,10 +1,14 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 @testable import DesignFlowKernel
 
 func testWorkspaceID(for root: URL) throws -> FlowWorkspaceID {
-    try FlowWorkspaceID(
-        rawValue: ArtifactID(stableKey: root.standardizedFileURL.path(percentEncoded: false)).rawValue
+    let digest = try SHA256ContentDigester()
+        .digest(data: Data(root.standardizedFileURL.path(percentEncoded: false).utf8))
+        .hexadecimalValue
+    return try FlowWorkspaceID(
+        rawValue: "workspace-\(digest.prefix(24))"
     )
 }
 
@@ -22,13 +26,24 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
     private var progressEvents: [String: [FlowRunProgressEvent]] = [:]
     private var cancellations: [String: FlowRunCancellationRequest] = [:]
     private var envelopeRecords: [String: [FlowArtifactEnvelopeRecord]] = [:]
+    private var bindingsByContentID: [ArtifactID: FlowArtifactBinding] = [:]
 
     init(projectRoot: URL) {
         self.projectRoot = Self.canonicalRoot(projectRoot)
     }
 
     func verifiedData(for reference: ArtifactReference) async throws -> Data {
-        try await loadArtifactContent(for: reference)
+        guard let binding = bindingsByContentID[reference.id] else {
+            throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
+                path: reference.id.description,
+                reason: "artifact availability is not registered"
+            )
+        }
+        return try await loadArtifactContent(for: binding)
+    }
+
+    func registerArtifactBinding(_ binding: FlowArtifactBinding) {
+        bindingsByContentID[binding.reference.id] = binding
     }
 
     func prepareRun(
@@ -145,12 +160,18 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func appendActionArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         action: FlowRunActionRecord
     ) async throws -> FlowRunLedger {
         try appendActionOwnedArtifact(
             content: content,
-            reference: reference,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
+            producer: producer,
             approval: nil,
             action: action
         )
@@ -158,13 +179,19 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func appendApprovalArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         approval: FlowApprovalRecord,
         action: FlowRunActionRecord
     ) async throws -> FlowRunLedger {
         try appendActionOwnedArtifact(
             content: content,
-            reference: reference,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
+            producer: producer,
             approval: approval,
             action: action
         )
@@ -172,7 +199,10 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     private func appendActionOwnedArtifact(
         content: Data,
-        reference: ArtifactReference,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?,
         approval: FlowApprovalRecord?,
         action: FlowRunActionRecord
     ) throws -> FlowRunLedger {
@@ -193,19 +223,18 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
                 approvalID: approval.stageID
             )
         }
-        let expectedReference = ArtifactReference(
-            id: reference.id,
-            locator: reference.locator,
-            digest: try SHA256ContentDigester().digest(data: content),
-            byteCount: UInt64(content.count),
-            producer: reference.producer
+        let binding = try makeBinding(
+            content: content,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
+            producer: producer
         )
-        guard expectedReference == reference,
-              action.runID == ledger.runID,
-              action.outputs == [reference] else {
+        guard action.runID == ledger.runID,
+              action.outputs == [binding.reference] else {
             throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
                 runID: action.runID,
-                path: reference.path
+                path: binding.availabilityDescription
             )
         }
         if let approval {
@@ -215,26 +244,26 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             let expectedPath = ".xcircuite/runs/\(approval.runID)/approvals/\(approval.stageID).json"
             guard approval.runID == action.runID,
                   action.stageID == approval.stageID,
-                  reference.artifactID == "approval-\(approval.stageID)",
-                  reference.path == expectedPath,
-                  reference.locator.role == .output,
-                  reference.locator.kind == .report,
-                  reference.locator.format == .json,
-                  action.inputs == [approval.evidence.plan, approval.evidence.stageResult],
+                  binding.logicalID == "approval-\(approval.stageID)",
+                  relativePath.stringValue == normalizedRelativePath(expectedPath),
+                  binding.role == .output,
+                  binding.kind == .report,
+                  binding.format == .json,
+                  action.inputs == [
+                    approval.evidence.plan.reference,
+                    approval.evidence.stageResult.reference,
+                  ],
                   content == expectedContent else {
                 throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
                     runID: action.runID,
-                    path: reference.path
+                    path: binding.availabilityDescription
                 )
             }
         }
-        let destination = try artifactURL(
-            locator: projectRelativeLocator(from: reference.locator),
-            projectRoot: projectRoot
-        )
+        let destination = try artifactURL(relativePath: relativePath)
         guard !FileManager.default.fileExists(atPath: destination.path(percentEncoded: false)) else {
             throw FlowRunLedgerPersistenceError.storageFailed(
-                "immutable action artifact already exists: \(reference.path)"
+                "immutable action artifact already exists: \(binding.availabilityDescription)"
             )
         }
         try FileManager.default.createDirectory(
@@ -246,9 +275,13 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         if let approval {
             ledger.approvals.append(approval)
         }
+        ledger.artifacts.removeAll { sameMaterializationPath($0, binding) }
+        ledger.artifacts.append(binding)
+        ledger.runManifest.artifacts = ledger.artifacts
         ledger.runManifest.revision += 1
         ledger.runManifest.updatedAt = max(Date(), ledger.runManifest.updatedAt)
         try content.write(to: destination, options: .atomic)
+        bindingsByContentID[binding.reference.id] = binding
         ledgers[key] = ledger
         if let approval {
             approvals[approvalKey(
@@ -278,49 +311,14 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func persistArtifact(
         content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
-        runID: String,
-        mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
-        try await persistArtifact(
-            content: content,
-            id: id,
-            locator: locator,
-            runID: runID,
-            producer: nil,
-            mode: mode
-        )
-    }
-
-    func persistArtifact(
-        content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
-        runID: String,
-        producer: ProducerIdentity,
-        mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
-        try await persistArtifact(
-            content: content,
-            id: id,
-            locator: locator,
-            runID: runID,
-            producer: Optional(producer),
-            mode: mode
-        )
-    }
-
-    private func persistArtifact(
-        content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
         runID: String,
         producer: ProducerIdentity?,
         mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
-        let persistedLocator = try projectRelativeLocator(from: locator)
-        let url = try artifactURL(locator: persistedLocator, projectRoot: projectRoot)
+    ) async throws -> FlowArtifactBinding {
+        let url = try artifactURL(relativePath: relativePath)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -331,85 +329,93 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         switch mode {
         case .createOnly where destinationExists:
             throw FlowRunLedgerPersistenceError.storageFailed(
-                "artifact already exists: \(locator.location.value)"
+                "artifact already exists: \(relativePath.stringValue)"
             )
         case .immutable where destinationExists:
             let existing = try Data(contentsOf: url)
             guard existing == content else {
                 throw FlowRunLedgerPersistenceError.storageFailed(
-                    "immutable artifact conflict: \(locator.location.value)"
+                    "immutable artifact conflict: \(relativePath.stringValue)"
                 )
             }
         case .appendOnly where destinationExists:
             let existing = try Data(contentsOf: url)
             guard content.starts(with: existing) else {
                 throw FlowRunLedgerPersistenceError.storageFailed(
-                    "append-only artifact conflict: \(locator.location.value)"
+                    "append-only artifact conflict: \(relativePath.stringValue)"
                 )
             }
             try content.write(to: url, options: .atomic)
         case .createOnly, .immutable, .replaceable, .appendOnly:
             try content.write(to: url, options: .atomic)
         }
-        let reference = ArtifactReference(
-            id: id,
-            locator: persistedLocator,
-            digest: try SHA256ContentDigester().digest(data: content),
-            byteCount: UInt64(content.count),
+        let binding = try makeBinding(
+            content: content,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
             producer: producer
         )
+        bindingsByContentID[binding.reference.id] = binding
         let key = runKey(runID: runID, projectRoot: projectRoot)
         if var ledger = ledgers[key] {
-            ledger.artifacts.removeAll {
-                $0.locator.location == reference.locator.location
-            }
-            ledger.artifacts.append(reference)
-            ledger.artifacts.sort { $0.path < $1.path }
+            ledger.artifacts.removeAll { sameMaterializationPath($0, binding) }
+            ledger.artifacts.append(binding)
+            ledger.artifacts.sort { $0.availabilityDescription < $1.availabilityDescription }
             ledger.runManifest.artifacts = ledger.artifacts
             ledger.runManifest.revision += 1
             ledger.runManifest.updatedAt = Date()
             ledgers[key] = ledger
             try persistManifestProjection(for: ledger)
         }
-        return reference
+        return binding
     }
 
     func persistRunControlArtifact(
         content: Data,
-        id: ArtifactID?,
-        locator: ArtifactLocator,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
         runID: String,
         mode: FlowArtifactPersistenceMode
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await persistArtifact(
             content: content,
-            id: id,
-            locator: locator,
+            logicalID: logicalID,
+            relativePath: relativePath,
+            descriptor: descriptor,
             runID: runID,
+            producer: nil,
             mode: mode
         )
     }
 
     func loadArtifactContent(
-        for reference: ArtifactReference
+        for binding: FlowArtifactBinding
     ) async throws -> Data {
-        let url = try artifactURL(
-            locator: storageLocator(for: reference.locator),
-            projectRoot: projectRoot
-        )
+        let expectedRootID = try artifactRootID()
+        guard case .local(_, let rootID, let relativePath) = binding.availability,
+              rootID == expectedRootID else {
+            throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
+                path: binding.availabilityDescription,
+                reason: "test storage requires its local artifact root"
+            )
+        }
+        let url = try artifactURL(relativePath: relativePath)
         let data: Data
         do {
             data = try Data(contentsOf: url)
         } catch {
             throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
-                path: reference.path,
+                path: binding.availabilityDescription,
                 reason: error.localizedDescription
             )
         }
         let digest = try SHA256ContentDigester().digest(data: data)
+        let reference = binding.reference
         guard digest == reference.digest, UInt64(data.count) == reference.byteCount else {
             throw FlowRunLedgerPersistenceError.artifactIntegrityFailure(
-                path: reference.locator.location.value,
+                path: binding.availabilityDescription,
                 reason: "digest or byte count mismatch"
             )
         }
@@ -417,49 +423,30 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
     }
 
     func loadArtifactContent(
-        at locator: ArtifactLocator
+        at relativePath: ArtifactRelativePath
     ) async throws -> Data? {
-        let directURL = try artifactURL(locator: locator, projectRoot: projectRoot)
-        if FileManager.default.fileExists(atPath: directURL.path(percentEncoded: false)) {
-            return try Data(contentsOf: directURL)
-        }
-        let persistedURL = try artifactURL(
-            locator: projectRelativeLocator(from: locator),
-            projectRoot: projectRoot
-        )
-        guard FileManager.default.fileExists(atPath: persistedURL.path(percentEncoded: false)) else {
+        let url = try artifactURL(relativePath: relativePath)
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             return nil
         }
-        return try Data(contentsOf: persistedURL)
+        return try Data(contentsOf: url)
     }
 
-    func artifactExists(at locator: ArtifactLocator) async throws -> Bool {
-        let directURL = try artifactURL(locator: locator, projectRoot: projectRoot)
-        if FileManager.default.fileExists(atPath: directURL.path(percentEncoded: false)) {
-            return true
-        }
+    func artifactExists(at relativePath: ArtifactRelativePath) async throws -> Bool {
         return FileManager.default.fileExists(
-            atPath: try artifactURL(
-                locator: projectRelativeLocator(from: locator),
-                projectRoot: projectRoot
-            ).path(percentEncoded: false)
+            atPath: try artifactURL(relativePath: relativePath).path(percentEncoded: false)
         )
     }
 
-    func verifyArtifact(_ reference: ArtifactReference) async -> ArtifactIntegrity {
+    func verifyArtifact(_ binding: FlowArtifactBinding) async -> ArtifactIntegrity {
         do {
-            let locator = try storageLocator(for: reference.locator)
-            let persistedReference = ArtifactReference(
-                id: reference.id,
-                locator: locator,
-                digest: reference.digest,
-                byteCount: reference.byteCount,
-                producer: reference.producer
-            )
-            return LocalArtifactVerifier().verify(persistedReference, relativeTo: projectRoot)
+            _ = try await loadArtifactContent(for: binding)
+            return ArtifactIntegrity()
+        } catch let error as FlowRunLedgerPersistenceError {
+            return ArtifactIntegrity(issues: [.unreadableFile(String(describing: error))])
         } catch {
             return ArtifactIntegrity(issues: [
-                .invalidLocation(error.localizedDescription),
+                .unreadableFile(error.localizedDescription),
             ])
         }
     }
@@ -552,12 +539,12 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
     }
 
     func upsertRunArtifacts(
-        _ references: [ArtifactReference],
+        _ bindings: [FlowArtifactBinding],
         runID: String,
         inProjectAt projectRoot: URL
     ) throws {
-        for reference in references {
-            try upsertRunArtifact(reference, runID: runID, inProjectAt: projectRoot)
+        for binding in bindings {
+            try upsertRunArtifact(binding, runID: runID, inProjectAt: projectRoot)
         }
     }
 
@@ -675,26 +662,27 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         format: ArtifactFormat,
         inProjectAt projectRoot: URL,
         producerRunID: String? = nil
-    ) throws -> ArtifactReference {
+    ) throws -> FlowArtifactBinding {
         let data = try Data(contentsOf: projectRoot.appending(path: path))
-        return ArtifactReference(
-            id: try artifactID.map(ArtifactID.init(rawValue:)),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        let binding = try makeBinding(
+            content: data,
+            logicalID: artifactID ?? "test-artifact",
+            relativePath: try FlowArtifactPath.relative(normalizedRelativePath(path)),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: kind,
                 format: format
             ),
-            digest: try SHA256ContentDigester().digest(data: data),
-            byteCount: UInt64(data.count),
             producer: try producerRunID.map {
                 try ProducerIdentity(kind: .engine, identifier: $0, version: "1")
             }
         )
+        bindingsByContentID[binding.reference.id] = binding
+        return binding
     }
 
     func upsertRunArtifact(
-        _ reference: ArtifactReference,
+        _ binding: FlowArtifactBinding,
         runID: String,
         inProjectAt projectRoot: URL
     ) throws {
@@ -702,12 +690,13 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         guard var ledger = ledgers[key] else {
             throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: runID)
         }
-        ledger.artifacts.removeAll { $0.locator.location == reference.locator.location }
-        ledger.artifacts.append(reference)
+        ledger.artifacts.removeAll { sameMaterializationPath($0, binding) }
+        ledger.artifacts.append(binding)
         ledger.runManifest.artifacts = ledger.artifacts
         ledger.runManifest.revision += 1
         ledger.runManifest.updatedAt = Date()
         ledgers[key] = ledger
+        bindingsByContentID[binding.reference.id] = binding
     }
 
     func loadCancellationRequest(
@@ -752,16 +741,15 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         }
         _ = try await persistArtifact(
             content: content,
-            id: ArtifactID(rawValue: "run-progress"),
-            locator: ArtifactLocator(
-                location: ArtifactLocation(
-                    workspaceRelativePath: ".xcircuite/runs/\(event.runID)/progress.jsonl"
-                ),
+            logicalID: "run-progress",
+            relativePath: try FlowArtifactPath.relative("runs/\(event.runID)/progress.jsonl"),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .text
             ),
             runID: event.runID,
+            producer: nil,
             mode: .replaceable
         )
         return event
@@ -777,7 +765,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func persistCancellationRequest(
         _ request: FlowRunCancellationRequest
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         _ = try ensureRunDirectory(for: request.runID, inProjectAt: projectRoot)
         cancellations[runKey(runID: request.runID, projectRoot: projectRoot)] = request
         let key = runKey(runID: request.runID, projectRoot: projectRoot)
@@ -793,7 +781,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         )
     }
 
-    func runControlArtifacts(runID: String) async throws -> [ArtifactReference] {
+    func runControlArtifacts(runID: String) async throws -> [FlowArtifactBinding] {
         let ledger: FlowRunLedger
         do {
             ledger = try await loadRunLedger(runID: runID)
@@ -801,7 +789,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             return []
         }
         return ledger.artifacts.filter {
-            $0.id.rawValue == "run-progress" || $0.id.rawValue == "run-cancellation-request"
+            $0.logicalID == "run-progress" || $0.logicalID == "run-cancellation-request"
         }
     }
 
@@ -819,7 +807,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         guard Self.canonicalRoot(candidateRoot) == projectRoot else {
             throw FlowRunLedgerPersistenceError.storageFailed("test infrastructure root mismatch")
         }
-        let reference = try await persistJSON(
+        let binding = try await persistJSON(
             envelope,
             id: envelope.artifactID,
             path: ".xcircuite/runs/\(runID)/evidence/\(envelope.artifactID).json",
@@ -832,8 +820,8 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         guard var ledger = ledgers[key] else {
             throw FlowRunLedgerPersistenceError.resumeTargetNotFound(runID: runID)
         }
-        ledger.artifacts.removeAll { $0.locator.location == reference.locator.location }
-        ledger.artifacts.append(reference)
+        ledger.artifacts.removeAll { sameMaterializationPath($0, binding) }
+        ledger.artifacts.append(binding)
         ledger.runManifest.artifacts = ledger.artifacts
         ledger.runManifest.revision += 1
         ledger.runManifest.updatedAt = Date()
@@ -842,7 +830,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func persistCrossArtifactEvaluation(
         _ evaluation: FlowCrossArtifactEvaluation
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await persistJSON(
             evaluation,
             id: "cross-artifact-evaluation",
@@ -854,7 +842,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
     func persistLoopIterationSummaries(
         _ iterations: [FlowLoopIterationSummary],
         runID: String
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await persistJSON(
             iterations,
             id: "agent-loop-iterations",
@@ -865,7 +853,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
 
     func persistAgentLoopSnapshot(
         _ snapshot: FlowAgentLoopSnapshot
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await persistJSON(
             snapshot,
             id: "agent-loop-snapshot",
@@ -879,64 +867,84 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         id: String,
         path: String,
         runID: String
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return try await persistArtifact(
             content: encoder.encode(value),
-            id: try ArtifactID(rawValue: id),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+            logicalID: id,
+            relativePath: try FlowArtifactPath.relative(normalizedRelativePath(path)),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .report,
                 format: .json
             ),
             runID: runID,
+            producer: nil,
             mode: .replaceable
         )
     }
 
-    private func artifactURL(locator: ArtifactLocator, projectRoot: URL) throws -> URL {
-        guard locator.location.storage == .workspaceRelative else {
-            throw FlowRunLedgerPersistenceError.storageFailed("absolute test artifact location")
-        }
-        let path = locator.location.value
-        guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
-            throw FlowRunLedgerPersistenceError.storageFailed("unsafe test artifact path: \(path)")
-        }
-        return projectRoot.appending(path: path)
+    private func artifactURL(relativePath: ArtifactRelativePath) throws -> URL {
+        projectRoot
+            .appending(path: ".xcircuite", directoryHint: .isDirectory)
+            .appending(path: relativePath.stringValue)
     }
 
-    private func projectRelativeLocator(from locator: ArtifactLocator) throws -> ArtifactLocator {
-        guard locator.location.storage == .workspaceRelative else {
-            return locator
-        }
-        let value = locator.location.value
-        guard !value.hasPrefix(".xcircuite/") else {
-            return locator
-        }
-        return ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: ".xcircuite/\(value)"),
-            role: locator.role,
-            kind: locator.kind,
-            format: locator.format
+    private func artifactRootID() throws -> ArtifactRootID {
+        try ArtifactRootID(rawValue: "test-workspace")
+    }
+
+    private func normalizedRelativePath(_ path: String) -> String {
+        path.hasPrefix(".xcircuite/")
+            ? String(path.dropFirst(".xcircuite/".count))
+            : path
+    }
+
+    private func makeBinding(
+        content: Data,
+        logicalID: String,
+        relativePath: ArtifactRelativePath,
+        descriptor: ArtifactDescriptor,
+        producer: ProducerIdentity?
+    ) throws -> FlowArtifactBinding {
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: content),
+            byteCount: UInt64(content.count),
+            descriptor: descriptor
+        )
+        return try FlowArtifactBinding(
+            logicalID: logicalID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: artifactRootID(),
+                relativePath: relativePath
+            ),
+            producer: producer
         )
     }
 
-    private func storageLocator(for locator: ArtifactLocator) throws -> ArtifactLocator {
-        guard locator.location.storage == .workspaceRelative,
-              locator.location.value.hasPrefix("runs/") else {
-            return locator
+    private func sameMaterializationPath(
+        _ left: FlowArtifactBinding,
+        _ right: FlowArtifactBinding
+    ) -> Bool {
+        switch (left.availability, right.availability) {
+        case (.local(_, let leftRoot, let leftPath), .local(_, let rightRoot, let rightPath)):
+            return leftRoot == rightRoot && leftPath == rightPath
+        case (.service(_, let leftResource), .service(_, let rightResource)):
+            return leftResource == rightResource
+        default:
+            return false
         }
-        return try projectRelativeLocator(from: locator)
     }
 
     private func persistProjections(for ledger: FlowRunLedger) throws {
         let runDirectory = projectRoot.appending(path: ".xcircuite/runs/\(ledger.runID)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
-        var generatedReferences: [ArtifactReference] = []
+        var generatedBindings: [FlowArtifactBinding] = []
         if let plan = ledger.plan {
-            generatedReferences.append(try writeProjectionReference(
+            generatedBindings.append(try writeProjectionReference(
                 plan,
                 id: "run-plan",
                 path: ".xcircuite/runs/\(ledger.runID)/plan.json",
@@ -946,7 +954,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             ))
         }
         if let toolchain = ledger.toolchain {
-            generatedReferences.append(try writeProjectionReference(
+            generatedBindings.append(try writeProjectionReference(
                 toolchain,
                 id: "toolchain-manifest",
                 path: ".xcircuite/runs/\(ledger.runID)/toolchain.json",
@@ -963,7 +971,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             }
             let stageDirectory = runDirectory.appending(path: "stages/\(stage.stageID)", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: stageDirectory, withIntermediateDirectories: true)
-            generatedReferences.append(try writeProjectionReference(
+            generatedBindings.append(try writeProjectionReference(
                 stage,
                 id: "\(stage.stageID)-result",
                 path: ".xcircuite/runs/\(ledger.runID)/stages/\(stage.stageID)/result.json",
@@ -973,7 +981,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             ))
         }
         for approval in ledger.approvals {
-            generatedReferences.append(try writeProjectionReference(
+            generatedBindings.append(try writeProjectionReference(
                 approval,
                 id: "approval-\(approval.stageID)",
                 path: ".xcircuite/runs/\(ledger.runID)/approvals/\(approval.stageID).json",
@@ -983,7 +991,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             ))
         }
         if !ledger.actions.isEmpty {
-            generatedReferences.append(try writeJSONLinesReference(
+            generatedBindings.append(try writeJSONLinesReference(
                 ledger.actions,
                 id: "action-ledger",
                 path: ".xcircuite/runs/\(ledger.runID)/actions.jsonl",
@@ -992,7 +1000,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             ))
         }
         if let designDiff = ledger.designDiff {
-            generatedReferences.append(try writeProjectionReference(
+            generatedBindings.append(try writeProjectionReference(
                 designDiff,
                 id: "design-diff",
                 path: ".xcircuite/runs/\(ledger.runID)/design-diff.json",
@@ -1003,9 +1011,10 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         }
 
         var stored = ledger
-        for reference in generatedReferences {
-            stored.artifacts.removeAll { $0.path == reference.path }
-            stored.artifacts.append(reference)
+        for binding in generatedBindings {
+            stored.artifacts.removeAll { sameMaterializationPath($0, binding) }
+            stored.artifacts.append(binding)
+            bindingsByContentID[binding.reference.id] = binding
         }
         try persistManifestProjection(for: stored)
     }
@@ -1017,15 +1026,15 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         )
         try FileManager.default.createDirectory(at: runDirectory, withIntermediateDirectories: true)
         var stored = ledger
-        stored.artifacts.sort { $0.path < $1.path }
+        stored.artifacts.sort { $0.availabilityDescription < $1.availabilityDescription }
         stored.runManifest.artifacts = stored.artifacts.filter {
-            $0.id.rawValue != "run-manifest"
+            $0.logicalID != "run-manifest"
         }
         try writeProjection(
             stored.runManifest,
             to: runDirectory.appending(path: "manifest.json")
         )
-        let manifestReference = try fileReference(
+        let manifestBinding = try fileReference(
             forProjectRelativePath: ".xcircuite/runs/\(stored.runID)/manifest.json",
             artifactID: "run-manifest",
             kind: .report,
@@ -1033,13 +1042,14 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
             inProjectAt: projectRoot,
             producerRunID: stored.runID
         )
-        stored.artifacts.removeAll { $0.path == manifestReference.path }
-        stored.artifacts.append(manifestReference)
-        stored.artifacts.sort { $0.path < $1.path }
+        stored.artifacts.removeAll { sameMaterializationPath($0, manifestBinding) }
+        stored.artifacts.append(manifestBinding)
+        stored.artifacts.sort { $0.availabilityDescription < $1.availabilityDescription }
         if let evidence = stored.evidence {
-            stored.evidence = EvidenceManifest(
+            stored.evidence = try EvidenceManifest.contentAddressed(
                 provenance: evidence.provenance,
-                artifacts: stored.artifacts
+                artifacts: stored.artifacts.map(\.reference),
+                digester: SHA256ContentDigester()
             )
         }
         ledgers[runKey(runID: stored.runID, projectRoot: projectRoot)] = stored
@@ -1058,22 +1068,21 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         role: ArtifactRole,
         to url: URL,
         runID: String
-    ) throws -> ArtifactReference {
+    ) throws -> FlowArtifactBinding {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(value)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
-        return ArtifactReference(
-            id: try ArtifactID(rawValue: id),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        return try makeBinding(
+            content: data,
+            logicalID: id,
+            relativePath: try FlowArtifactPath.relative(normalizedRelativePath(path)),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: .other,
                 format: .json
             ),
-            digest: try SHA256ContentDigester().digest(data: data),
-            byteCount: UInt64(data.count),
             producer: try ProducerIdentity(kind: .engine, identifier: runID, version: "1")
         )
     }
@@ -1084,7 +1093,7 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         path: String,
         to url: URL,
         runID: String
-    ) throws -> ArtifactReference {
+    ) throws -> FlowArtifactBinding {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var data = Data()
@@ -1094,16 +1103,15 @@ actor TestFlowInfrastructure: FlowRunInfrastructure, FlowRunLedgerPersisting, Fl
         }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
-        return ArtifactReference(
-            id: try ArtifactID(rawValue: id),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        return try makeBinding(
+            content: data,
+            logicalID: id,
+            relativePath: try FlowArtifactPath.relative(normalizedRelativePath(path)),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: .other,
                 format: .text
             ),
-            digest: try SHA256ContentDigester().digest(data: data),
-            byteCount: UInt64(data.count),
             producer: try ProducerIdentity(kind: .engine, identifier: runID, version: "1")
         )
     }
@@ -1198,9 +1206,7 @@ func makeTestApprovalRecorder(projectRoot: URL) async -> DefaultFlowGateApproval
             )
         ),
         approvalPersistence: infrastructure,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 }
 
@@ -1221,9 +1227,7 @@ func makeTestDecisionPacketValidator(projectRoot: URL) async -> DefaultFlowRunDe
             loader: infrastructure,
             persistence: infrastructure
         ),
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 }
 
@@ -1264,9 +1268,7 @@ func makeTestRunResumer(projectRoot: URL) async throws -> DefaultFlowRunResumer 
             )
         ),
         artifactPersistence: infrastructure,
-        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator(
-            storagePrefix: ".xcircuite"
-        )
+        artifactLocationValidator: DefaultFlowRunArtifactLocationValidator()
     )
 }
 
@@ -1304,7 +1306,7 @@ func makeTestInputArtifactReference(
     at url: URL,
     artifactID: String,
     projectRoot: URL
-) async throws -> ArtifactReference {
+) async throws -> FlowArtifactBinding {
     func canonicalPath(_ candidate: URL) -> String {
         var path = candidate.standardizedFileURL.resolvingSymlinksInPath()
             .path(percentEncoded: false)
@@ -1412,17 +1414,27 @@ func makeTestReviewArtifact(
     byteCount: UInt64 = 0,
     integrity: FlowRunReviewArtifactIntegrity? = nil
 ) throws -> FlowRunReviewArtifact {
-    FlowRunReviewArtifact(
-        reference: ArtifactReference(
-            id: try ArtifactID(rawValue: artifactID),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
-                role: .output,
-                kind: kind,
-                format: format
-            ),
-            digest: try ContentDigest(algorithm: .sha256, hexadecimalValue: sha256),
-            byteCount: byteCount
+    let reference = try ArtifactReference(
+        digest: ContentDigest(algorithm: .sha256, hexadecimalValue: sha256),
+        byteCount: byteCount,
+        descriptor: ArtifactDescriptor(
+            role: .output,
+            kind: kind,
+            format: format
+        )
+    )
+    let normalizedPath = path.hasPrefix(".xcircuite/")
+        ? String(path.dropFirst(".xcircuite/".count))
+        : path
+    return FlowRunReviewArtifact(
+        binding: try FlowArtifactBinding(
+            logicalID: artifactID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(normalizedPath)
+            )
         ),
         purpose: purpose,
         stageID: stageID,

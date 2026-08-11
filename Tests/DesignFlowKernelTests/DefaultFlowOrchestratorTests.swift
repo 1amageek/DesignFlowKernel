@@ -58,8 +58,56 @@ struct DefaultFlowOrchestratorTests {
         let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: "run-1")
         let evidence = try #require(ledger.evidence)
         #expect(evidence.provenance == result.evidence.provenance)
-        #expect(Set(evidence.artifacts).isSubset(of: Set(ledger.artifacts)))
-        #expect(ledger.artifacts.filter { $0.id.rawValue == "run-manifest" }.count == 1)
+        #expect(Set(evidence.artifacts).isSubset(of: Set(ledger.artifacts.map(\.reference))))
+        #expect(ledger.artifacts.filter { $0.logicalID == "run-manifest" }.count == 1)
+    }
+
+    @Test func stageInputsArePersistedAndScopedToTheirExecutor() async throws {
+        let root = try makeTemporaryRoot("stage-input-scope")
+        defer { removeTemporaryRoot(root) }
+        let inputURL = root.appending(path: "candidate-context.json")
+        try Data(#"{"candidate":"exact"}"#.utf8).write(to: inputURL)
+        let input = try await makeTestInputArtifactReference(
+            at: inputURL,
+            artifactID: "candidate-context",
+            projectRoot: root
+        )
+        let recorder = StageInputRecorder()
+        let request = FlowOperationRequest(
+            workspaceID: try testWorkspaceID(for: root),
+            runID: "run-stage-input-scope",
+            intent: "Pass exact stage inputs",
+            stages: [
+                FlowStageDefinition(stageID: "001-verify", displayName: "Verify"),
+            ],
+            stageInputs: [
+                FlowStageInputBinding(
+                    stageID: "001-verify",
+                    artifacts: [input]
+                ),
+            ]
+        )
+
+        let result = try await makeTestOrchestrator(projectRoot: root).run(
+            request: request,
+            toolRegistry: ToolRegistry(),
+            healthResults: [:],
+            executors: [
+                StageInputRecordingExecutor(
+                    stageID: "001-verify",
+                    toolID: "verify-tool",
+                    recorder: recorder
+                ),
+            ]
+        )
+
+        #expect(result.status == .succeeded)
+        #expect(await recorder.artifacts() == [input])
+        let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(
+            runID: request.runID
+        )
+        let retainedPlan = try #require(ledger.plan)
+        #expect(retainedPlan.stageInputs == request.stageInputs)
     }
 
     @Test func retainsStageLocalArtifactsThatShareSemanticIdentifiers() async throws {
@@ -114,14 +162,19 @@ struct DefaultFlowOrchestratorTests {
         #expect(result.status == .succeeded)
         let ledger = try await TestFlowInfrastructure.bound(to: root).loadRunLedger(runID: runID)
         let sharedIdentifierArtifacts = ledger.artifacts.filter {
-            $0.id.rawValue == "stage-summary"
+            $0.logicalID == "stage-summary"
         }
         #expect(sharedIdentifierArtifacts.count == 2)
-        #expect(Set(sharedIdentifierArtifacts.map(\.path)) == Set([firstPath, secondPath]))
+        #expect(Set(sharedIdentifierArtifacts.compactMap {
+            try? $0.requireLocalRelativePath().stringValue
+        }) == Set([
+            String(firstPath.dropFirst(".xcircuite/".count)),
+            String(secondPath.dropFirst(".xcircuite/".count)),
+        ]))
         #expect(result.stages.allSatisfy { stage in
             Set(stage.artifacts).isSubset(of: Set(ledger.artifacts))
         })
-        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+        #expect(ledger.evidence?.artifacts == ledger.artifacts.map(\.reference))
     }
 
     @Test func executorStageIdentifierMismatchFailsClosedBeforePersistingResult() async throws {
@@ -183,8 +236,11 @@ struct DefaultFlowOrchestratorTests {
 
         #expect(result.status == .succeeded)
         let ledger = try await infrastructure.loadRunLedger(runID: "run-prepared-artifact")
-        #expect(ledger.artifacts.contains { $0.locator.location.value == path })
-        #expect(ledger.evidence?.artifacts.contains { $0.locator.location.value == path } == true)
+        let preparedBinding = ledger.artifacts.first {
+            (try? $0.requireLocalRelativePath().stringValue) == path
+        }
+        let prepared = try #require(preparedBinding)
+        #expect(ledger.evidence?.artifacts.contains(prepared.reference) == true)
     }
 
     @Test func artifactPreparationFailureFinalizesCreatedRunAsFailed() async throws {
@@ -220,7 +276,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(ledger.stages.first?.status == .failed)
         #expect(ledger.stages.first?.diagnostics.first?.code == "FLOW_RUN_SETUP_FAILED")
         #expect(ledger.toolchain?.stages.map(\.stageID) == ["flow-setup"])
-        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+        #expect(ledger.evidence?.artifacts == ledger.artifacts.map(\.reference))
     }
 
     @Test func progressSetupFailureFinalizesRunningRunAsFailed() async throws {
@@ -409,7 +465,7 @@ struct DefaultFlowOrchestratorTests {
         #expect(ledger.stages.map(\.stageID) == ["001-drc", "flow-execution"])
         #expect(ledger.stages.map(\.status) == [.succeeded, .failed])
         #expect(ledger.toolchain?.stages.map(\.stageID) == ["001-drc", "flow-execution"])
-        #expect(ledger.evidence?.artifacts == ledger.artifacts)
+        #expect(ledger.evidence?.artifacts == ledger.artifacts.map(\.reference))
     }
 
     @Test func succeededStageWithErrorDiagnosticFailsClosed() async throws {
@@ -530,8 +586,8 @@ struct DefaultFlowOrchestratorTests {
             from: root.appending(path: ".xcircuite/runs/run-progress/manifest.json")
         )
         #expect(manifest.artifacts.contains {
-            $0.artifactID == "run-progress"
-                && $0.path == ".xcircuite/runs/run-progress/progress.jsonl"
+            $0.logicalID == "run-progress"
+                && (try? $0.requireLocalRelativePath().stringValue) == "runs/run-progress/progress.jsonl"
                 && $0.format == .text
         })
 
@@ -541,7 +597,7 @@ struct DefaultFlowOrchestratorTests {
         )
         #expect(bundle.artifacts.contains {
             $0.purpose == .runProgress
-                && $0.reference.path == ".xcircuite/runs/run-progress/progress.jsonl"
+                && (try? $0.binding.requireLocalRelativePath().stringValue) == "runs/run-progress/progress.jsonl"
         })
     }
 
@@ -693,11 +749,11 @@ struct DefaultFlowOrchestratorTests {
         #expect(tailSnapshot.terminalStatus == .succeeded)
 
         let artifacts = try await store.runLevelArtifacts(runID: runID)
-        let expectedProgressPath = ".xcircuite/runs/\(runID)/progress.jsonl"
+        let expectedProgressPath = "runs/\(runID)/progress.jsonl"
         let hasProgressArtifact = artifacts.contains { artifact in
-            artifact.artifactID == "run-progress"
-                && artifact.path == expectedProgressPath
-                && artifact.byteCount > 0
+            artifact.logicalID == "run-progress"
+                && (try? artifact.requireLocalRelativePath().stringValue) == expectedProgressPath
+                && artifact.reference.byteCount > 0
         }
         #expect(hasProgressArtifact)
         try copyProgressStressArtifactIfRequested(root: root, runID: runID)
@@ -966,7 +1022,7 @@ struct DefaultFlowOrchestratorTests {
         })
         #expect(bundle.artifacts.contains {
             $0.purpose == .runCancellationRequest
-                && $0.reference.path == ".xcircuite/runs/run-cancel/cancellation.json"
+                && (try? $0.binding.requireLocalRelativePath().stringValue) == "runs/run-cancel/cancellation.json"
         })
     }
 
@@ -1659,6 +1715,10 @@ struct DefaultFlowOrchestratorTests {
 
         #expect(result.status == .succeeded)
         #expect(await script.executionCount() == 2)
+        let executionAttemptIDs = await script.executionAttemptIDs()
+        #expect(executionAttemptIDs.count == 2)
+        #expect(executionAttemptIDs.allSatisfy { $0 != nil })
+        #expect(Set(executionAttemptIDs.compactMap { $0 }).count == 2)
         let stage = try #require(result.stages.first)
         #expect(stage.attempts.count == 2)
         #expect(stage.attempts[0].retryDecision.shouldRetry)
@@ -1684,8 +1744,8 @@ struct DefaultFlowOrchestratorTests {
             from: root.appending(path: ".xcircuite/runs/run-retry-success/manifest.json")
         )
         #expect(manifest.artifacts.contains {
-            $0.artifactID == "001-drc-attempts"
-                && $0.path == ".xcircuite/runs/run-retry-success/stages/001-drc/attempts.json"
+            $0.logicalID == "001-drc-attempts"
+                && (try? $0.requireLocalRelativePath().stringValue) == "runs/run-retry-success/stages/001-drc/attempts.json"
         })
 
         let bundle = try await makeTestReviewBundler(projectRoot: root).makeReviewBundle(
@@ -1988,19 +2048,21 @@ struct DefaultFlowOrchestratorTests {
         )
     }
 
-    private func assertToolchainArtifact(in root: URL, runID: String) async throws -> ArtifactReference {
+    private func assertToolchainArtifact(in root: URL, runID: String) async throws -> FlowArtifactBinding {
         let runManifest = try await TestFlowInfrastructure.bound(to: root).readJSON(
             FlowRunManifest.self,
             from: root.appending(path: ".xcircuite/runs/\(runID)/manifest.json")
         )
-        let path = ".xcircuite/runs/\(runID)/toolchain.json"
-        let reference = try #require(runManifest.artifacts.first { $0.path == path })
-        #expect(reference.kind == .other)
-        #expect(reference.format == .json)
-        let sha256 = reference.digest.hexadecimalValue
+        let path = "runs/\(runID)/toolchain.json"
+        let binding = try #require(runManifest.artifacts.first {
+            (try? $0.requireLocalRelativePath().stringValue) == path
+        })
+        #expect(binding.kind == .other)
+        #expect(binding.format == .json)
+        let sha256 = binding.reference.digest.hexadecimalValue
         #expect(!sha256.isEmpty)
-        #expect(reference.producer?.identifier == runID)
-        return reference
+        #expect(binding.producer?.identifier == runID)
+        return binding
     }
 }
 
@@ -2017,6 +2079,32 @@ private struct StubStageExecutor: FlowStageExecutor {
     }
 }
 
+private actor StageInputRecorder {
+    private var recorded: [FlowArtifactBinding] = []
+
+    func record(_ artifacts: [FlowArtifactBinding]) {
+        recorded = artifacts
+    }
+
+    func artifacts() -> [FlowArtifactBinding] {
+        recorded
+    }
+}
+
+private struct StageInputRecordingExecutor: FlowStageExecutor {
+    let stageID: String
+    let toolID: String
+    let recorder: StageInputRecorder
+
+    func execute(
+        stage: FlowStageDefinition,
+        context: FlowExecutionContext
+    ) async throws -> FlowStageResult {
+        await recorder.record(context.stageInputArtifacts)
+        return FlowStageResult(stageID: stage.stageID, status: .succeeded)
+    }
+}
+
 private struct TestRunArtifactPreparer: FlowRunArtifactPreparing {
     let infrastructure: TestFlowInfrastructure
     let path: String
@@ -2025,21 +2113,17 @@ private struct TestRunArtifactPreparer: FlowRunArtifactPreparing {
     func prepareArtifacts(
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async throws -> [ArtifactReference] {
-        let locator = ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: path),
-            role: .input,
-            kind: .other,
-            format: .json
-        )
-        let reference = try await infrastructure.persistArtifact(
+    ) async throws -> [FlowArtifactBinding] {
+        let binding = try await infrastructure.persistArtifact(
             content: payload,
-            id: try ArtifactID(rawValue: "toolchain-profile"),
-            locator: locator,
+            logicalID: "toolchain-profile",
+            relativePath: try FlowArtifactPath.relative(path),
+            descriptor: ArtifactDescriptor(role: .input, kind: .other, format: .json),
             runID: runID,
+            producer: nil,
             mode: .immutable
         )
-        return [reference]
+        return [binding]
     }
 }
 
@@ -2047,7 +2131,7 @@ private struct ThrowingRunArtifactPreparer: FlowRunArtifactPreparing {
     func prepareArtifacts(
         runID: String,
         workspaceID: FlowWorkspaceID
-    ) async throws -> [ArtifactReference] {
+    ) async throws -> [FlowArtifactBinding] {
         throw StubStageError.executionFailed
     }
 }
@@ -2078,7 +2162,7 @@ private struct FailingProgressPersistence: FlowRunProgressPersisting {
 
     func persistCancellationRequest(
         _ request: FlowRunCancellationRequest
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await underlying.persistCancellationRequest(request)
     }
 
@@ -2086,7 +2170,7 @@ private struct FailingProgressPersistence: FlowRunProgressPersisting {
         try await underlying.loadCancellationRequest(runID: runID)
     }
 
-    func runControlArtifacts(runID: String) async throws -> [ArtifactReference] {
+    func runControlArtifacts(runID: String) async throws -> [FlowArtifactBinding] {
         try await underlying.runControlArtifacts(runID: runID)
     }
 }
@@ -2134,7 +2218,7 @@ private actor FailingNthProgressPersistence: FlowRunProgressPersisting {
 
     func persistCancellationRequest(
         _ request: FlowRunCancellationRequest
-    ) async throws -> ArtifactReference {
+    ) async throws -> FlowArtifactBinding {
         try await underlying.persistCancellationRequest(request)
     }
 
@@ -2142,7 +2226,7 @@ private actor FailingNthProgressPersistence: FlowRunProgressPersisting {
         try await underlying.loadCancellationRequest(runID: runID)
     }
 
-    func runControlArtifacts(runID: String) async throws -> [ArtifactReference] {
+    func runControlArtifacts(runID: String) async throws -> [FlowArtifactBinding] {
         try await underlying.runControlArtifacts(runID: runID)
     }
 }
@@ -2197,13 +2281,17 @@ private struct ThrowingStageExecutor: FlowStageExecutor {
 private actor StageResultScript {
     private var results: [FlowStageResult]
     private var count: Int = 0
+    private var attemptIDs: [FlowStageExecutionAttemptID?] = []
 
     init(results: [FlowStageResult]) {
         self.results = results
     }
 
-    func nextResult() throws -> FlowStageResult {
+    func nextResult(
+        attemptID: FlowStageExecutionAttemptID?
+    ) throws -> FlowStageResult {
         count += 1
+        attemptIDs.append(attemptID)
         guard !results.isEmpty else {
             throw StubStageError.executionFailed
         }
@@ -2212,6 +2300,10 @@ private actor StageResultScript {
 
     func executionCount() -> Int {
         count
+    }
+
+    func executionAttemptIDs() -> [FlowStageExecutionAttemptID?] {
+        attemptIDs
     }
 }
 
@@ -2236,7 +2328,7 @@ private struct ScriptedStageExecutor: FlowStageExecutor {
         stage: FlowStageDefinition,
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
-        try await script.nextResult()
+        try await script.nextResult(attemptID: context.stageExecutionAttemptID)
     }
 }
 
@@ -2251,7 +2343,9 @@ private struct DelayedScriptedStageExecutor: FlowStageExecutor {
         context: FlowExecutionContext
     ) async throws -> FlowStageResult {
         try await Task.sleep(nanoseconds: delayNanoseconds)
-        return try await script.nextResult()
+        return try await script.nextResult(
+            attemptID: context.stageExecutionAttemptID
+        )
     }
 }
 

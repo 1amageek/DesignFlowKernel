@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 
 public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
@@ -39,58 +40,56 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
         }
         let planPath = "runs/\(request.runID)/plan.json"
         let resultPath = "runs/\(request.runID)/stages/\(request.stageID)/result.json"
-        let planCandidates = ledger.artifacts.filter { $0.id.rawValue == "run-plan" }
-        let planReferences = planCandidates.filter {
-            artifactLocationValidator.isReference(
+        let planCandidates = ledger.artifacts.filter { $0.logicalID == "run-plan" }
+        let planBindings = planCandidates.filter {
+            artifactLocationValidator.isBinding(
                 $0,
                 boundTo: planPath,
                 allowingContentAddressedVariant: false
             )
-                && $0.locator.role == .input
-                && $0.locator.kind == .other
-                && $0.locator.format == .json
+                && $0.role == .input
+                && $0.kind == .other
+                && $0.format == .json
         }
         guard planCandidates.count == 1,
-              planReferences.count == 1,
-              let planReference = planReferences.first else {
+              planBindings.count == 1,
+              let planBinding = planBindings.first else {
             throw FlowGateApprovalError.evidenceArtifactNotFound(planPath)
         }
         let resultCandidates = ledger.artifacts.filter {
-            $0.id.rawValue == "\(request.stageID)-result"
+            $0.logicalID == "\(request.stageID)-result"
         }
-        let resultReferences = resultCandidates.filter {
-            artifactLocationValidator.isReference(
+        let resultBindings = resultCandidates.filter {
+            artifactLocationValidator.isBinding(
                 $0,
                 boundTo: resultPath,
                 allowingContentAddressedVariant: false
             )
-                && $0.locator.role == .output
-                && $0.locator.kind == .other
-                && $0.locator.format == .json
+                && $0.role == .output
+                && $0.kind == .other
+                && $0.format == .json
         }
         guard resultCandidates.count == 1,
-              resultReferences.count == 1,
-              let resultReference = resultReferences.first else {
+              resultBindings.count == 1,
+              let resultBinding = resultBindings.first else {
             throw FlowGateApprovalError.evidenceArtifactNotFound(resultPath)
         }
         let reviewedResultContent = try await approvalPersistence.loadArtifactContent(
-            for: resultReference
+            for: resultBinding
         )
         let reviewedResultDigest = try SHA256ContentDigester().digest(data: reviewedResultContent)
         let reviewedResultPath = "runs/\(request.runID)/review/approval-inputs/"
             + "\(request.stageID)-\(reviewedResultDigest.hexadecimalValue).json"
-        let reviewedResultReference = ArtifactReference(
-            id: try ArtifactID(
-                rawValue: "approval-review-\(request.stageID.replacingOccurrences(of: ".", with: "-"))"
-            ),
-            locator: ArtifactLocator(
-                location: try artifactLocationValidator.location(boundTo: reviewedResultPath),
-                role: .output,
-                kind: .report,
-                format: .json
-            ),
+        let reviewedResultLogicalID = "approval-review-\(request.stageID.replacingOccurrences(of: ".", with: "-"))"
+        let reviewedResultDescriptor = ArtifactDescriptor(
+            role: .output,
+            kind: .report,
+            format: .json
+        )
+        let reviewedResultReference = try ArtifactReference(
             digest: reviewedResultDigest,
-            byteCount: UInt64(reviewedResultContent.count)
+            byteCount: UInt64(reviewedResultContent.count),
+            descriptor: reviewedResultDescriptor
         )
         let retentionAction = FlowRunActionRecord(
             actionID: "approval-review-\(request.stageID)-\(reviewedResultDigest.hexadecimalValue)",
@@ -99,10 +98,11 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
             actor: FlowRunActor(kind: .system, identifier: "design-flow-kernel"),
             actionKind: "approval.review.retain",
             status: .succeeded,
-            inputs: [planReference],
+            inputs: [planBinding.reference],
             outputs: [reviewedResultReference],
             createdAt: ledger.runManifest.finishedAt ?? ledger.runManifest.createdAt
         )
+        let retentionLedger: FlowRunLedger
         if let existingAction = ledger.actions.first(where: {
             $0.actionID == retentionAction.actionID
         }) {
@@ -112,14 +112,26 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
                     actionID: retentionAction.actionID
                 )
             }
+            retentionLedger = ledger
         } else {
-            _ = try await approvalPersistence.appendActionArtifact(
+            retentionLedger = try await approvalPersistence.appendActionArtifact(
                 content: reviewedResultContent,
-                reference: reviewedResultReference,
+                logicalID: reviewedResultLogicalID,
+                relativePath: artifactLocationValidator.relativePath(boundTo: reviewedResultPath),
+                descriptor: reviewedResultDescriptor,
+                producer: nil,
                 action: retentionAction
             )
         }
-        _ = try await approvalPersistence.loadArtifactContent(for: reviewedResultReference)
+        guard let reviewedResultBinding = retentionLedger.artifacts.first(where: {
+            $0.logicalID == reviewedResultLogicalID
+                && $0.reference == reviewedResultReference
+        }) else {
+            throw FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
+                runID: request.runID,
+                path: reviewedResultPath
+            )
+        }
 
         let approval = FlowApprovalRecord(
             runID: request.runID,
@@ -130,24 +142,23 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
             note: request.note,
             createdAt: request.decidedAt,
             evidence: FlowApprovalEvidenceBinding(
-                plan: planReference,
-                stageResult: reviewedResultReference
+                plan: planBinding,
+                stageResult: reviewedResultBinding
             )
         )
         let approvalPath = "runs/\(request.runID)/approvals/\(request.stageID).json"
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let content = try encoder.encode(approval)
-        let reference = ArtifactReference(
-            id: try ArtifactID(rawValue: "approval-\(request.stageID)"),
-            locator: ArtifactLocator(
-                location: try artifactLocationValidator.location(boundTo: approvalPath),
-                role: .output,
-                kind: .report,
-                format: .json
-            ),
+        let approvalDescriptor = ArtifactDescriptor(
+            role: .output,
+            kind: .report,
+            format: .json
+        )
+        let reference = try ArtifactReference(
             digest: try SHA256ContentDigester().digest(data: content),
-            byteCount: UInt64(content.count)
+            byteCount: UInt64(content.count),
+            descriptor: approvalDescriptor
         )
         let decisionKind: FlowRunReviewDecisionKind = request.verdict == .waived
             ? .waiver
@@ -159,7 +170,7 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
             actor: FlowRunActor(kind: request.reviewerKind, identifier: request.reviewer),
             actionKind: decisionKind.rawValue,
             status: .succeeded,
-            inputs: [planReference, reviewedResultReference],
+            inputs: [planBinding.reference, reviewedResultReference],
             outputs: [reference],
             context: FlowRunActionContext(
                 reviewDecision: FlowRunActionContext.ReviewDecision(
@@ -174,7 +185,10 @@ public struct DefaultFlowGateApprovalRecorder: FlowGateApprovalRecording {
         )
         let persisted = try await approvalPersistence.appendApprovalArtifact(
             content: content,
-            reference: reference,
+            logicalID: "approval-\(request.stageID)",
+            relativePath: artifactLocationValidator.relativePath(boundTo: approvalPath),
+            descriptor: approvalDescriptor,
+            producer: nil,
             approval: approval,
             action: action
         )

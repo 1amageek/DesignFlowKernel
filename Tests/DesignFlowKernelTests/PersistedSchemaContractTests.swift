@@ -4,8 +4,8 @@ import Testing
 
 @Suite("Persisted flow schema contracts")
 struct PersistedSchemaContractTests {
-    @Test("schema version 1 records reject missing and unsupported versions")
-    func version1RecordsFailClosed() throws {
+    @Test("current-schema records reject missing and unsupported versions")
+    func currentSchemaRecordsFailClosed() throws {
         let value = FlowRunPlan(
             runID: "run-schema-v1",
             intent: "Verify strict schema decoding.",

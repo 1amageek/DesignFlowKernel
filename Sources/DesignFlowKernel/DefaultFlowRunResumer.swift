@@ -92,17 +92,17 @@ public struct DefaultFlowRunResumer: FlowRunResuming {
     private func validatePlanIntegrity(_ ledger: FlowRunLedger) async throws {
         let planPath = "runs/\(ledger.runID)/plan.json"
         let candidates = ledger.runManifest.artifacts.filter {
-            $0.id.rawValue == "run-plan"
+            $0.logicalID == "run-plan"
         }
         let references = candidates.filter {
-            artifactLocationValidator.isReference(
+            artifactLocationValidator.isBinding(
                 $0,
                 boundTo: planPath,
                 allowingContentAddressedVariant: false
             )
-                && $0.locator.role == .input
-                && $0.locator.kind == .other
-                && $0.locator.format == .json
+                && $0.role == .input
+                && $0.kind == .other
+                && $0.format == .json
         }
         guard candidates.count == 1,
               references.count == 1,

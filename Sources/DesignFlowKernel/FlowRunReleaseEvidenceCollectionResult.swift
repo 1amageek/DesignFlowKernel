@@ -7,17 +7,17 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
     public var corpusHistory: FlowRunReleaseCorpusHistory
     public var performanceEnvelope: FlowRunReleasePerformanceEnvelope
     public var contractAudit: FlowRunReleaseContractAudit
-    /// Canonical Foundation references for all persisted qualification artifacts.
-    public var artifacts: [ArtifactReference]
+    /// Canonical content identities and materializations for persisted qualification artifacts.
+    public var artifacts: [FlowArtifactBinding]
     public var diagnostics: [FlowDiagnostic]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         runID: String,
         corpusHistory: FlowRunReleaseCorpusHistory,
         performanceEnvelope: FlowRunReleasePerformanceEnvelope,
         contractAudit: FlowRunReleaseContractAudit,
-        artifacts: [ArtifactReference],
+        artifacts: [FlowArtifactBinding],
         diagnostics: [FlowDiagnostic] = []
     ) {
         self.schemaVersion = schemaVersion
@@ -32,18 +32,18 @@ public struct FlowRunReleaseEvidenceCollectionResult: Sendable, Hashable, Codabl
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-        guard schemaVersion == 1 else {
+        guard schemaVersion == 2 else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schemaVersion,
                 in: container,
-                debugDescription: "Expected release evidence collection schema version 1."
+                debugDescription: "Expected release evidence collection schema version 2."
             )
         }
         runID = try container.decode(String.self, forKey: .runID)
         corpusHistory = try container.decode(FlowRunReleaseCorpusHistory.self, forKey: .corpusHistory)
         performanceEnvelope = try container.decode(FlowRunReleasePerformanceEnvelope.self, forKey: .performanceEnvelope)
         contractAudit = try container.decode(FlowRunReleaseContractAudit.self, forKey: .contractAudit)
-        artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
+        artifacts = try container.decode([FlowArtifactBinding].self, forKey: .artifacts)
         diagnostics = try container.decode([FlowDiagnostic].self, forKey: .diagnostics)
     }
 

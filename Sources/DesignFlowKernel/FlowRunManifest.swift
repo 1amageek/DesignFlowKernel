@@ -2,7 +2,7 @@ import CircuiteFoundation
 import Foundation
 
 public struct FlowRunManifest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public let schemaVersion: Int
     public let runID: String
@@ -15,7 +15,7 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
     public internal(set) var updatedAt: Date
     public internal(set) var startedAt: Date?
     public internal(set) var finishedAt: Date?
-    public internal(set) var artifacts: [ArtifactReference]
+    public internal(set) var artifacts: [FlowArtifactBinding]
 
     public init(
         runID: String,
@@ -28,7 +28,7 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
         updatedAt: Date,
         startedAt: Date? = nil,
         finishedAt: Date? = nil,
-        artifacts: [ArtifactReference] = []
+        artifacts: [FlowArtifactBinding] = []
     ) throws {
         schemaVersion = Self.currentSchemaVersion
         self.runID = runID
@@ -80,7 +80,7 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
         updatedAt = try Self.decodeRequiredTimestamp(from: container, forKey: .updatedAt)
         startedAt = try Self.decodeTimestamp(from: container, forKey: .startedAt)
         finishedAt = try Self.decodeTimestamp(from: container, forKey: .finishedAt)
-        artifacts = try container.decode([ArtifactReference].self, forKey: .artifacts)
+        artifacts = try container.decode([FlowArtifactBinding].self, forKey: .artifacts)
         try validate()
     }
 
@@ -160,17 +160,29 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
                 )
             }
         }
-        var artifactLocators: Set<ArtifactLocator> = []
+        var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
         for artifact in artifacts {
-            try Self.validateArtifactPath(artifact.path, runID: runID)
-            guard artifactLocators.insert(artifact.locator).inserted else {
+            if case .local(_, _, let relativePath) = artifact.availability {
+                try Self.validateArtifactPath(relativePath, runID: runID)
+            }
+            let materialization = FlowArtifactMaterializationIdentity(artifact.availability)
+            if let existingContent = contentByMaterialization[materialization] {
+                guard existingContent == artifact.reference.id else {
+                    throw FlowRunManifestError.invalidManifest(
+                        runID: runID,
+                        reason: "artifact materialization for '\(artifact.logicalID)' has conflicting content identity."
+                    )
+                }
+            } else {
+                contentByMaterialization[materialization] = artifact.reference.id
+            }
+            guard artifact.availability.artifactID == artifact.reference.id else {
                 throw FlowRunManifestError.invalidManifest(
                     runID: runID,
-                    reason: "artifact locator for '\(artifact.path)' must be unique."
+                    reason: "artifact availability for '\(artifact.logicalID)' does not match its content identity."
                 )
             }
-            let artifactID = artifact.artifactID
-            try FlowIdentifierValidator().validate(artifactID, kind: .artifactID)
+            try FlowIdentifierValidator().validate(artifact.logicalID, kind: .artifactID)
         }
 
         switch status {
@@ -193,13 +205,14 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
         .invalidManifest(runID: runID, reason: reason)
     }
 
-    private static func validateArtifactPath(_ path: String, runID: String) throws {
-        do {
-            _ = try ArtifactLocation(workspaceRelativePath: path)
-        } catch {
+    private static func validateArtifactPath(
+        _ path: ArtifactRelativePath,
+        runID: String
+    ) throws {
+        guard !path.segments.isEmpty else {
             throw FlowRunManifestError.invalidManifest(
                 runID: runID,
-                reason: "artifact path '\(path)' must be project-relative."
+                reason: "artifact path must be root-relative."
             )
         }
     }

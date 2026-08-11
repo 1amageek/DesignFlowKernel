@@ -1,5 +1,6 @@
 import DesignFlowKernel
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 import Testing
 
@@ -174,16 +175,15 @@ struct FlowRunLoopGuardTests {
 
         #expect(evaluationResult.evaluation.status == .rejected)
         let evaluationArtifact = try #require(evaluationResult.artifactReferences.first)
-        #expect(evaluationArtifact.id.rawValue == "cross-artifact-evaluation")
-        #expect(evaluationArtifact.locator.role == .output)
-        #expect(evaluationArtifact.locator.kind == .report)
-        #expect(evaluationArtifact.locator.format == .json)
+        #expect(evaluationArtifact.descriptor.role == .output)
+        #expect(evaluationArtifact.descriptor.kind == .report)
+        #expect(evaluationArtifact.descriptor.format == .json)
         #expect(evaluationArtifact.byteCount > 0)
         #expect(fileExists(".xcircuite/runs/\(runID)/reports/cross-artifact-evaluation.json", in: root))
         #expect(bundle.runGuardVerdict != nil)
         #expect(bundle.crossArtifactEvaluation?.status == .rejected)
         #expect(bundle.reviewItems.contains { $0.kind == .crossArtifactEvaluation && $0.status == .needsRepair })
-        #expect(bundle.artifacts.contains { $0.reference.artifactID == "cross-artifact-evaluation" })
+        #expect(bundle.artifacts.contains { $0.binding.logicalID == "cross-artifact-evaluation" })
     }
 
     private func makeGuardEvaluator(
@@ -207,7 +207,7 @@ struct FlowRunLoopGuardTests {
             withIntermediateDirectories: true
         )
         try Data(#"{"status":"accepted"}"#.utf8).write(to: summaryURL, options: .atomic)
-        let reference = try foundationReference(
+        let binding = try foundationBinding(
             path: summaryPath,
             artifactID: "simulation-summary",
             projectRoot: root
@@ -215,7 +215,7 @@ struct FlowRunLoopGuardTests {
         let envelope = FlowArtifactEnvelope(
             artifactID: "simulation-summary",
             role: "simulation-summary",
-            reference: reference,
+            binding: binding,
             evaluationResult: FlowEvaluationResult(
                 evaluationID: "simulation-evaluation",
                 specID: "opamp-spec",
@@ -242,7 +242,7 @@ struct FlowRunLoopGuardTests {
             withIntermediateDirectories: true
         )
         try Data(#"{"violationCount":2}"#.utf8).write(to: summaryURL, options: .atomic)
-        let reference = try foundationReference(
+        let binding = try foundationBinding(
             path: summaryPath,
             artifactID: "drc-summary",
             projectRoot: root
@@ -250,7 +250,7 @@ struct FlowRunLoopGuardTests {
         let envelope = FlowArtifactEnvelope(
             artifactID: "drc-summary",
             role: "drc-summary",
-            reference: reference,
+            binding: binding,
             observationSet: FlowObservationSet(
                 observationSetID: "drc-observations",
                 channels: [
@@ -278,27 +278,32 @@ struct FlowRunLoopGuardTests {
         try await store.writeArtifactEnvelope(envelope, runID: runID, inProjectAt: root)
     }
 
-    private func foundationReference(
+    private func foundationBinding(
         path: String,
         artifactID: String,
         projectRoot: URL
-    ) throws -> ArtifactReference {
-        let locator = ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: path),
-            role: .output,
-            kind: .report,
-            format: .json
+    ) throws -> FlowArtifactBinding {
+        let data = try Data(contentsOf: projectRoot.appending(path: path))
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .report,
+                format: .json
+            )
         )
-        let reference = try LocalArtifactReferencer().reference(
-            locator,
-            relativeTo: projectRoot
-        )
-        return ArtifactReference(
-            id: try ArtifactID(rawValue: artifactID),
-            locator: reference.locator,
-            digest: reference.digest,
-            byteCount: reference.byteCount,
-            producer: reference.producer
+        let relativePath = path.hasPrefix(".xcircuite/")
+            ? String(path.dropFirst(".xcircuite/".count))
+            : path
+        return try FlowArtifactBinding(
+            logicalID: artifactID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(relativePath)
+            )
         )
     }
 

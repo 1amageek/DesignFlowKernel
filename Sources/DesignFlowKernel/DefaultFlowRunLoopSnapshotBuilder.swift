@@ -27,7 +27,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         )
         let envelopes = envelopeRecords.map(\.envelope)
         let persistedAtByArtifactID = Dictionary(
-            envelopeRecords.map { ($0.envelope.reference.id.rawValue, $0.persistedAt) },
+            envelopeRecords.map { ($0.envelope.reference.id.description, $0.persistedAt) },
             uniquingKeysWith: max
         )
         let artifactReferences = try availableArtifactReferences(from: ledger, envelopes: envelopes)
@@ -48,9 +48,9 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
                 iterations,
                 runID: runID
             )
-            producedReferences.append(iterationsReference)
+            producedReferences.append(iterationsReference.reference)
             let snapshotReference = try await evidencePersistence.persistAgentLoopSnapshot(snapshot)
-            producedReferences.append(snapshotReference)
+            producedReferences.append(snapshotReference.reference)
         }
 
         return FlowRunLoopSummaryResult(
@@ -163,10 +163,10 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         envelopes: [FlowArtifactEnvelope]
     ) throws -> [ArtifactReference] {
         var references: [ArtifactReference] = []
-        references.append(contentsOf: ledger.runManifest.artifacts)
+        references.append(contentsOf: ledger.runManifest.artifacts.map(\.reference))
         references.append(contentsOf: ledger.stages
             .flatMap(\.artifacts)
-            .map { $0 })
+            .map(\.reference))
         references.append(contentsOf: envelopes.map(\.reference))
         return stableUniqueReferences(references)
     }
@@ -296,11 +296,10 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             return false
         }
         if let artifactID = requiredEvidence.artifactID {
-            return envelope.artifactID == artifactID || envelope.reference.artifactID == artifactID
+            return envelope.artifactID == artifactID
         }
         return envelope.role == requiredEvidence.artifactRole
             || envelope.artifactID == requiredEvidence.artifactRole
-            || envelope.reference.artifactID == requiredEvidence.artifactRole
     }
 
     private func evidenceMatches(
@@ -308,10 +307,10 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         reference: ArtifactReference
     ) -> Bool {
         if let artifactID = requiredEvidence.artifactID {
-            return reference.artifactID == artifactID
+            _ = artifactID
+            return false
         }
-        return reference.artifactID == requiredEvidence.artifactRole
-            || reference.path.contains(requiredEvidence.artifactRole)
+        return reference.descriptor.role.rawValue == requiredEvidence.artifactRole
     }
 
     private func metricTrend(
@@ -444,7 +443,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
     ) -> FlowLoopIterationSummary.EvaluationDelta {
         let scopedEnvelopes = envelopes.filter { envelope in
             outputArtifactIDs.contains(envelope.artifactID)
-                || outputArtifactIDs.contains(envelope.reference.artifactID)
+                || outputArtifactIDs.contains(envelope.binding.logicalID)
         }
         let selectedEnvelopes = scopedEnvelopes.isEmpty ? [] : scopedEnvelopes
         var accepted = 0
@@ -605,7 +604,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         generatedAt: Date,
         persistedAtByArtifactID: [String: Date]
     ) -> Bool {
-        guard let persistedAt = persistedAtByArtifactID[reference.id.rawValue] else {
+        guard let persistedAt = persistedAtByArtifactID[reference.id.description] else {
             return true
         }
         return generatedAt.timeIntervalSince(persistedAt) > Double(maximumAgeSeconds)
@@ -615,7 +614,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
         var seen: Set<String> = []
         var result: [ArtifactReference] = []
         for reference in references {
-            let key = reference.artifactID
+            let key = reference.id.description
             guard !seen.contains(key) else {
                 continue
             }
@@ -623,7 +622,7 @@ public struct DefaultFlowRunLoopSnapshotBuilder: Sendable {
             result.append(reference)
         }
         return result.sorted { left, right in
-            left.artifactID < right.artifactID
+            left.id.description < right.id.description
         }
     }
 

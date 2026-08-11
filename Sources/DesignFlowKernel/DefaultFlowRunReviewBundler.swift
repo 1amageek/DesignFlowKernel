@@ -155,7 +155,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     id: "generate-candidate-plan.with-rejected-feedback",
                     readiness: .ready,
                     operation: .generateCandidatePlan(
-                        rejectedPlansArtifactID: try ArtifactID(rawValue: "planning-rejected-plans")
+                        rejectedPlansArtifactID: "planning-rejected-plans"
                     ),
                     runID: runID,
                     reason: "Regenerate the candidate plan using recorded rejected-plan feedback."
@@ -178,11 +178,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         case "generate-candidate-plan":
             return [flowAction(id: "generate-candidate-plan", readiness: .ready, operation: .generateCandidatePlan(rejectedPlansArtifactID: nil), runID: runID, reason: "Generate a candidate plan.")]
         case "execute-candidate-plan":
-            return [flowAction(id: "execute-candidate-plan", readiness: .ready, operation: .executeCandidatePlan, runID: runID, reason: "Execute the candidate plan.")]
+            return [flowAction(id: "execute-candidate-plan", readiness: .requiresInput, operation: .executeCandidatePlan, runID: runID, reason: "Attach the exact database-bound candidate plan, runtime configuration, and edit scope before execution.")]
         case "verify-candidate-plan":
-            return [flowAction(id: "verify-candidate-plan", readiness: .ready, operation: .verifyCandidatePlan(scope: .preExecution), runID: runID, reason: "Verify the candidate plan.")]
+            return [flowAction(id: "verify-candidate-plan", readiness: .requiresInput, operation: .verifyCandidatePlan(scope: .preExecution), runID: runID, reason: "Attach an exact typed verification dispatch request and runtime configuration before verification.")]
         case "verify-candidate-plan:post-execution":
-            return [flowAction(id: "verify-candidate-plan.post-execution", readiness: .ready, operation: .verifyCandidatePlan(scope: .postExecution), runID: runID, reason: "Verify post-execution evidence.")]
+            return [flowAction(id: "verify-candidate-plan.post-execution", readiness: .requiresInput, operation: .verifyCandidatePlan(scope: .postExecution), runID: runID, reason: "Attach exact candidate evidence, a typed verification dispatch request, and runtime configuration before post-execution verification.")]
         case "generate-parameter-candidates":
             return [flowAction(id: "generate-parameter-candidates", readiness: .ready, operation: .generateParameterCandidates, runID: runID, reason: "Generate parameter candidates.")]
         case "synthesize-parameter-candidate-plan":
@@ -339,16 +339,15 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 into: &artifacts
             )
             artifacts.append(
-                contentsOf: stage.artifacts.map { reference in
-                    let reference = reference
+                contentsOf: stage.artifacts.map { binding in
                     return FlowRunReviewArtifact(
-                        reference: reference,
-                        purpose: reviewRole(for: reference),
+                        binding: binding,
+                        purpose: reviewRole(for: binding),
                         stageID: stage.stageID,
                         integrity: artifactIntegrity(
-                            for: reference,
+                            for: binding,
                             stageID: stage.stageID,
-                            integrity: integrityByPath[reference.path]
+                            integrity: integrityByPath[binding.availabilityDescription]
                         )
                     )
                 }
@@ -359,50 +358,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             integrityByPath: integrityByPath,
             into: &artifacts
         )
-        appendActionArtifacts(
-            from: ledger,
-            integrityByPath: integrityByPath,
-            into: &artifacts
-        )
         return artifacts
     }
 
-    private func appendActionArtifacts(
-        from ledger: FlowRunLedger,
-        integrityByPath: [String: ArtifactIntegrity],
-        into artifacts: inout [FlowRunReviewArtifact]
-    ) {
-        var seenPaths = Set(artifacts.map { $0.reference.path })
-        for reference in ledger.actions.flatMap(\.outputs)
-            where isReviewSourceActionArtifact(reference)
-                && seenPaths.insert(reference.path).inserted {
-            artifacts.append(
-                FlowRunReviewArtifact(
-                    reference: reference,
-                    purpose: reviewRole(for: reference),
-                    integrity: artifactIntegrity(
-                        for: reference,
-                        integrity: integrityByPath[reference.path]
-                    )
-                )
-            )
-        }
-    }
-
-    private func isReviewSourceActionArtifact(_ reference: ArtifactReference) -> Bool {
-        switch reference.artifactID {
-        case "agent-loop-snapshot",
-             "run-guard-verdict",
-             "cross-artifact-evaluation",
-             DefaultFlowRunStageArtifactLadderBuilder.artifactID:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func reviewRole(for reference: ArtifactReference) -> FlowRunReviewArtifactPurpose {
-        let artifactID = reference.artifactID
+    private func reviewRole(for binding: FlowArtifactBinding) -> FlowRunReviewArtifactPurpose {
+        let artifactID = binding.logicalID
         if artifactID == "agent-loop-snapshot" {
             return .agentLoopSnapshot
         }
@@ -412,7 +372,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         if artifactID == "cross-artifact-evaluation" {
             return .crossArtifactEvaluation
         }
-        if let role = retainedHistoryReviewRole(for: reference) {
+        if let role = retainedHistoryReviewRole(for: binding) {
             return role
         }
         if artifactID.hasSuffix("-summary") {
@@ -429,27 +389,31 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
 
     private func recordedReferencesByPath(
         from ledger: FlowRunLedger
-    ) -> [String: ArtifactReference] {
-        var references: [String: ArtifactReference] = [:]
-        for reference in ledger.runManifest.artifacts {
-            references[reference.path] = reference
-            if let runRelativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
-                references[runRelativePath] = reference
-            }
-        }
-        for reference in ledger.artifacts {
-            references[reference.path] = reference
-            if let runRelativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
-                references[runRelativePath] = reference
-            }
-        }
-        for reference in ledger.actions.flatMap(\.outputs) {
-            references[reference.path] = reference
-            if let runRelativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
-                references[runRelativePath] = reference
+    ) -> [String: FlowArtifactBinding] {
+        var references: [String: FlowArtifactBinding] = [:]
+        let bindings = ledger.runManifest.artifacts
+            + ledger.artifacts
+            + ledger.stages.flatMap(\.artifacts)
+        for binding in bindings {
+            for path in artifactPathAliases(for: binding, runID: ledger.runID) {
+                references[path] = binding
             }
         }
         return references
+    }
+
+    private func artifactPathAliases(
+        for binding: FlowArtifactBinding,
+        runID: String
+    ) -> [String] {
+        var paths = [binding.availabilityDescription]
+        if case .local(_, _, let relativePath) = binding.availability {
+            paths.append(relativePath.stringValue)
+            if let runRelativePath = runRelativePath(for: relativePath.stringValue, runID: runID) {
+                paths.append(runRelativePath)
+            }
+        }
+        return paths
     }
 
     private func runRelativePath(for path: String, runID: String) -> String? {
@@ -489,10 +453,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 domain: coverageDomain(for: artifact),
                 role: artifact.purpose.rawValue,
                 stageID: artifact.stageID,
-                artifactID: artifact.reference.artifactID,
-                path: artifact.reference.path,
+                artifactID: artifact.binding.logicalID,
+                path: artifact.binding.availabilityDescription,
                 integrityStatus: artifact.integrity?.status,
-                reviewItemIDs: reviewItemsByArtifactPath[artifact.reference.path, default: []]
+                reviewItemIDs: reviewItemsByArtifactPath[artifact.binding.availabilityDescription, default: []]
             )
         }
         refs.append(contentsOf: artifacts.compactMap { artifact in
@@ -503,10 +467,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 domain: "integrity",
                 role: artifact.purpose.rawValue,
                 stageID: artifact.stageID,
-                artifactID: artifact.reference.artifactID,
-                path: artifact.reference.path,
+                artifactID: artifact.binding.logicalID,
+                path: artifact.binding.availabilityDescription,
                 integrityStatus: artifact.integrity?.status,
-                reviewItemIDs: reviewItemsByArtifactPath[artifact.reference.path, default: []]
+                reviewItemIDs: reviewItemsByArtifactPath[artifact.binding.availabilityDescription, default: []]
             )
         })
         refs.append(contentsOf: approvals.map { approval in
@@ -550,25 +514,25 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     private func coverageDomain(for artifact: FlowRunReviewArtifact) -> String {
-        if artifact.purpose == .designDiff || artifact.reference.kind == .designDiff {
+        if artifact.purpose == .designDiff || artifact.binding.kind == .designDiff {
             return "diff"
         }
-        if artifact.reference.kind == .waveform || artifact.reference.path.contains("/waveform") {
+        if artifact.binding.kind == .waveform || artifact.binding.availabilityDescription.contains("/waveform") {
             return "waveform"
         }
-        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.reference.path.contains("/planning/") {
+        if artifact.purpose.rawValue.hasPrefix("planning-") || artifact.binding.availabilityDescription.contains("/planning/") {
             return "planning"
         }
-        if artifact.purpose == .approval || artifact.reference.path.contains("/approvals/") {
+        if artifact.purpose == .approval || artifact.binding.availabilityDescription.contains("/approvals/") {
             return "approval"
         }
         let searchable = [
             artifact.purpose.rawValue,
-            artifact.reference.artifactID,
+            artifact.binding.logicalID,
             artifact.stageID ?? "",
-            artifact.reference.path,
-            artifact.reference.kind.rawValue,
-            artifact.reference.format.rawValue,
+            artifact.binding.availabilityDescription,
+            artifact.binding.kind.rawValue,
+            artifact.binding.format.rawValue,
         ]
         .joined(separator: " ")
         .lowercased()
@@ -622,35 +586,38 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         integrityByPath: [String: ArtifactIntegrity],
         into artifacts: inout [FlowRunReviewArtifact]
     ) {
-        var seenPaths = Set(artifacts.map { $0.reference.path })
-        for reference in ledger.runManifest.artifacts where seenPaths.insert(reference.path).inserted {
+        var seenPaths = Set(artifacts.map {
+            FlowArtifactMaterializationIdentity($0.binding.availability)
+        })
+        for binding in ledger.runManifest.artifacts + ledger.artifacts
+            where seenPaths.insert(FlowArtifactMaterializationIdentity(binding.availability)).inserted {
             artifacts.append(
                 FlowRunReviewArtifact(
-                    reference: reference,
-                    purpose: runReviewRole(for: reference),
+                    binding: binding,
+                    purpose: runReviewRole(for: binding),
                     integrity: artifactIntegrity(
-                        for: reference,
-                        integrity: integrityByPath[reference.path]
+                        for: binding,
+                        integrity: integrityByPath[binding.availabilityDescription]
                     )
                 )
             )
         }
     }
 
-    private func runReviewRole(for reference: ArtifactReference) -> FlowRunReviewArtifactPurpose {
-        if let role = retainedHistoryReviewRole(for: reference) {
+    private func runReviewRole(for binding: FlowArtifactBinding) -> FlowRunReviewArtifactPurpose {
+        if let role = retainedHistoryReviewRole(for: binding) {
             return role
         }
-        if reference.artifactID.hasSuffix("-edited-netlist") {
+        if binding.logicalID.hasSuffix("-edited-netlist") {
             return .planningEditedNetlist
         }
-        if reference.artifactID.hasSuffix("-netlist-parameter-edit-report") {
+        if binding.logicalID.hasSuffix("-netlist-parameter-edit-report") {
             return .planningNetlistParameterEditReport
         }
-        if reference.artifactID.hasSuffix("-attempts") {
+        if binding.logicalID.hasSuffix("-attempts") {
             return .stageAttempts
         }
-        switch reference.artifactID {
+        switch binding.logicalID {
         case "post-layout-comparison":
             return .postLayoutComparison
         case "planning-action-domain-snapshot":
@@ -695,7 +662,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     ) -> [FlowRunReviewItem] {
         var items: [FlowRunReviewItem] = []
         let artifactPathsByStage = Dictionary(grouping: artifacts.filter { $0.stageID != nil }) { $0.stageID ?? "" }
-            .mapValues { $0.map { $0.reference.path }.sorted() }
+            .mapValues { $0.map { $0.binding.availabilityDescription }.sorted() }
         let artifactIntegrityIssuesByStage = Dictionary(
             grouping: artifacts.filter {
                 $0.stageID != nil && isArtifactIntegrityIssue($0.integrity?.status)
@@ -703,7 +670,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         ) { $0.stageID ?? "" }
         let runArtifactPaths = artifacts
             .filter { $0.stageID == nil }
-            .map { $0.reference.path }
+            .map { $0.binding.availabilityDescription }
             .sorted()
         let approvalsByStage = ledger.approvals.reduce(into: [String: FlowApprovalRecord]()) {
             approvals, approval in
@@ -759,7 +726,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                         severity: hasError ? .error : .warning,
                         title: "Repair artifact integrity",
                         reason: "One or more stage artifacts could not be verified against the recorded run ledger.",
-                        artifactPaths: artifactIntegrityIssues.map { $0.reference.path }.sorted(),
+                        artifactPaths: artifactIntegrityIssues.map { $0.binding.availabilityDescription }.sorted(),
                         nextActionID: stageScopedID(stage.stageID, "repair-artifact-integrity")
                     )
                 )
@@ -909,7 +876,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     severity: .info,
                     title: "Archive or continue",
                     reason: "The run succeeded; archive the artifacts or start the next design iteration.",
-                    artifactPaths: artifacts.map { $0.reference.path }.sorted(),
+                    artifactPaths: artifacts.map { $0.binding.availabilityDescription }.sorted(),
                     nextActionID: "archive-or-continue"
                 )
             )
@@ -924,13 +891,13 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     }
 
     private func retainedHistoryReviewRole(
-        for reference: ArtifactReference
+        for binding: FlowArtifactBinding
     ) -> FlowRunReviewArtifactPurpose? {
         let searchable = [
-            reference.artifactID,
-            reference.path,
-            reference.kind.rawValue,
-            reference.format.rawValue,
+            binding.logicalID,
+            binding.availabilityDescription,
+            binding.kind.rawValue,
+            binding.format.rawValue,
         ]
         .joined(separator: " ")
         .lowercased()
@@ -974,11 +941,11 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 artifact.purpose == .agentLoopSnapshot
                     || artifact.purpose == .runGuardVerdict
             }
-            .map { $0.reference.path }
+            .map { $0.binding.availabilityDescription }
             .sorted()
         let crossArtifactPaths = artifacts
             .filter { $0.purpose == .crossArtifactEvaluation }
-            .map { $0.reference.path }
+            .map { $0.binding.availabilityDescription }
             .sorted()
 
         if let runGuardVerdict {
@@ -1109,19 +1076,22 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
     ) -> [FlowRunReviewItem] {
         let retainedArtifacts = artifacts
             .filter(isRetainedHistoryReviewArtifact)
-            .sorted { left, right in left.reference.path < right.reference.path }
+            .sorted { left, right in
+                left.binding.availabilityDescription < right.binding.availabilityDescription
+            }
         guard !retainedArtifacts.isEmpty else {
             return []
         }
         var signal = RetainedHistoryReviewSignal()
         for artifact in retainedArtifacts {
-            signal.artifactPaths.insert(artifact.reference.path)
-            guard artifact.reference.format == .json else {
+            let path = artifact.binding.availabilityDescription
+            signal.artifactPaths.insert(path)
+            guard artifact.binding.format == .json else {
                 continue
             }
             do {
-                guard let data = contentsByPath[artifact.reference.path] else {
-                    throw FlowExecutionError.missingArtifact(artifact.reference.path)
+                guard let data = contentsByPath[path] else {
+                    throw FlowExecutionError.missingArtifact(path)
                 }
                 let document = try JSONSerialization.jsonObject(with: data)
                 collectRetainedHistoryReviewSignal(from: document, into: &signal)
@@ -1155,7 +1125,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Review retained CI history",
                 reason: "Retained CI dashboard, history, retention index, workflow report, and release-gate artifacts are available for human and Agent review.",
                 diagnosticCodes: signal.diagnosticCodes.sorted(),
-                artifactPaths: retainedArtifacts.map { $0.reference.path },
+                artifactPaths: retainedArtifacts.map { $0.binding.availabilityDescription },
                 nextActionID: nextActionID
             ),
         ]
@@ -1315,7 +1285,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Regenerate candidate plan with feedback",
                 reason: "Rejected planning feedback is available and should be folded into the next candidate-plan ranking.",
                 diagnosticCodes: ["planning-rejected-feedback-available"],
-                artifactPaths: [rejectedPlans.reference.path],
+                artifactPaths: [rejectedPlans.binding.availabilityDescription],
                 nextActionID: "regenerate-candidate-plan-with-feedback"
             ),
         ]
@@ -1336,9 +1306,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         from artifact: FlowRunReviewArtifact,
         contentsByPath: [String: Data]
     ) -> FlowRunReviewItem? {
+        let path = artifact.binding.availabilityDescription
         do {
-            guard let data = contentsByPath[artifact.reference.path] else {
-                throw FlowExecutionError.missingArtifact(artifact.reference.path)
+            guard let data = contentsByPath[path] else {
+                throw FlowExecutionError.missingArtifact(path)
             }
             let document = try JSONDecoder().decode(FlowRunProblemTranslationAuditDocument.self, from: data)
             guard document.blocking else {
@@ -1352,7 +1323,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Repair problem translation audit",
                 reason: document.summary,
                 diagnosticCodes: document.diagnosticCodes,
-                artifactPaths: [artifact.reference.path],
+                artifactPaths: [path],
                 nextActionID: document.primaryNextAction
             )
         } catch {
@@ -1364,7 +1335,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                 title: "Review problem translation audit",
                 reason: "The problem translation audit artifact could not be decoded for review.",
                 diagnosticCodes: ["problem-translation-audit-unreadable"],
-                artifactPaths: [artifact.reference.path],
+                artifactPaths: [path],
                 nextActionID: "regenerate-problem-translation-audit"
             )
         }
@@ -1380,9 +1351,10 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         from artifact: FlowRunReviewArtifact,
         contentsByPath: [String: Data]
     ) -> [FlowRunReviewItem] {
+        let path = artifact.binding.availabilityDescription
         do {
-            guard let data = contentsByPath[artifact.reference.path] else {
-                throw FlowExecutionError.missingArtifact(artifact.reference.path)
+            guard let data = contentsByPath[path] else {
+                throw FlowExecutionError.missingArtifact(path)
             }
             let document = try JSONDecoder().decode(PlanVerificationReviewDocument.self, from: data)
             return document.correctnessGateResults.compactMap { gate in
@@ -1398,7 +1370,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
                     title: "Review planning correctness evidence",
                     reason: "The planning verification artifact could not be decoded for correctness gate review.",
                     diagnosticCodes: ["planning-correctness-unreadable"],
-                    artifactPaths: [artifact.reference.path],
+                    artifactPaths: [path],
                     nextActionID: "regenerate-plan-verification"
                 ),
             ]
@@ -1420,7 +1392,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             title: planningCorrectnessTitle(for: gate),
             reason: gate.summary,
             diagnosticCodes: gate.diagnostics.map(\.code),
-            artifactPaths: [artifact.reference.path],
+            artifactPaths: [artifact.binding.availabilityDescription],
             nextActionID: gate.nextActions.first
         )
     }
@@ -1479,13 +1451,15 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         ledger: FlowRunLedger,
         contentsByPath: [String: Data]
     ) throws -> T? {
-        let reference = (ledger.artifacts + ledger.actions.flatMap(\.outputs)).last {
-            $0.artifactID == artifactID
+        let binding = (ledger.artifacts + ledger.runManifest.artifacts + ledger.stages.flatMap(\.artifacts)).last {
+            $0.logicalID == artifactID
         }
-        guard let reference,
-              let content = contentsByPath[reference.path]
-                ?? runRelativePath(for: reference.path, runID: ledger.runID)
-                    .flatMap({ contentsByPath[$0] }) else {
+        guard let binding else {
+            return nil
+        }
+        guard let content = artifactPathAliases(for: binding, runID: ledger.runID)
+            .compactMap({ contentsByPath[$0] })
+            .first else {
             return nil
         }
         return try JSONDecoder().decode(type, from: content)
@@ -1495,16 +1469,12 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         from ledger: FlowRunLedger
     ) async throws -> [String: Data] {
         var contents: [String: Data] = [:]
-        let references = recordedReferencesByPath(from: ledger).values
-        for reference in references {
+        let bindings = Set(recordedReferencesByPath(from: ledger).values)
+        for binding in bindings {
             do {
-                let content = try await persistence.loadArtifactContent(for: reference)
-                contents[reference.locator.location.value] = content
-                if let runRelativePath = runRelativePath(
-                    for: reference.locator.location.value,
-                    runID: ledger.runID
-                ) {
-                    contents[runRelativePath] = content
+                let content = try await persistence.loadArtifactContent(for: binding)
+                for path in artifactPathAliases(for: binding, runID: ledger.runID) {
+                    contents[path] = content
                 }
             } catch {
                 continue
@@ -1517,7 +1487,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         purpose: FlowRunReviewArtifactPurpose,
         runID: String,
         relativePath: String,
-        recordedReferencesByPath: [String: ArtifactReference],
+        recordedReferencesByPath: [String: FlowArtifactBinding],
         integrityByPath: [String: ArtifactIntegrity],
         stageID: String? = nil,
         into artifacts: inout [FlowRunReviewArtifact]
@@ -1526,34 +1496,38 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         if let stageID, !identifierPolicy.isValidStageID(stageID) {
             return
         }
-        if let reference = recordedReferencesByPath[projectRelativePath] {
-            guard !artifacts.contains(where: { $0.reference.path == reference.path }) else {
+        if let binding = recordedReferencesByPath[projectRelativePath] {
+            let materialization = FlowArtifactMaterializationIdentity(binding.availability)
+            guard !artifacts.contains(where: {
+                FlowArtifactMaterializationIdentity($0.binding.availability) == materialization
+            }) else {
                 return
             }
             artifacts.append(FlowRunReviewArtifact(
-                reference: reference,
+                binding: binding,
                 purpose: purpose,
                 stageID: stageID,
                 integrity: artifactIntegrity(
-                    for: reference,
+                    for: binding,
                     stageID: stageID,
-                    integrity: integrityByPath[reference.path]
+                    integrity: integrityByPath[binding.availabilityDescription]
                 )
             ))
         }
     }
 
     private func artifactIntegrity(
-        for reference: ArtifactReference,
+        for binding: FlowArtifactBinding,
         stageID: String? = nil,
         integrity: ArtifactIntegrity?
     ) -> FlowRunReviewArtifactIntegrity {
         if let stageID, !identifierPolicy.isValidStageID(stageID) {
             return identifierPolicy.invalidStageIdentifierIntegrity(stageID)
         }
-        if !identifierPolicy.isValidArtifactID(reference.artifactID) {
-            return identifierPolicy.invalidArtifactIdentifierIntegrity(reference.artifactID)
+        if !identifierPolicy.isValidArtifactID(binding.logicalID) {
+            return identifierPolicy.invalidArtifactIdentifierIntegrity(binding.logicalID)
         }
+        let reference = binding.reference
         guard let integrity else {
             return FlowRunReviewArtifactIntegrity(
                 status: .unreadableArtifact,
@@ -1615,21 +1589,20 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         let recordedReferences = recordedReferencesByPath(from: ledger)
         var result: [String: ArtifactIntegrity] = [:]
         for path in recordedReferences.keys.sorted() {
-            guard let reference = recordedReferences[path] else {
+            guard let binding = recordedReferences[path] else {
                 continue
             }
-            result[path] = await persistence.verifyArtifact(reference)
+            result[path] = await persistence.verifyArtifact(binding)
         }
 
         // Stage results are the canonical source for stage artifact references.
         // Apply them after run-level aliases so integrity never depends on
         // Dictionary iteration order when both keys resolve to the same path.
         for stage in ledger.stages {
-            for reference in stage.artifacts {
-                let integrity = await persistence.verifyArtifact(reference)
-                result[reference.path] = integrity
-                if let relativePath = runRelativePath(for: reference.path, runID: ledger.runID) {
-                    result[relativePath] = integrity
+            for binding in stage.artifacts {
+                let integrity = await persistence.verifyArtifact(binding)
+                for path in artifactPathAliases(for: binding, runID: ledger.runID) {
+                    result[path] = integrity
                 }
             }
         }

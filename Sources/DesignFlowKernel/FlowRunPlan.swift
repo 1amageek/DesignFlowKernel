@@ -1,24 +1,27 @@
 import Foundation
 
 public struct FlowRunPlan: Sendable, Hashable, Codable {
-    @FlowSchemaVersion1 public var schemaVersion: Int
+    @FlowSchemaVersion2 public var schemaVersion: Int
     public var runID: String
     public var intent: String
     public var toolchainProfile: FlowToolchainProfileRecord?
     public var stages: [FlowStageDefinition]
+    public var stageInputs: [FlowStageInputBinding]
 
     public init(
-        schemaVersion: Int = 1,
+        schemaVersion: Int = 2,
         runID: String,
         intent: String,
         toolchainProfile: FlowToolchainProfileRecord? = nil,
-        stages: [FlowStageDefinition]
+        stages: [FlowStageDefinition],
+        stageInputs: [FlowStageInputBinding] = []
     ) {
         self.schemaVersion = schemaVersion
         self.runID = runID
         self.intent = intent
         self.toolchainProfile = toolchainProfile
         self.stages = stages
+        self.stageInputs = stageInputs
     }
 
     public func makeRequest(workspaceID: FlowWorkspaceID) -> FlowOperationRequest {
@@ -27,7 +30,8 @@ public struct FlowRunPlan: Sendable, Hashable, Codable {
             runID: runID,
             intent: intent,
             toolchainProfile: toolchainProfile,
-            stages: stages
+            stages: stages,
+            stageInputs: stageInputs
         )
     }
 }

@@ -66,16 +66,18 @@ and owns lifecycle, gates, approvals, retries, and resume.
 | Type | Responsibility |
 |---|---|
 | `FlowWorkspaceID` | Validated opaque identity resolved by the composing storage layer |
-| `FlowOperationRequest` | Workspace identity, run ID, intent, stage sequence |
+| `FlowOperationRequest` | Workspace identity, run ID, intent, stage sequence, immutable per-stage input bindings |
+| `FlowStageInputBinding` | Exact artifact bindings scoped to one declared stage and persisted in `FlowRunPlan` schema version 2 |
 | `FlowStageDefinition` | Stage ID, display name, tool trust requirement, `requiresApproval`, retry policy |
 | `FlowStageExecutor` | Protocol: delegates domain-specific stage execution to engines |
 | `DefaultFlowOrchestrator` | Applies tool trust gates, executes stages, applies the approval gate, and persists results through an injected ledger boundary |
 | `FlowStageResult` / `FlowStageStatus` | Typed stage outcome: status, diagnostics, gate results, artifact references, attempt records |
 | `FlowStageRetryPolicy` / `FlowStageAttemptRecord` | Bounded stage retry contract and persisted per-attempt audit trail |
+| `FlowStageExecutionAttemptID` | Unique typed identity issued for each actual executor invocation, including retries |
 | `FlowGateResult` / `FlowGateStatus` | Pass/fail/waived/incomplete per gate |
 | `FlowRunResult` / `FlowRunStatus` | Run status, stage results, canonical evidence, provenance, and diagnostics |
 | `FlowDiagnostic` / `FlowDiagnosticSeverity` | Structured diagnostics (never opaque strings) |
-| `FlowExecutionContext` / `FlowExecutionError` | Execution environment and typed failures |
+| `FlowExecutionContext` / `FlowExecutionError` | Execution environment, target-stage input artifacts, and typed failures |
 | `FlowRunLedgerSummary` | Compact Agent / CI summary with stage, gate, toolchain, diagnostic, next-action, and selected semantic-action state |
 | `FlowRunLedgerLoading` | Asynchronous canonical ledger-loading seam used by the composed runtime and stage infrastructure |
 | `FlowRunReviewLedgerLoading` | Structurally validated metadata load for per-artifact human review; missing or corrupted evidence remains visible in the review bundle |
@@ -97,7 +99,9 @@ stage has retry enabled or more than one attempt, it also writes
 manifest with artifact ID `<stage-id>-attempts`, exposes it as `stage-attempts`
 in the review bundle, and reports `attemptCount` / `retryCount` through
 `FlowRunLedgerSummary`. This keeps retry policy reviewable without scraping
-process logs.
+process logs. Every executor invocation also receives a distinct
+`FlowStageExecutionAttemptID`; consumers can bind attempt-local evidence to the
+invocation that produced it instead of accepting evidence left by an earlier retry.
 
 ## Progress subscription
 
@@ -149,6 +153,37 @@ the agent both operate on this one ledger — block → decide → resume.
 If setup fails after an interrupted run has transitioned back to `running`, the
 orchestrator retains the prior stage and toolchain records and appends a typed
 `flow-setup` failure. Setup failure does not replace the run's earlier evidence.
+
+## Candidate evidence and promotion authorization
+
+Database-bound candidate promotion uses a separate fail-closed policy path:
+
+```mermaid
+flowchart LR
+    Stage["FlowRuntime stage results"] --> Attestation["Content-addressed stage attestations"]
+    Attestation --> Evidence["Exact candidate evidence binding"]
+    Evidence --> Diff["Exact base-to-candidate design diff"]
+    Diff --> Approval["Persisted human approval artifacts"]
+    Approval --> Decision["DFK promotion decision"]
+    Decision --> Authorization["Bounded DFK authorization"]
+    Authorization --> CAS["Xcircuite reference CAS"]
+```
+
+`FlowCandidateStageAttestation` binds the run, stage, exact candidate revision,
+semantic dependency-graph digest, commit receipt, stage inputs, result, raw
+evidence, and status. `FlowCandidateEvidenceBinding` retains the required stage
+set under one content digest. `DefaultFlowCandidatePromotionAuthorizer` loads
+the retained evidence and approvals through
+`FlowCandidatePromotionArtifactReading`; it validates bytes and content identity
+before issuing a content-addressed decision and time-bounded authorization. The
+approval must bind the exact retained design-diff availability and content identity.
+The decision digest also includes that diff reference, so authorization validation
+rejects a reconstructed request that substitutes another diff without re-reading
+workspace storage.
+
+DesignFlowKernel does not mutate a DesignDatabase reference. The composing
+Xcircuite runtime verifies the authorization and provider grant, performs the
+compare-and-swap, and records the result in its ledger.
 
 ## Release envelope and retention evidence
 

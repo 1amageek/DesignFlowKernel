@@ -61,44 +61,43 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             )
         }
 
-        let retainedArtifacts = ledger.artifacts + ledger.actions.flatMap(\.outputs)
-        let packetCandidates = retainedArtifacts.filter { reference in
-            reference.artifactID == DefaultFlowRunDecisionPacketBuilder.artifactID
+        let packetCandidates = ledger.artifacts.filter { binding in
+            binding.logicalID == DefaultFlowRunDecisionPacketBuilder.artifactID
         }
-        let matchingPacketReferences = packetCandidates.filter { reference in
-            reference.locator.role == .output
-                && reference.locator.kind == .report
-                && reference.locator.format == .json
-                && artifactLocationValidator.isReference(
-                    reference,
+        let matchingPacketBindings = packetCandidates.filter { binding in
+            binding.role == .output
+                && binding.kind == .report
+                && binding.format == .json
+                && artifactLocationValidator.isBinding(
+                    binding,
                     boundTo: packetPath,
                     allowingContentAddressedVariant: true
                 )
         }
-        let packetReference = packetCandidates.count == 1
-            ? matchingPacketReferences.first
+        let packetBinding = packetCandidates.count == 1
+            ? matchingPacketBindings.first
             : nil
-        let mismatchedPacketReference = packetReference == nil ? packetCandidates.last : nil
-        let resolvedPacketPath = packetReference?.path ?? packetPath
+        let mismatchedPacketBinding = packetBinding == nil ? packetCandidates.last : nil
+        let resolvedPacketPath = packetBinding?.availabilityDescription ?? packetPath
         let packetIntegrity: FlowArtifactIntegrityRecord?
-        if let packetReference {
+        if let packetBinding {
             do {
-                _ = try await persistence.loadArtifactContent(for: packetReference)
+                _ = try await persistence.loadArtifactContent(for: packetBinding)
                 packetIntegrity = FlowArtifactIntegrityRecord(
                     status: .verified,
-                    path: packetReference.locator.location.value,
-                    expectedSHA256: packetReference.digest.hexadecimalValue,
-                    actualSHA256: packetReference.digest.hexadecimalValue,
-                    expectedByteCount: packetReference.byteCount,
-                    actualByteCount: packetReference.byteCount,
+                    path: packetBinding.availabilityDescription,
+                    expectedSHA256: packetBinding.reference.digest.hexadecimalValue,
+                    actualSHA256: packetBinding.reference.digest.hexadecimalValue,
+                    expectedByteCount: packetBinding.reference.byteCount,
+                    actualByteCount: packetBinding.reference.byteCount,
                     message: "Artifact content was verified by the injected persistence boundary."
                 )
             } catch {
                 packetIntegrity = FlowArtifactIntegrityRecord(
                     status: .unreadableArtifact,
-                    path: packetReference.locator.location.value,
-                    expectedSHA256: packetReference.digest.hexadecimalValue,
-                    expectedByteCount: packetReference.byteCount,
+                    path: packetBinding.availabilityDescription,
+                    expectedSHA256: packetBinding.reference.digest.hexadecimalValue,
+                    expectedByteCount: packetBinding.reference.byteCount,
                     message: error.localizedDescription
                 )
             }
@@ -106,15 +105,15 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
             packetIntegrity = nil
         }
         var diagnostics: [FlowDiagnostic] = []
-        if let mismatchedPacketReference {
+        if let mismatchedPacketBinding {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
                     code: "decision-packet-artifact-reference-mismatch",
-                    message: "The retained decision packet reference is not exactly bound to the requested run and decision-packet artifact contract: \(mismatchedPacketReference.path)"
+                    message: "The retained decision packet binding is not exactly bound to the requested run and decision-packet artifact contract: \(mismatchedPacketBinding.availabilityDescription)"
                 )
             )
-        } else if packetReference == nil {
+        } else if packetBinding == nil {
             diagnostics.append(
                 FlowDiagnostic(
                     severity: .error,
@@ -135,11 +134,11 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
 
         let packet: FlowRunDecisionPacket
         do {
-            guard let packetReference else {
+            guard let packetBinding else {
                 throw FlowExecutionError.missingArtifact(packetPath)
             }
             let content = try await persistence.loadArtifactContent(
-                for: packetReference
+                for: packetBinding
             )
             packet = try JSONDecoder().decode(FlowRunDecisionPacket.self, from: content)
         } catch {
@@ -455,9 +454,9 @@ public struct DefaultFlowRunDecisionPacketValidator: FlowRunDecisionPacketValida
         do {
             _ = try await persistence.persistArtifact(
                 content: encoder.encode(result),
-                id: ArtifactID(rawValue: Self.artifactID),
-                locator: ArtifactLocator(
-                    location: try ArtifactLocation(workspaceRelativePath: projectRelativePath),
+                logicalID: Self.artifactID,
+                relativePath: FlowArtifactPath.relative(projectRelativePath),
+                descriptor: ArtifactDescriptor(
                     role: .output,
                     kind: .report,
                     format: .json

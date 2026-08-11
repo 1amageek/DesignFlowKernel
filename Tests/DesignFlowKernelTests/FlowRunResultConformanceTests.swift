@@ -20,19 +20,26 @@ struct FlowRunResultConformanceTests {
 
     @Test("flow result preserves canonical artifacts and provenance")
     func preservesOpaqueArtifactIdentity() throws {
-        let artifact = ArtifactReference(
-            id: try ArtifactID(rawValue: "rtl-netlist"),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "runs/run-1/design.sv"),
-                role: .output,
-                kind: .rtl,
-                format: .systemVerilog
-            ),
-            digest: try ContentDigest(
+        let artifact = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "a", count: 64)
             ),
-            byteCount: 32
+            byteCount: 32,
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .rtl,
+                format: .systemVerilog
+            )
+        )
+        let binding = try FlowArtifactBinding(
+            logicalID: "rtl-netlist",
+            reference: artifact,
+            availability: .local(
+                artifactID: artifact.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative("runs/run-1/design.sv")
+            )
         )
         let timestamp = Date(timeIntervalSince1970: 10)
         let provenance = try ExecutionProvenance(
@@ -51,15 +58,15 @@ struct FlowRunResultConformanceTests {
             stages: [FlowStageResult(
                 stageID: "rtl",
                 status: .succeeded,
-                artifacts: [artifact]
+                artifacts: [binding]
             )],
             provenance: provenance
         )
 
         #expect(result.artifacts.count == 1)
-        #expect(result.artifacts[0].id.rawValue == "rtl-netlist")
-        #expect(result.artifacts[0].locator.kind == .rtl)
-        #expect(result.artifacts[0].locator.format == ArtifactFormat.systemVerilog)
+        #expect(result.artifacts[0].id == artifact.id)
+        #expect(result.artifacts[0].descriptor.kind == ArtifactKind.rtl)
+        #expect(result.artifacts[0].descriptor.format == ArtifactFormat.systemVerilog)
         #expect(result.evidence.provenance == provenance)
 
         let decoded = try JSONDecoder().decode(
@@ -71,18 +78,26 @@ struct FlowRunResultConformanceTests {
 
     @Test("flow evidence derives a deterministic identity when ID is absent")
     func derivesDeterministicIdentityWithoutExplicitID() throws {
-        let artifact = ArtifactReference(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "runs/run-1/report.json"),
-                role: .output,
-                kind: .report,
-                format: .json
-            ),
-            digest: try ContentDigest(
+        let artifact = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "b", count: 64)
             ),
-            byteCount: 16
+            byteCount: 16,
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .report,
+                format: .json
+            )
+        )
+        let binding = try FlowArtifactBinding(
+            logicalID: "report",
+            reference: artifact,
+            availability: .local(
+                artifactID: artifact.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative("runs/run-1/report.json")
+            )
         )
         let timestamp = Date(timeIntervalSince1970: 10)
         let provenance = try ExecutionProvenance(
@@ -101,7 +116,7 @@ struct FlowRunResultConformanceTests {
             stages: [FlowStageResult(
                 stageID: "report",
                 status: .succeeded,
-                artifacts: [artifact]
+                artifacts: [binding]
             )],
             provenance: provenance
         )
@@ -111,13 +126,13 @@ struct FlowRunResultConformanceTests {
             stages: [FlowStageResult(
                 stageID: "report",
                 status: .succeeded,
-                artifacts: [artifact]
+                artifacts: [binding]
             )],
             provenance: provenance
         )
 
         #expect(first.artifacts[0].id == second.artifacts[0].id)
-        #expect(!first.artifacts[0].id.rawValue.isEmpty)
+        #expect(!first.artifacts[0].id.description.isEmpty)
     }
 
     @Test("decoding rejects evidence that diverges from stage artifacts")
@@ -142,18 +157,17 @@ struct FlowRunResultConformanceTests {
             JSONSerialization.jsonObject(with: JSONEncoder().encode(result)) as? [String: Any]
         )
         var evidence = try #require(object["evidence"] as? [String: Any])
-        let artifact = ArtifactReference(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "artifact.json"),
-                role: .output,
-                kind: .report,
-                format: .json
-            ),
-            digest: try ContentDigest(
+        let artifact = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "a", count: 64)
             ),
-            byteCount: 1
+            byteCount: 1,
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .report,
+                format: .json
+            )
         )
         let artifactObject = try #require(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(artifact)) as? [String: Any]

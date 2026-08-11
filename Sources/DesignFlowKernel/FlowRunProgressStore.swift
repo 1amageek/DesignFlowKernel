@@ -48,7 +48,7 @@ public struct FlowRunProgressStore: Sendable {
         return FlowRunCancellationResult(
             status: "recorded",
             request: request,
-            path: reference.locator.location.value
+            path: try reference.requireLocalRelativePath().stringValue
         )
     }
 
@@ -60,7 +60,7 @@ public struct FlowRunProgressStore: Sendable {
 
     public func runLevelArtifacts(
         runID: String
-    ) async throws -> [ArtifactReference] {
+    ) async throws -> [FlowArtifactBinding] {
         try await persistence.runControlArtifacts(runID: runID)
     }
 }

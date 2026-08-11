@@ -9,7 +9,7 @@ public struct DesignDiffChange: Sendable, Hashable, Codable {
     public var fromPath: String?
     public var before: DesignDiffValue?
     public var after: DesignDiffValue?
-    public var artifacts: [ArtifactReference]
+    public var artifacts: [FlowArtifactBinding]
     public var summary: String
 
     public init(
@@ -20,7 +20,7 @@ public struct DesignDiffChange: Sendable, Hashable, Codable {
         fromPath: String? = nil,
         before: DesignDiffValue? = nil,
         after: DesignDiffValue? = nil,
-        artifacts: [ArtifactReference] = [],
+        artifacts: [FlowArtifactBinding] = [],
         summary: String
     ) {
         self.changeID = changeID

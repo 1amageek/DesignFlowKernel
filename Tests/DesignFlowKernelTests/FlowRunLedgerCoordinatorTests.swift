@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import Foundation
 import Testing
 @testable import DesignFlowKernel
@@ -58,36 +59,44 @@ struct FlowRunLedgerCoordinatorTests {
 
     @Test
     func artifactMergeKeepsStageLocalIdentifiersAndRejectsLocatorConflicts() throws {
-        let first = try artifactReference(
+        let first = try artifactBinding(
             id: "stage-summary",
             path: "runs/run-1/stages/001-drc/summary.json"
         )
-        let second = try artifactReference(
+        let second = try artifactBinding(
             id: "stage-summary",
             path: "runs/run-1/stages/002-lvs/summary.json"
         )
 
-        let merged = try mergedArtifactReferences([first, second, first])
+        let merged = try mergedArtifactBindings([first, second, first])
         #expect(merged.count == 2)
-        #expect(Set(merged.map(\.locator.location)) == Set([
-            first.locator.location,
-            second.locator.location,
+        #expect(Set(merged.map(\.availability)) == Set([
+            first.availability,
+            second.availability,
         ]))
 
-        let conflicting = ArtifactReference(
-            id: first.id,
-            locator: first.locator,
-            digest: try ContentDigest(
+        let conflictingReference = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "1", count: 64)
             ),
-            byteCount: 1
+            byteCount: 1,
+            descriptor: first.descriptor
+        )
+        let conflicting = try FlowArtifactBinding(
+            logicalID: first.logicalID,
+            reference: conflictingReference,
+            availability: .local(
+                artifactID: conflictingReference.id,
+                rootID: first.requireLocalRootID(),
+                relativePath: first.requireLocalRelativePath()
+            )
         )
         #expect(throws: FlowExecutionError.conflictingArtifactReference(
-            artifactID: first.id.rawValue,
-            location: first.locator.location.value
+            artifactID: first.logicalID,
+            location: first.availabilityDescription
         )) {
-            _ = try mergedArtifactReferences([first, conflicting])
+            _ = try mergedArtifactBindings([first, conflicting])
         }
     }
 
@@ -159,6 +168,68 @@ struct FlowRunLedgerCoordinatorTests {
     }
 
     @Test
+    func startingExistingRunBindsExactPlanAndArtifactsAtomically() async throws {
+        let runID = "run-existing-plan-binding"
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        let plan = FlowRunPlan(
+            runID: runID,
+            intent: "Verify one exact candidate.",
+            stages: [FlowStageDefinition(
+                stageID: "verify",
+                displayName: "Verify"
+            )]
+        )
+        let planArtifact = try artifactBinding(
+            id: "run-plan",
+            path: ".xcircuite/runs/\(runID)/plan.json"
+        )
+
+        let running = try await coordinator.transition(
+            runID: runID,
+            to: .running,
+            binding: plan,
+            registering: [planArtifact]
+        )
+
+        #expect(running.plan == plan)
+        #expect(running.artifacts == [planArtifact])
+        #expect(running.runManifest.status == .running)
+        #expect(running.runManifest.revision == 1)
+        #expect(await store.saveCount == 1)
+    }
+
+    @Test
+    func startingExistingRunRejectsDifferentPlan() async throws {
+        let runID = "run-existing-plan-conflict"
+        let original = FlowRunPlan(
+            runID: runID,
+            intent: "Original plan.",
+            stages: []
+        )
+        var ledger = try makeLedger(runID: runID)
+        ledger.plan = original
+        let store = InMemoryLedgerStore(ledger: ledger)
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        let replacement = FlowRunPlan(
+            runID: runID,
+            intent: "Different plan.",
+            stages: []
+        )
+
+        await #expect(throws: FlowRunLedgerPersistenceError
+            .protectedProjectionMutation(runID: runID, field: "plan")) {
+            try await coordinator.transition(
+                runID: runID,
+                to: .running,
+                binding: replacement
+            )
+        }
+        #expect(await store.saveCount == 0)
+        #expect(try await store.loadRunLedger(runID: runID) == ledger)
+    }
+
+    @Test
     func terminalRunRejectsGenericArtifactRegistration() async throws {
         let store = InMemoryLedgerStore(ledger: try makeLedger(runID: "run-terminal-register"))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
@@ -174,7 +245,7 @@ struct FlowRunLedgerCoordinatorTests {
             evidence: try evidenceManifest(artifacts: []),
             artifacts: []
         )
-        let lateArtifact = try artifactReference(
+        let lateArtifact = try artifactBinding(
             id: "late-artifact",
             path: "runs/run-terminal-register/reports/late.json"
         )
@@ -230,8 +301,8 @@ struct FlowRunLedgerCoordinatorTests {
             stages: [FlowStageResult(stageID: "review", status: .blocked)]
         ))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
-        let plan = try artifactReference(id: "plan", path: ".xcircuite/runs/run-review/plan.json")
-        let stageResult = try artifactReference(
+        let plan = try artifactBinding(id: "plan", path: ".xcircuite/runs/run-review/plan.json")
+        let stageResult = try artifactBinding(
             id: "stage-result",
             path: ".xcircuite/runs/run-review/stages/layout/result.json"
         )
@@ -314,7 +385,7 @@ struct FlowRunLedgerCoordinatorTests {
         let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
         _ = try await coordinator.transition(runID: runID, to: .running)
-        let artifact = try artifactReference(
+        let artifact = try artifactBinding(
             id: "result",
             path: ".xcircuite/runs/\(runID)/result.json"
         )
@@ -342,8 +413,8 @@ struct FlowRunLedgerCoordinatorTests {
         let coordinator = FlowRunLedgerCoordinator(persistence: store)
         _ = try await coordinator.transition(runID: runID, to: .running)
         let path = ".storage/runs/\(runID)/waveforms/pre-simulation.json"
-        let output = try artifactReference(id: "pre-simulation-waveform", path: path)
-        let input = try artifactReference(
+        let output = try artifactBinding(id: "pre-simulation-waveform", path: path)
+        let input = try artifactBinding(
             id: "post-layout-waveform-input",
             path: path,
             role: .input
@@ -383,8 +454,10 @@ struct FlowRunLedgerCoordinatorTests {
         )
 
         #expect(finalized.artifacts.count == 2)
-        #expect(Set(finalized.artifacts.map(\.locator.location)).count == 1)
-        #expect(Set(finalized.artifacts.map(\.locator.role)) == Set([.output, .input]))
+        #expect(Set(finalized.artifacts.map {
+            FlowArtifactMaterializationIdentity($0.availability)
+        }).count == 1)
+        #expect(Set(finalized.artifacts.map(\.role)) == Set([ArtifactRole.output, ArtifactRole.input]))
     }
 
     @Test
@@ -513,13 +586,13 @@ struct FlowRunLedgerCoordinatorTests {
             )
         }
 
-        let unretainedOutput = try artifactReference(
+        let unretainedOutput = try artifactBinding(
             id: "unretained-output",
             path: "runs/\(runID)/actions/unretained-output.json"
         )
         await #expect(throws: FlowRunLedgerPersistenceError.actionArtifactBindingMismatch(
             runID: runID,
-            path: unretainedOutput.path
+            path: unretainedOutput.reference.id.description
         )) {
             try await coordinator.appendAction(FlowRunActionRecord(
                 actionID: "bind-unretained-output",
@@ -527,7 +600,7 @@ struct FlowRunLedgerCoordinatorTests {
                 actor: FlowRunActor(kind: .agent, identifier: "agent"),
                 actionKind: "analysis.bind-output",
                 status: .succeeded,
-                outputs: [unretainedOutput]
+                outputs: [unretainedOutput.reference]
             ))
         }
 
@@ -602,30 +675,40 @@ struct FlowRunLedgerCoordinatorTests {
         }
     }
 
-    private func artifactReference(
+    private func artifactBinding(
         id: String,
         path: String,
         role: ArtifactRole = .output
-    ) throws -> ArtifactReference {
-        ArtifactReference(
-            id: try ArtifactID(rawValue: id),
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
-                role: role,
-                kind: .report,
-                format: .json
-            ),
-            digest: try ContentDigest(
+    ) throws -> FlowArtifactBinding {
+        let reference = try ArtifactReference(
+            digest: ContentDigest(
                 algorithm: .sha256,
                 hexadecimalValue: String(repeating: "0", count: 64)
             ),
-            byteCount: 0
+            byteCount: 0,
+            descriptor: ArtifactDescriptor(
+                role: role,
+                kind: .report,
+                format: .json
+            )
+        )
+        let normalizedPath = path.hasPrefix(".xcircuite/")
+            ? String(path.dropFirst(".xcircuite/".count))
+            : path
+        return try FlowArtifactBinding(
+            logicalID: id,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "test-workspace"),
+                relativePath: FlowArtifactPath.relative(normalizedPath)
+            )
         )
     }
 
-    private func evidenceManifest(artifacts: [ArtifactReference]) throws -> EvidenceManifest {
+    private func evidenceManifest(artifacts: [FlowArtifactBinding]) throws -> EvidenceManifest {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_100)
-        return EvidenceManifest(
+        return try EvidenceManifest.contentAddressed(
             provenance: try ExecutionProvenance(
                 producer: ProducerIdentity(
                     kind: .engine,
@@ -635,7 +718,8 @@ struct FlowRunLedgerCoordinatorTests {
                 startedAt: timestamp,
                 completedAt: timestamp
             ),
-            artifacts: artifacts
+            artifacts: artifacts.map(\.reference),
+            digester: SHA256ContentDigester()
         )
     }
 
