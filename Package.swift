@@ -1,31 +1,15 @@
 // swift-tools-version: 6.3
 import PackageDescription
-import Foundation
 
-let workspaceRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-let isLSIWorkspace = FileManager.default.fileExists(
-    atPath: workspaceRoot.appendingPathComponent("docs/workspace-packages.json").path
+let circuiteFoundationDependency: Package.Dependency = .package(
+    url: "https://github.com/1amageek/CircuiteFoundation.git",
+    exact: "26.812.0"
 )
 
-let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
-    atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
+let toolQualificationDependency: Package.Dependency = .package(
+    url: "https://github.com/1amageek/ToolQualification.git",
+    exact: "26.812.0"
 )
-    ? .package(path: "../CircuiteFoundation")
-    : .package(
-        url: "https://github.com/1amageek/CircuiteFoundation.git",
-        revision: "dc792c88e189c822c9f83ea86cf139ee68560dca"
-    )
-
-let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
-    atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
-)
-    ? .package(path: "../ToolQualification")
-    : .package(
-        url: "https://github.com/1amageek/ToolQualification.git",
-        revision: "c489783a5673bc2dd0b94c438c2f53a65d9a2d8b"
-    )
 
 let package = Package(
     name: "DesignFlowKernel",

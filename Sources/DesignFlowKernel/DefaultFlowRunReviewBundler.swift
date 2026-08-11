@@ -188,7 +188,7 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
         case "synthesize-parameter-candidate-plan":
             return [flowAction(id: "synthesize-parameter-candidate-plan", readiness: .ready, operation: .synthesizeParameterCandidatePlan, runID: runID, reason: "Synthesize the selected parameter candidate.")]
         case "run-numeric-repair-loop":
-            return [flowAction(id: "run-numeric-repair-loop", readiness: .ready, operation: .runNumericRepairLoop, runID: runID, reason: "Run the numeric repair loop.")]
+            return [flowAction(id: "run-numeric-repair-loop", readiness: .requiresInput, operation: .runNumericRepairLoop, runID: runID, reason: "Attach the exact database host, edit context, runtime configuration, and source netlist before running numeric repair.")]
         case "repair-planning-problem-goals", "add-objective-goal-atoms":
             return [flowAction(id: "validate-planning-problem.after-goal-edit", readiness: .requiresInput, operation: .validatePlanningProblem, runID: runID, reason: "Edit goal atoms before validating the repaired planning problem.")]
         case "repair-problem-translation-audit", "attach-objective-source-ref", "attach-constraint-source-ref", "attach-action-source-objective", "attach-goal-atom-source-objective", "map-source-ref-to-objective-or-constraint", "regenerate-planning-problem":
@@ -640,8 +640,6 @@ public struct DefaultFlowRunReviewBundler: FlowRunReviewBundling {
             return .planningPlanVerification
         case "planning-rejected-plans":
             return .planningRejectedPlans
-        case "planning-plan-execution":
-            return .planningPlanExecution
         case "flow-toolchain-profile":
             return .toolchainProfile
         case "review-stage-artifact-ladder":

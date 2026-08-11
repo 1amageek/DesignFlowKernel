@@ -40,7 +40,6 @@ public struct FlowRunReviewArtifactPurpose: Sendable, Hashable, Codable, RawRepr
     public static let planningParameterCandidateSearchTrace = Self(uncheckedRawValue: "planning-parameter-candidate-search-trace")
     public static let planningParameterCandidateSelectionTrace = Self(uncheckedRawValue: "planning-parameter-candidate-selection-trace")
     public static let planningParameterCandidates = Self(uncheckedRawValue: "planning-parameter-candidates")
-    public static let planningPlanExecution = Self(uncheckedRawValue: "planning-plan-execution")
     public static let planningPlanVerification = Self(uncheckedRawValue: "planning-plan-verification")
     public static let planningProblem = Self(uncheckedRawValue: "planning-problem")
     public static let planningProblemTranslationAudit = Self(uncheckedRawValue: "planning-problem-translation-audit")

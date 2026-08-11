@@ -187,8 +187,6 @@ extension FlowRunLedgerSummaryTests {
     """.utf8)
     let rejectedPlansPath = ".xcircuite/runs/run-1/planning/rejected-plans.jsonl"
     let rejectedPlansPayload = Data(#"{"schemaVersion":1,"rejectionID":"rejection-1","status":"rejected"}"#.utf8)
-    let planExecutionPath = ".xcircuite/runs/run-1/planning/plan-execution.json"
-    let planExecutionPayload = Data(#"{"schemaVersion":1,"planID":"plan-1","status":"executed"}"#.utf8)
     let editedNetlistPath = ".xcircuite/runs/run-1/planning/executions/plan-1/step-1/netlist.spice"
     let editedNetlistPayload = Data("RC\nr1 in out r=1.5k\n.end\n".utf8)
     let editReportPath = ".xcircuite/runs/run-1/planning/executions/plan-1/step-1/netlist-parameter-edit-report.json"
@@ -210,7 +208,6 @@ extension FlowRunLedgerSummaryTests {
     try selectionTracePayload.write(to: root.appending(path: selectionTracePath), options: .atomic)
     try planVerificationPayload.write(to: root.appending(path: planVerificationPath), options: .atomic)
     try rejectedPlansPayload.write(to: root.appending(path: rejectedPlansPath), options: .atomic)
-    try planExecutionPayload.write(to: root.appending(path: planExecutionPath), options: .atomic)
     try FileManager.default.createDirectory(
         at: root.appending(path: editedNetlistPath).deletingLastPathComponent(),
         withIntermediateDirectories: true
@@ -307,15 +304,6 @@ extension FlowRunLedgerSummaryTests {
         producerRunID: "run-1"
     )
     try await store.upsertRunArtifact(rejectedPlansReference, runID: "run-1", inProjectAt: root)
-    let planExecutionReference = try await store.fileReference(
-        forProjectRelativePath: planExecutionPath,
-        artifactID: "planning-plan-execution",
-        kind: .other,
-        format: .json,
-        inProjectAt: root,
-        producerRunID: "run-1"
-    )
-    try await store.upsertRunArtifact(planExecutionReference, runID: "run-1", inProjectAt: root)
     let editedNetlistReference = try await store.fileReference(
         forProjectRelativePath: editedNetlistPath,
         artifactID: "candidate-step-1-edited-netlist",
@@ -493,16 +481,6 @@ extension FlowRunLedgerSummaryTests {
         rejectedPlansArtifactID: "planning-rejected-plans"
     ))
     #expect(feedbackAction.runID == "run-1")
-    let planExecutionArtifact = try #require(bundle.artifacts.first {
-        $0.purpose == .planningPlanExecution
-            && $0.binding.logicalID == "planning-plan-execution"
-            && $0.binding.availabilityDescription == reviewAvailabilityPath(planExecutionPath)
-    })
-    #expect(planExecutionArtifact.binding.kind == .other)
-    #expect(planExecutionArtifact.binding.format == .json)
-    #expect(planExecutionArtifact.reference.digest.hexadecimalValue == (try TestContentDigester().sha256(data: planExecutionPayload)))
-    #expect(planExecutionArtifact.reference.byteCount == UInt64(planExecutionPayload.count))
-    #expect(planExecutionArtifact.integrity?.status == .verified)
     let editedNetlistArtifact = try #require(bundle.artifacts.first {
         $0.purpose == .planningEditedNetlist
             && $0.binding.logicalID == "candidate-step-1-edited-netlist"
