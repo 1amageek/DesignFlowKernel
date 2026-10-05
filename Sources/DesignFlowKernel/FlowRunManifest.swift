@@ -160,21 +160,22 @@ public struct FlowRunManifest: Sendable, Hashable, Codable {
                 )
             }
         }
-        var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
+        var bindingByMaterialization: [FlowArtifactMaterializationIdentity: FlowArtifactBinding] = [:]
         for artifact in artifacts {
             if case .local(_, _, let relativePath) = artifact.availability {
                 try Self.validateArtifactPath(relativePath, runID: runID)
             }
             let materialization = FlowArtifactMaterializationIdentity(artifact.availability)
-            if let existingContent = contentByMaterialization[materialization] {
-                guard existingContent == artifact.reference.id else {
+            if let existing = bindingByMaterialization[materialization] {
+                guard existing.reference.id == artifact.reference.id,
+                      existing.producer == artifact.producer else {
                     throw FlowRunManifestError.invalidManifest(
                         runID: runID,
-                        reason: "artifact materialization for '\(artifact.logicalID)' has conflicting content identity."
+                        reason: "artifact materialization for '\(artifact.logicalID)' has conflicting content identity or producer."
                     )
                 }
             } else {
-                contentByMaterialization[materialization] = artifact.reference.id
+                bindingByMaterialization[materialization] = artifact
             }
             guard artifact.availability.artifactID == artifact.reference.id else {
                 throw FlowRunManifestError.invalidManifest(

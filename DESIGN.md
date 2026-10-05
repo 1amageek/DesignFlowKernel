@@ -71,3 +71,31 @@ flowchart TD
 - No project lifecycle or UI state is moved into Foundation.
 - No domain-specific artifact formats are interpreted by the kernel.
 - Concrete Xcircuite workspace storage is not part of the kernel contract.
+
+## Artifact materialization aliases
+
+`FlowArtifactBinding` separates a stage-local logical ID, the typed content
+reference, and physical availability. Stage logical IDs are unique. A physical
+materialization may retain multiple semantic bindings when every binding has the
+same exact `ArtifactID` and producer, including an identical absent producer.
+Different descriptors are retained as declared semantics rather than interpreted
+by the kernel. Conflicting digests, byte counts, or producers at one materialization
+are rejected before stage publication and terminal ledger finalization.
+
+```text
+Physical availability -> one exact content ID and producer
+                      -> multiple immutable logical IDs and descriptors
+```
+
+`mergedArtifactBindings` owns shared materialization admission for stage and ledger
+composition. Run manifests and terminal projections preserve the same admission
+invariant. Evidence retains every typed reference, including repeated references
+associated with distinct logical aliases. Review preserves stage bindings; explicit
+stage selectors remain the composing application's responsibility. No domain role,
+storage copy, or descriptor transformation is introduced here.
+
+`FlowRunLedgerCoordinatorTests` verifies actual stage validation, alias-preserving
+terminal finalization and reload, unique logical IDs, and rejection of conflicting
+content/producer across stage, merger, and run-manifest boundaries. This contract
+affects composing applications' stage artifact coverage, exact-reference availability
+resolution, and immutable retained-ledger comparisons.

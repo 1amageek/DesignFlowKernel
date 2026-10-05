@@ -3,19 +3,20 @@ import CircuiteFoundation
 func mergedArtifactBindings(
     _ artifacts: [FlowArtifactBinding]
 ) throws -> [FlowArtifactBinding] {
-    var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
+    var bindingByMaterialization: [FlowArtifactMaterializationIdentity: FlowArtifactBinding] = [:]
     var uniqueBindings: Set<FlowArtifactBinding> = []
     for artifact in artifacts {
         let identity = FlowArtifactMaterializationIdentity(artifact.availability)
-        if let existingContent = contentByMaterialization[identity] {
-            guard existingContent == artifact.reference.id else {
+        if let existing = bindingByMaterialization[identity] {
+            guard existing.reference.id == artifact.reference.id,
+                  existing.producer == artifact.producer else {
                 throw FlowExecutionError.conflictingArtifactReference(
                     artifactID: artifact.logicalID,
                     location: artifact.availabilityDescription
                 )
             }
         } else {
-            contentByMaterialization[identity] = artifact.reference.id
+            bindingByMaterialization[identity] = artifact
         }
         uniqueBindings.insert(artifact)
     }

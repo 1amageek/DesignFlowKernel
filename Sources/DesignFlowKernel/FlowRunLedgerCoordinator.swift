@@ -445,14 +445,14 @@ public actor FlowRunLedgerCoordinator {
             try reject(.nonterminalStatus(status))
         }
 
-        var contentByMaterialization: [FlowArtifactMaterializationIdentity: ArtifactID] = [:]
+        var bindingByMaterialization: [FlowArtifactMaterializationIdentity: FlowArtifactBinding] = [:]
         for artifact in artifacts {
             let materialization = FlowArtifactMaterializationIdentity(artifact.availability)
-            if let existingContent = contentByMaterialization[materialization],
-               existingContent != artifact.reference.id {
+            if let existing = bindingByMaterialization[materialization],
+               existing.reference.id != artifact.reference.id || existing.producer != artifact.producer {
                 try reject(.conflictingArtifactMaterialization)
             }
-            contentByMaterialization[materialization] = artifact.reference.id
+            bindingByMaterialization[materialization] = artifact
         }
         let artifactReferences = artifacts.map(\.reference)
         guard Set(evidence.artifacts) == Set(artifactReferences),

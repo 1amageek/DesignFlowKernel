@@ -7,6 +7,59 @@ import Testing
 @Suite("FlowRunLedgerCoordinator")
 struct FlowRunLedgerCoordinatorTests {
     @Test
+    func stageAliasesSurviveTerminalFinalizationAndReload() async throws {
+        let runID = "run-stage-aliases"
+        let original = try artifactBinding(id: "deck", path: "runs/\(runID)/inputs/profile.json", role: .input)
+        let alias = try semanticAlias(of: original, logicalID: "view", kind: .technology)
+        let artifacts = [original, alias]
+        let stage = FlowStageResult(stageID: "pex", status: .succeeded, artifacts: artifacts)
+        try DefaultFlowStageResultValidator().validate(stage, expectedStageID: "pex")
+        #expect(Set(try mergedArtifactBindings(artifacts)) == Set(artifacts))
+        let store = InMemoryLedgerStore(ledger: try makeLedger(runID: runID))
+        let coordinator = FlowRunLedgerCoordinator(persistence: store)
+        _ = try await coordinator.transition(runID: runID, to: .running)
+        let finalized = try await coordinator.finalize(runID: runID, status: .succeeded,
+            stages: [stage], toolchain: toolchainManifest(runID: runID, stageID: "pex"),
+            evidence: try evidenceManifest(artifacts: artifacts), artifacts: artifacts)
+        #expect(Set(finalized.artifacts) == Set(artifacts))
+        #expect(finalized.stages.first?.artifacts == artifacts)
+        #expect(finalized.evidence?.artifacts.count == 2)
+        #expect(try await coordinator.load(runID: runID) == finalized)
+    }
+
+    @Test(arguments: ["logicalID", "digest", "byteCount", "producer"])
+    func stageAliasAdmissionRejectsConflicts(change: String) throws {
+        let original = try artifactBinding(id: "deck", path: "runs/run-alias/inputs/profile.json", role: .input)
+        let reference = try ArtifactReference(
+            digest: change == "digest" ? ContentDigest(algorithm: .sha256, hexadecimalValue: String(repeating: "1", count: 64)) : original.reference.digest,
+            byteCount: change == "byteCount" ? 1 : original.reference.byteCount,
+            descriptor: original.descriptor)
+        let alias = try FlowArtifactBinding(logicalID: change == "logicalID" ? original.logicalID : "view", reference: reference,
+            availability: .local(artifactID: reference.id, rootID: original.requireLocalRootID(), relativePath: original.requireLocalRelativePath()),
+            producer: change == "producer" ? ProducerIdentity(kind: .engine, identifier: "different", version: "1") : original.producer)
+        #expect(throws: FlowExecutionError.invalidStageResult(stageID: "pex", issue: .duplicateArtifactIdentity)) {
+            try DefaultFlowStageResultValidator().validate(
+                .init(stageID: "pex", status: .succeeded, artifacts: [original, alias]), expectedStageID: "pex")
+        }
+        if change != "logicalID" {
+            #expect(throws: FlowExecutionError.conflictingArtifactReference(artifactID: alias.logicalID, location: alias.availabilityDescription)) {
+                _ = try mergedArtifactBindings([original, alias])
+            }
+            #expect(throws: FlowRunManifestError.self) {
+                let now = Date(timeIntervalSince1970: 1_700_000_000)
+                _ = try FlowRunManifest(runID: "run-alias", status: .created,
+                    actor: .init(kind: .system, identifier: "test"), createdAt: now, updatedAt: now, artifacts: [original, alias])
+            }
+        }
+    }
+
+    private func semanticAlias(of binding: FlowArtifactBinding, logicalID: String, kind: ArtifactKind) throws -> FlowArtifactBinding {
+        try .init(logicalID: logicalID,
+            reference: .init(id: binding.reference.id, descriptor: .init(role: binding.role, kind: kind, format: binding.format)),
+            availability: binding.availability, producer: binding.producer)
+    }
+
+    @Test
     func createRejectsLifecycleDataWithTypedIssue() async throws {
         var ledger = try makeLedger(runID: "run-invalid-create")
         ledger.stages = [FlowStageResult(stageID: "simulation", status: .succeeded)]

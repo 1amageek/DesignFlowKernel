@@ -33,7 +33,7 @@ public enum FlowStageResultValidationIssue: Sendable, Equatable, LocalizedError 
         case .finalAttemptStatusMismatch(let expected, let actual):
             "Final attempt status must be \(expected.rawValue), got \(actual?.rawValue ?? "missing")."
         case .duplicateArtifactIdentity:
-            "Artifact identifiers and locations must be unique."
+            "Artifact logical identifiers must be unique and each location must identify one content ID and producer."
         }
     }
 }

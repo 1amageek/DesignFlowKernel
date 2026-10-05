@@ -116,11 +116,15 @@ public struct DefaultFlowStageResultValidator: FlowStageResultValidating {
         stageID: String
     ) throws {
         let identifiers = artifacts.map(\.logicalID)
-        let locations = artifacts.map {
-            FlowArtifactMaterializationIdentity($0.availability)
+        guard Set(identifiers).count == identifiers.count else {
+            throw FlowExecutionError.invalidStageResult(
+                stageID: stageID,
+                issue: .duplicateArtifactIdentity
+            )
         }
-        guard Set(identifiers).count == identifiers.count,
-              Set(locations).count == locations.count else {
+        do {
+            _ = try mergedArtifactBindings(artifacts)
+        } catch {
             throw FlowExecutionError.invalidStageResult(
                 stageID: stageID,
                 issue: .duplicateArtifactIdentity

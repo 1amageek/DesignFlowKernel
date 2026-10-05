@@ -38,7 +38,7 @@ public enum FlowTerminalProjectionIssue: Sendable, Equatable, LocalizedError {
         case .invalidPartialRunStages:
             "A partial run requires skipped stages and cannot contain failed or blocked stages."
         case .conflictingArtifactMaterialization:
-            "A physical artifact location cannot resolve to multiple content identities."
+            "A physical artifact location cannot resolve to multiple content identities or producers."
         case .evidenceArtifactInventoryMismatch:
             "Evidence artifacts must exactly match the ledger artifact inventory."
         case .provenanceInputNotRetained:
