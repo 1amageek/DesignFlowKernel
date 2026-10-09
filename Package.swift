@@ -3,12 +3,12 @@ import PackageDescription
 
 let circuiteFoundationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/CircuiteFoundation.git",
-    exact: "26.812.0"
+    revision: "ae88104c556f5802819713ed741f5b2fffffc2d9"
 )
 
 let toolQualificationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/ToolQualification.git",
-    revision: "01742440a723dd7fc2a426242dc26d4b1c97ac5f"
+    revision: "23ec40063c97417d0446e43dda9383308371f09a"
 )
 
 let package = Package(
