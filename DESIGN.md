@@ -99,3 +99,12 @@ terminal finalization and reload, unique logical IDs, and rejection of conflicti
 content/producer across stage, merger, and run-manifest boundaries. This contract
 affects composing applications' stage artifact coverage, exact-reference availability
 resolution, and immutable retained-ledger comparisons.
+
+## Qualification Fixture Retention
+
+[QualificationOriginalRetentionTests](Tests/DesignFlowKernelTests/QualificationOriginalRetentionTests.swift)
+verifies the model-free corpus fixture's exact original output, completed phase
+and metric binding through record issuance and validation. Explicit corpus-required trust evaluation
+refuses missing or same-size altered originals. The fixture has no oracle case or
+process qualification and establishes no model coverage. The canonical execution
+schema remains owned by [ToolQualification](../ToolQualification/DESIGN.md).

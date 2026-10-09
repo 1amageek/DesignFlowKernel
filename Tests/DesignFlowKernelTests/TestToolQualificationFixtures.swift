@@ -40,7 +40,7 @@ enum TestToolQualificationFixtures {
             try fixture.data.write(to: url, options: .atomic)
             await infrastructure.registerArtifactBinding(fixture.binding)
         }
-        for name in ["input", "output", "health-output"] {
+        for name in ["input", "output", "health-output", "tool-executable", "primary-original"] {
             let binding = try supportingArtifact(
                 toolID: descriptor.toolID,
                 name: name,
@@ -53,7 +53,7 @@ enum TestToolQualificationFixtures {
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try Data("\(descriptor.toolID):\(name)".utf8).write(to: url, options: .atomic)
+            try supportingData(toolID: descriptor.toolID, name: name, producer: issuer).write(to: url, options: .atomic)
             await infrastructure.registerArtifactBinding(binding)
         }
 
@@ -123,6 +123,7 @@ enum TestToolQualificationFixtures {
         evidenceID: String,
         issuer: ProducerIdentity
     ) throws -> EvidenceFixture {
+        let original = try supportingArtifact(toolID: toolID, name: "primary-original", producer: issuer).reference
         let result = ToolCorpusQualificationResult(
             resultID: evidenceID,
             qualificationID: "\(toolID)-qualification",
@@ -138,9 +139,10 @@ enum TestToolQualificationFixtures {
                 toolID: toolID,
                 name: "output",
                 producer: issuer
-            ).reference],
+            ).reference, original],
             cases: [ToolQualificationCaseOutcome(
                 caseID: "fixture-case",
+                originalExecutionArtifact: original,
                 coverageTags: ["fixture"],
                 comparisons: [ToolQualificationMetricComparison(
                     metricID: "pass",
@@ -235,7 +237,7 @@ enum TestToolQualificationFixtures {
         name: String,
         producer: ProducerIdentity
     ) throws -> FlowArtifactBinding {
-        let data = Data("\(toolID):\(name)".utf8)
+        let data = try supportingData(toolID: toolID, name: name, producer: producer)
         let reference = try ArtifactReference(
             digest: SHA256ContentDigester().digest(data: data),
             byteCount: UInt64(data.count),
@@ -255,8 +257,21 @@ enum TestToolQualificationFixtures {
                     "qualification/test-fixtures/\(toolID)-\(name).json"
                 )
             ),
-            producer: producer
+            producer: name == "primary-original"
+                ? ProducerIdentity(kind: .engine, identifier: toolID, version: "1.0.0")
+                : producer
         )
+    }
+
+    private static func supportingData(toolID: String, name: String, producer: ProducerIdentity) throws -> Data {
+        guard name == "primary-original" else { return Data("\(toolID):\(name)".utf8) }
+        // This model-free protocol fixture supplies no device-model coverage.
+        return try ToolQualificationCaseExecution(caseID: "fixture-case", executionID: "\(toolID)-primary",
+            producer: ProducerIdentity(kind: .engine, identifier: toolID, version: "1.0.0"),
+            executableArtifact: supportingArtifact(toolID: toolID, name: "tool-executable", producer: producer).reference,
+            inputArtifacts: [supportingArtifact(toolID: toolID, name: "input", producer: producer).reference],
+            phaseIDs: ["fixture"], metricPhaseIDs: ["pass": ["fixture"]],
+            modelReceiptArtifacts: [], observedMetrics: ["pass": 1]).canonicalData()
     }
 
     private static func qualificationIssuer(toolID: String) throws -> ProducerIdentity {
