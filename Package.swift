@@ -8,7 +8,7 @@ let circuiteFoundationDependency: Package.Dependency = .package(
 
 let toolQualificationDependency: Package.Dependency = .package(
     url: "https://github.com/1amageek/ToolQualification.git",
-    revision: "23ec40063c97417d0446e43dda9383308371f09a"
+    revision: "7a69d2ba4e3c4c2262478312f9217de4293a7ab7"
 )
 
 let package = Package(
